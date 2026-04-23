@@ -7,6 +7,7 @@
 pub mod card_plugin;
 pub mod events;
 pub mod game_plugin;
+pub mod input_plugin;
 pub mod layout;
 pub mod resources;
 pub mod table_plugin;
@@ -17,6 +18,7 @@ pub use events::{
     StateChangedEvent, UndoRequestEvent,
 };
 pub use game_plugin::{GameMutation, GamePlugin};
+pub use input_plugin::InputPlugin;
 pub use layout::{compute_layout, Layout, LayoutResource};
 pub use resources::{DragState, GameStateResource, SyncStatus, SyncStatusResource};
 pub use table_plugin::{PileMarker, TableBackground, TablePlugin};
