@@ -29,7 +29,7 @@ impl Deck {
         Self { cards }
     }
 
-    /// Shuffles the deck in-place using Fisher-Yates with a seeded `SmallRng`.
+    /// Shuffles the deck in-place using Fisher-Yates with a seeded `StdRng`.
     /// The same seed always produces the same order on any platform.
     pub fn shuffle(&mut self, seed: u64) {
         let mut rng = StdRng::seed_from_u64(seed);
@@ -49,19 +49,22 @@ impl Default for Deck {
 /// Column `i` contains `i + 1` cards; only the top card is face-up.
 /// Stock receives the remaining 24 cards, all face-down.
 pub fn deal_klondike(deck: Deck) -> ([Pile; 7], Pile) {
+    debug_assert_eq!(deck.cards.len(), 52, "deal_klondike requires a full 52-card deck");
     let mut tableau: [Pile; 7] = core::array::from_fn(|i| Pile::new(PileType::Tableau(i)));
-    let mut cards = deck.cards.into_iter();
+    // Safety: the debug_assert above documents the 52-card contract; index arithmetic is bounded.
+    let mut idx = 0usize;
 
     for (col, pile) in tableau.iter_mut().enumerate() {
         for row in 0..=col {
-            let mut card = cards.next().expect("deck has 52 cards");
+            let mut card = deck.cards[idx].clone();
             card.face_up = row == col;
             pile.cards.push(card);
+            idx += 1;
         }
     }
 
     let mut stock = Pile::new(PileType::Stock);
-    stock.cards.extend(cards);
+    stock.cards.extend(deck.cards.into_iter().skip(idx));
     (tableau, stock)
 }
 
