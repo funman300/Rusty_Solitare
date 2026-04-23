@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use solitaire_engine::{GamePlugin, TablePlugin};
+use solitaire_engine::{CardPlugin, GamePlugin, TablePlugin};
 
 fn main() {
     App::new()
@@ -15,5 +15,6 @@ fn main() {
         )
         .add_plugins(GamePlugin)
         .add_plugins(TablePlugin)
+        .add_plugins(CardPlugin)
         .run();
 }

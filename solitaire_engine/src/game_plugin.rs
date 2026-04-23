@@ -12,6 +12,12 @@ use crate::events::{
 };
 use crate::resources::{DragState, GameStateResource, SyncStatusResource};
 
+/// System set for `GamePlugin`'s state-mutating systems. Downstream plugins
+/// that read the resulting `StateChangedEvent` should schedule themselves
+/// `.after(GameMutation)` so updates propagate within a single frame.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct GameMutation;
+
 /// Registers game resources, events, and the systems that route user intent
 /// (events) into mutations on `GameState`.
 pub struct GamePlugin;
@@ -39,7 +45,8 @@ impl Plugin for GamePlugin {
                     handle_move,
                     handle_undo,
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(GameMutation),
             );
     }
 }
