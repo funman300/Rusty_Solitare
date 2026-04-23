@@ -1,0 +1,10 @@
+[package]
+name    = "solitaire_core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde     = { workspace = true }
+chrono    = { workspace = true }
+thiserror = { workspace = true }
+rand      = { workspace = true }

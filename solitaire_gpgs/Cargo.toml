@@ -1,0 +1,9 @@
+[package]
+name    = "solitaire_gpgs"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+solitaire_data = { workspace = true }
+solitaire_sync = { workspace = true }
+async-trait    = { workspace = true }

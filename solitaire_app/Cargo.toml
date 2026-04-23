@@ -1,0 +1,12 @@
+[package]
+name    = "solitaire_app"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "solitaire_app"
+path = "src/main.rs"
+
+[dependencies]
+bevy             = { workspace = true }
+solitaire_engine = { workspace = true }

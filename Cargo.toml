@@ -1,0 +1,56 @@
+[workspace]
+members = [
+    "solitaire_core",
+    "solitaire_sync",
+    "solitaire_data",
+    "solitaire_engine",
+    "solitaire_server",
+    "solitaire_gpgs",
+    "solitaire_app",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+
+[workspace.dependencies]
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+uuid        = { version = "1", features = ["v4", "serde"] }
+chrono      = { version = "0.4", features = ["serde"] }
+thiserror   = "1"
+rand        = "0.8"
+async-trait = "0.1"
+tokio       = { version = "1", features = ["full"] }
+dirs        = "5"
+keyring     = "2"
+reqwest     = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+solitaire_core   = { path = "solitaire_core" }
+solitaire_sync   = { path = "solitaire_sync" }
+solitaire_data   = { path = "solitaire_data" }
+solitaire_engine = { path = "solitaire_engine" }
+
+bevy            = "0.15"
+bevy_egui       = "0.30"
+bevy_kira_audio = "0.21"
+
+axum               = "0.7"
+sqlx               = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "macros", "migrate"] }
+jsonwebtoken       = "9"
+bcrypt             = "0.15"
+tower_governor     = "0.4"
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy            = "0.15"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "thin"
