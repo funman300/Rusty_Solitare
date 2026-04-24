@@ -1,8 +1,8 @@
 # Solitaire Quest — Session Handoff
 
-> Last updated: 2026-04-23
+> Last updated: 2026-04-24
 > Branch: `master` — pushed to https://git.aleshym.co/funman300/Rusty_Solitare.git
-> Test count: **130 passing** (68 core + 13 data + 49 engine), `cargo clippy --workspace -- -D warnings` clean
+> Test count: **148 passing** (76 core + 19 data + 53 engine), `cargo clippy --workspace -- -D warnings` clean
 
 ---
 
@@ -86,20 +86,32 @@ All sub-phases (3A–3F) done. Plugins: `GamePlugin`, `TablePlugin`, `CardPlugin
 - Full-window overlay toggled with `S` — games played/won, win rate, streak, best score, fastest, avg
 - `StatsPlugin::default()` for production, `StatsPlugin::headless()` for tests (no disk I/O)
 
+### Phase 5 — Achievements ✅ COMPLETE (14 of ~19)
+
+- `solitaire_core::achievement` — `AchievementContext` + `AchievementDef` + `ALL_ACHIEVEMENTS` + `check_achievements`
+- `solitaire_core::GameState.undo_count` — tracks whether undo was used (for `no_undo` / `speed_and_skill`)
+- `solitaire_data::AchievementRecord` + atomic `achievements.json` persistence
+- `AchievementPlugin` — on `GameWonEvent`, build context from `StatsResource` + `GameState` + `chrono::Local` hour, evaluate all conditions, persist newly-unlocked records, emit `AchievementUnlockedEvent(id)`
+- `AnimationPlugin`'s toast resolves the event's ID to the achievement's name via `achievement_plugin::display_name_for`
+- New `StatsUpdate` system set lets `AchievementPlugin` order itself after stats are incremented
+- Deferred: `daily_devotee` (needs `PlayerProgress`), `comeback` (needs recycle counter), `zen_winner` (needs modes), `perfectionist` (needs max-score calc). Stubs can be added in later phases.
+
 ## What Is Next
 
-### Phase 5 — Achievements
+### Phase 6 — Progression (XP, Levels, Daily Challenges, Modes)
 
-- 20+ achievement definitions (`AchievementDef` in `solitaire_core`)
-- `AchievementRecord` persistence in `solitaire_data`
-- `AchievementPlugin` in `solitaire_engine` — evaluates unlock conditions on `GameWonEvent` / `StateChangedEvent`, emits `AchievementUnlockedEvent`, persists, shows toast
-- `AchievementUnlockedEvent` currently uses `String` placeholder in `events.rs` — replace with `AchievementRecord` when this phase starts
+- `solitaire_data::PlayerProgress` (XP, level, daily challenge streak, unlocked card backs/backgrounds)
+- XP award on `GameWonEvent` — base + speed bonus + no-undo bonus
+- Level formula (from ARCHITECTURE.md §13)
+- Daily challenge seed generation + completion tracking
+- Weekly goals (rotating set of mini-objectives)
+- Time Attack / Challenge Mode / Zen Mode — unlocked at level 5
+- After this lands, the `daily_devotee` achievement can be wired up
 
-### Phases 6–8 (in order after Phase 5)
+### Phases 7–8 (in order after Phase 6)
 
 | Phase | Scope |
 |---|---|
-| Phase 6 | XP/levels, daily challenges, weekly goals, special modes |
 | Phase 7 | Audio (`kira`), polish, hints, onboarding, pause menu |
 | Phase 8A–C | Local storage + `SyncProvider` + self-hosted Axum server + client |
 | Phase 8D | GPGS stub fully wired into settings UI |
@@ -153,7 +165,7 @@ For Phase 3 onwards, write a new plan using the `superpowers:writing-plans` skil
 # Check everything compiles
 cargo check --workspace
 
-# Run all tests (130 tests, all should pass)
+# Run all tests (148 tests, all should pass)
 cargo test --workspace
 
 # Lint (must be zero warnings)
