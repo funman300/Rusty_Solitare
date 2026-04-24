@@ -34,3 +34,6 @@ pub trait SyncProvider: Send + Sync {
         Ok(())
     }
 }
+
+pub mod stats;
+pub use stats::StatsSnapshot;
