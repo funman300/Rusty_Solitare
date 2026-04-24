@@ -25,7 +25,7 @@ use crate::layout::{Layout, LayoutResource};
 use crate::resources::GameStateResource;
 
 /// Fraction of card height used as vertical offset between stacked tableau cards.
-const TABLEAU_FAN_FRAC: f32 = 0.25;
+pub const TABLEAU_FAN_FRAC: f32 = 0.25;
 
 /// Fraction of card height used as a tiny offset between stacked cards in
 /// non-tableau piles, so stacking is visible.
