@@ -2,7 +2,7 @@
 
 > Last updated: 2026-04-24
 > Branch: `master` — pushed to https://git.aleshym.co/funman300/Rusty_Solitare.git
-> Test count: **180 passing** (77 core + 39 data + 64 engine), `cargo clippy --workspace -- -D warnings` clean
+> Test count: **196 passing** (77 core + 50 data + 69 engine), `cargo clippy --workspace -- -D warnings` clean
 
 ---
 
@@ -114,16 +114,22 @@ All sub-phases (3A–3F) done. Plugins: `GamePlugin`, `TablePlugin`, `CardPlugin
 - `LevelUpEvent` now spawns a toast through `AnimationPlugin`
 - `daily_devotee` achievement wired (streak ≥ 7); `AchievementContext` gains `daily_challenge_streak` and reads from `ProgressResource`
 
+### Phase 6 (part 2b) — Weekly Goals ✅ COMPLETE
+
+- `solitaire_data::weekly` — `WeeklyGoalKind`, `WeeklyGoalDef`, `WeeklyGoalContext`, `current_iso_week_key`, three starter goals (5 wins / 3 no-undo / 3 fast)
+- `PlayerProgress` — `weekly_goal_week_iso`, `roll_weekly_goals_if_new_week`, `record_weekly_progress`
+- `WeeklyGoalsPlugin` — on `GameWonEvent`, rolls week if needed, increments matching goals, awards `WEEKLY_GOAL_XP` (75) per completion, fires `WeeklyGoalCompletedEvent`
+
 ## What Is Next
 
-### Phase 6 (part 2b) — Weekly Goals, Special Modes, Daily Challenge UI
+### Phase 6 (part 3) — Special Modes + Status UI
 
-- Weekly goals: `weekly_goal_progress` HashMap is already in `PlayerProgress`. Define a rotating goal set, completion detection, +75 XP per goal.
-- Time Attack / Challenge / Zen modes — unlock at level 5. Likely need a `GameMode` enum in `solitaire_core` or `solitaire_data` and a mode selection UI.
-- Daily challenge UI surfacing: indicate today's seed/status on the home/settings screen and toast on `DailyChallengeCompletedEvent`.
+- Time Attack / Challenge / Zen modes — unlock at level 5. Need a `GameMode` enum (likely in `solitaire_core`) + mode selector + per-mode rule overrides.
+- Toast for `DailyChallengeCompletedEvent` and `WeeklyGoalCompletedEvent` (currently fire but not surfaced).
+- Daily/weekly status panel in the stats overlay (today's challenge state, weekly goal progress bars).
 - Card-back / background unlock UI for `unlocked_card_backs` / `unlocked_backgrounds`.
 
-### Phases 7–8 (in order after Phase 6 part 2b)
+### Phases 7–8 (in order after Phase 6 part 3)
 
 | Phase | Scope |
 |---|---|
@@ -180,7 +186,7 @@ For Phase 3 onwards, write a new plan using the `superpowers:writing-plans` skil
 # Check everything compiles
 cargo check --workspace
 
-# Run all tests (180 tests, all should pass)
+# Run all tests (196 tests, all should pass)
 cargo test --workspace
 
 # Lint (must be zero warnings)
