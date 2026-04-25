@@ -12,12 +12,14 @@ pub mod progress_plugin;
 pub mod resources;
 pub mod stats_plugin;
 pub mod table_plugin;
+pub mod weekly_goals_plugin;
 
 pub use achievement_plugin::{AchievementPlugin, AchievementsResource};
 pub use daily_challenge_plugin::{
     DailyChallengeCompletedEvent, DailyChallengePlugin, DailyChallengeResource,
 };
 pub use progress_plugin::{LevelUpEvent, ProgressPlugin, ProgressResource, ProgressUpdate};
+pub use weekly_goals_plugin::{WeeklyGoalCompletedEvent, WeeklyGoalsPlugin};
 pub use animation_plugin::{AnimationPlugin, CardAnim};
 pub use card_plugin::{CardEntity, CardLabel, CardPlugin};
 pub use events::{

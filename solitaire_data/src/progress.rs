@@ -60,6 +60,11 @@ pub struct PlayerProgress {
     pub daily_challenge_last_completed: Option<NaiveDate>,
     pub daily_challenge_streak: u32,
     pub weekly_goal_progress: HashMap<String, u32>,
+    /// ISO week key (e.g. `"2026-W17"`) the current `weekly_goal_progress`
+    /// counters belong to. When the engine sees a different week it clears
+    /// progress and updates this field.
+    #[serde(default)]
+    pub weekly_goal_week_iso: Option<String>,
     pub unlocked_card_backs: Vec<usize>,
     pub unlocked_backgrounds: Vec<usize>,
     pub last_modified: DateTime<Utc>,
@@ -73,6 +78,7 @@ impl Default for PlayerProgress {
             daily_challenge_last_completed: None,
             daily_challenge_streak: 0,
             weekly_goal_progress: HashMap::new(),
+            weekly_goal_week_iso: None,
             unlocked_card_backs: vec![0],   // back #0 always available
             unlocked_backgrounds: vec![0],  // background #0 always available
             last_modified: DateTime::UNIX_EPOCH,
@@ -94,6 +100,32 @@ impl PlayerProgress {
     /// `true` if a level-up just occurred (current level > `prev_level`).
     pub fn leveled_up_from(&self, prev_level: u32) -> bool {
         self.level > prev_level
+    }
+
+    /// Reset weekly-goal progress when the ISO week has rolled over.
+    /// No-op if the stored week key already matches `current`.
+    pub fn roll_weekly_goals_if_new_week(&mut self, current: &str) -> bool {
+        if self.weekly_goal_week_iso.as_deref() == Some(current) {
+            return false;
+        }
+        self.weekly_goal_progress.clear();
+        self.weekly_goal_week_iso = Some(current.to_string());
+        self.last_modified = Utc::now();
+        true
+    }
+
+    /// Increment progress for `goal_id` by 1, capped at `target`.
+    /// Returns `true` if this call brought the counter from below `target`
+    /// to at-or-above `target` (i.e. just completed the goal).
+    pub fn record_weekly_progress(&mut self, goal_id: &str, target: u32) -> bool {
+        let entry = self.weekly_goal_progress.entry(goal_id.to_string()).or_insert(0);
+        if *entry >= target {
+            // Already complete — do not over-count.
+            return false;
+        }
+        *entry = entry.saturating_add(1);
+        self.last_modified = Utc::now();
+        *entry >= target
     }
 
     /// Record a daily-challenge completion for `date`.
@@ -321,6 +353,48 @@ mod tests {
         p.record_daily_completion(d1);
         p.record_daily_completion(d3);
         assert_eq!(p.daily_challenge_streak, 1);
+    }
+
+    // --- Weekly goals ---
+
+    #[test]
+    fn first_week_roll_initializes_key_and_returns_true() {
+        let mut p = PlayerProgress::default();
+        let rolled = p.roll_weekly_goals_if_new_week("2026-W17");
+        assert!(rolled);
+        assert_eq!(p.weekly_goal_week_iso.as_deref(), Some("2026-W17"));
+    }
+
+    #[test]
+    fn same_week_roll_is_noop() {
+        let mut p = PlayerProgress::default();
+        p.roll_weekly_goals_if_new_week("2026-W17");
+        p.weekly_goal_progress.insert("g1".into(), 3);
+        let rolled = p.roll_weekly_goals_if_new_week("2026-W17");
+        assert!(!rolled);
+        assert_eq!(p.weekly_goal_progress.get("g1"), Some(&3));
+    }
+
+    #[test]
+    fn new_week_roll_clears_progress_and_updates_key() {
+        let mut p = PlayerProgress::default();
+        p.roll_weekly_goals_if_new_week("2026-W17");
+        p.weekly_goal_progress.insert("g1".into(), 3);
+        let rolled = p.roll_weekly_goals_if_new_week("2026-W18");
+        assert!(rolled);
+        assert!(p.weekly_goal_progress.is_empty());
+        assert_eq!(p.weekly_goal_week_iso.as_deref(), Some("2026-W18"));
+    }
+
+    #[test]
+    fn record_weekly_progress_returns_true_only_on_completion_step() {
+        let mut p = PlayerProgress::default();
+        assert!(!p.record_weekly_progress("g1", 3));
+        assert!(!p.record_weekly_progress("g1", 3));
+        assert!(p.record_weekly_progress("g1", 3), "third tick completes");
+        // Further ticks should not re-fire completion.
+        assert!(!p.record_weekly_progress("g1", 3));
+        assert_eq!(p.weekly_goal_progress.get("g1"), Some(&3));
     }
 
     #[test]

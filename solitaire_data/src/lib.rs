@@ -51,3 +51,9 @@ pub use progress::{
     daily_seed_for, level_for_xp, load_progress_from, progress_file_path, save_progress_to,
     xp_for_win, PlayerProgress,
 };
+
+pub mod weekly;
+pub use weekly::{
+    current_iso_week_key, weekly_goal_by_id, WeeklyGoalContext, WeeklyGoalDef, WeeklyGoalKind,
+    WEEKLY_GOALS, WEEKLY_GOAL_XP,
+};
