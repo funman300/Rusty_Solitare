@@ -7,11 +7,13 @@ pub mod events;
 pub mod game_plugin;
 pub mod input_plugin;
 pub mod layout;
+pub mod progress_plugin;
 pub mod resources;
 pub mod stats_plugin;
 pub mod table_plugin;
 
 pub use achievement_plugin::{AchievementPlugin, AchievementsResource};
+pub use progress_plugin::{LevelUpEvent, ProgressPlugin, ProgressResource, ProgressUpdate};
 pub use animation_plugin::{AnimationPlugin, CardAnim};
 pub use card_plugin::{CardEntity, CardLabel, CardPlugin};
 pub use events::{
