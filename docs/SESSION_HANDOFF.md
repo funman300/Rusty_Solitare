@@ -2,7 +2,7 @@
 
 > Last updated: 2026-04-24
 > Branch: `master` — pushed to https://git.aleshym.co/funman300/Rusty_Solitare.git
-> Test count: **168 passing** (76 core + 33 data + 59 engine), `cargo clippy --workspace -- -D warnings` clean
+> Test count: **180 passing** (77 core + 39 data + 64 engine), `cargo clippy --workspace -- -D warnings` clean
 
 ---
 
@@ -106,18 +106,24 @@ All sub-phases (3A–3F) done. Plugins: `GamePlugin`, `TablePlugin`, `CardPlugin
 - `ProgressUpdate` system set for ordering downstream systems
 - `ProgressPlugin::default()` for production, `::headless()` for tests
 
+### Phase 6 (part 2a) — Daily Challenge + Level-Up Toast ✅ COMPLETE
+
+- `daily_seed_for(date)` deterministic per-date seed
+- `PlayerProgress::record_daily_completion(date)` with streak / reset / idempotency rules
+- `DailyChallengePlugin`: today's seed in a resource; pressing **C** starts a daily-seed new game; on winning a daily-seed game, awards **+100 XP**, updates streak, persists, fires `DailyChallengeCompletedEvent`
+- `LevelUpEvent` now spawns a toast through `AnimationPlugin`
+- `daily_devotee` achievement wired (streak ≥ 7); `AchievementContext` gains `daily_challenge_streak` and reads from `ProgressResource`
+
 ## What Is Next
 
-### Phase 6 (part 2) — Daily Challenges, Weekly Goals, Special Modes
+### Phase 6 (part 2b) — Weekly Goals, Special Modes, Daily Challenge UI
 
-- Daily challenge seed generation (deterministic from date, same for all players globally)
-- Daily challenge completion tracking → `daily_challenge_streak` field
-- After this lands, wire up the `daily_devotee` achievement
-- Weekly goals (`weekly_goal_progress` HashMap is already in `PlayerProgress`)
-- Time Attack / Challenge / Zen modes (unlock at level 5)
-- LevelUp toast — connect `LevelUpEvent` to a toast in `AnimationPlugin`
+- Weekly goals: `weekly_goal_progress` HashMap is already in `PlayerProgress`. Define a rotating goal set, completion detection, +75 XP per goal.
+- Time Attack / Challenge / Zen modes — unlock at level 5. Likely need a `GameMode` enum in `solitaire_core` or `solitaire_data` and a mode selection UI.
+- Daily challenge UI surfacing: indicate today's seed/status on the home/settings screen and toast on `DailyChallengeCompletedEvent`.
+- Card-back / background unlock UI for `unlocked_card_backs` / `unlocked_backgrounds`.
 
-### Phases 7–8 (in order after Phase 6 part 2)
+### Phases 7–8 (in order after Phase 6 part 2b)
 
 | Phase | Scope |
 |---|---|
@@ -174,7 +180,7 @@ For Phase 3 onwards, write a new plan using the `superpowers:writing-plans` skil
 # Check everything compiles
 cargo check --workspace
 
-# Run all tests (168 tests, all should pass)
+# Run all tests (180 tests, all should pass)
 cargo test --workspace
 
 # Lint (must be zero warnings)
