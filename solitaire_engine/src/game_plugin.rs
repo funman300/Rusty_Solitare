@@ -48,8 +48,44 @@ impl Plugin for GamePlugin {
                 )
                     .chain()
                     .in_set(GameMutation),
-            );
+            )
+            .add_systems(Update, tick_elapsed_time);
     }
+}
+
+/// Pure, testable helper. Updates `elapsed_seconds` and drains the
+/// fractional accumulator into whole-second ticks. No-op when `is_won`.
+pub fn advance_elapsed(
+    elapsed_seconds: &mut u64,
+    accumulator: &mut f32,
+    delta_secs: f32,
+    is_won: bool,
+) {
+    if is_won {
+        return;
+    }
+    *accumulator += delta_secs;
+    while *accumulator >= 1.0 {
+        *elapsed_seconds = elapsed_seconds.saturating_add(1);
+        *accumulator -= 1.0;
+    }
+}
+
+/// Increment `GameState.elapsed_seconds` once per real-world second while
+/// the game is in progress (not won). Stops counting on win so the final
+/// time reflects how long the player took to solve the deal.
+fn tick_elapsed_time(
+    time: Res<Time>,
+    mut game: ResMut<GameStateResource>,
+    mut accumulator: Local<f32>,
+) {
+    let is_won = game.0.is_won;
+    advance_elapsed(
+        &mut game.0.elapsed_seconds,
+        &mut accumulator,
+        time.delta_secs(),
+        is_won,
+    );
 }
 
 fn seed_from_system_time() -> u64 {
@@ -230,6 +266,37 @@ mod tests {
             .map(|c| c.id)
             .collect();
         assert_ne!(before, after);
+    }
+
+    #[test]
+    fn advance_elapsed_drains_accumulator_into_whole_seconds() {
+        let mut elapsed = 0;
+        let mut acc = 0.0;
+        advance_elapsed(&mut elapsed, &mut acc, 2.5, false);
+        assert_eq!(elapsed, 2);
+        // Remaining 0.5 should still be in the accumulator.
+        advance_elapsed(&mut elapsed, &mut acc, 0.5, false);
+        assert_eq!(elapsed, 3);
+    }
+
+    #[test]
+    fn advance_elapsed_is_noop_when_won() {
+        let mut elapsed = 100;
+        let mut acc = 0.0;
+        advance_elapsed(&mut elapsed, &mut acc, 5.0, true);
+        assert_eq!(elapsed, 100);
+        assert_eq!(acc, 0.0);
+    }
+
+    #[test]
+    fn advance_elapsed_handles_subsecond_deltas_without_skipping() {
+        let mut elapsed = 0;
+        let mut acc = 0.0;
+        // 16ms × 60 frames/sec ≈ 1 second; should produce 1 tick.
+        for _ in 0..60 {
+            advance_elapsed(&mut elapsed, &mut acc, 1.0 / 60.0, false);
+        }
+        assert!(elapsed == 1, "expected 1 second, got {elapsed}");
     }
 
     #[test]
