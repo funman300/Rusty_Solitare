@@ -45,3 +45,9 @@ pub mod achievements;
 pub use achievements::{
     achievements_file_path, load_achievements_from, save_achievements_to, AchievementRecord,
 };
+
+pub mod progress;
+pub use progress::{
+    level_for_xp, load_progress_from, progress_file_path, save_progress_to, xp_for_win,
+    PlayerProgress,
+};
