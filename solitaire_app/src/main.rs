@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use solitaire_engine::{
     AchievementPlugin, AnimationPlugin, CardPlugin, ChallengePlugin, DailyChallengePlugin,
-    GamePlugin, InputPlugin, ProgressPlugin, StatsPlugin, TablePlugin, TimeAttackPlugin,
+    GamePlugin, HelpPlugin, InputPlugin, ProgressPlugin, StatsPlugin, TablePlugin, TimeAttackPlugin,
     WeeklyGoalsPlugin,
 };
 
@@ -29,5 +29,6 @@ fn main() {
         .add_plugins(WeeklyGoalsPlugin)
         .add_plugins(ChallengePlugin)
         .add_plugins(TimeAttackPlugin)
+        .add_plugins(HelpPlugin)
         .run();
 }

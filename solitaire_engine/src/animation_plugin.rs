@@ -7,6 +7,7 @@ use bevy::prelude::*;
 
 use crate::achievement_plugin::display_name_for;
 use crate::card_plugin::CardEntity;
+use crate::challenge_plugin::ChallengeAdvancedEvent;
 use crate::daily_challenge_plugin::DailyChallengeCompletedEvent;
 use crate::events::{AchievementUnlockedEvent, GameWonEvent};
 use crate::game_plugin::GameMutation;
@@ -24,6 +25,7 @@ const LEVELUP_TOAST_SECS: f32 = 3.0;
 const DAILY_TOAST_SECS: f32 = 3.0;
 const WEEKLY_TOAST_SECS: f32 = 3.0;
 const TIME_ATTACK_TOAST_SECS: f32 = 5.0;
+const CHALLENGE_TOAST_SECS: f32 = 3.0;
 const CASCADE_STAGGER: f32 = 0.05;
 const CASCADE_DURATION: f32 = 0.5;
 
@@ -62,6 +64,7 @@ impl Plugin for AnimationPlugin {
             .add_event::<DailyChallengeCompletedEvent>()
             .add_event::<WeeklyGoalCompletedEvent>()
             .add_event::<TimeAttackEndedEvent>()
+            .add_event::<ChallengeAdvancedEvent>()
             .add_systems(
                 Update,
                 (
@@ -72,6 +75,7 @@ impl Plugin for AnimationPlugin {
                     handle_daily_toast,
                     handle_weekly_toast,
                     handle_time_attack_toast,
+                    handle_challenge_toast,
                     tick_toasts,
                 )
                     .after(GameMutation),
@@ -194,6 +198,19 @@ fn handle_time_attack_toast(
             &mut commands,
             format!("Time Attack: {} win{}", ev.wins, if ev.wins == 1 { "" } else { "s" }),
             TIME_ATTACK_TOAST_SECS,
+        );
+    }
+}
+
+fn handle_challenge_toast(
+    mut commands: Commands,
+    mut events: EventReader<ChallengeAdvancedEvent>,
+) {
+    for ev in events.read() {
+        spawn_toast(
+            &mut commands,
+            format!("Challenge {} cleared!", ev.previous_index.saturating_add(1)),
+            CHALLENGE_TOAST_SECS,
         );
     }
 }

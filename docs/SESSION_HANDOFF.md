@@ -2,7 +2,7 @@
 
 > Last updated: 2026-04-25
 > Branch: `master` — pushed to https://git.aleshym.co/funman300/Rusty_Solitare.git
-> Test count: **222 passing** (83 core + 54 data + 85 engine), `cargo clippy --workspace -- -D warnings` clean
+> Test count: **225 passing** (83 core + 54 data + 88 engine), `cargo clippy --workspace -- -D warnings` clean
 
 ---
 
@@ -148,14 +148,18 @@ All sub-phases (3A–3F) done. Plugins: `GamePlugin`, `TablePlugin`, `CardPlugin
 - `StatsPlugin` overlay (**S**) appends an "Unlocks" subsection (card backs / backgrounds, sorted/deduped, "None" when empty) and a live "Time Attack" panel showing remaining minutes/seconds + wins while a session is active.
 - Helper `format_id_list` factored out + tested.
 
+### Phase 7 (part 1) — Help Overlay + Challenge Toast ✅ COMPLETE
+
+- `HelpPlugin`: **H** or `?` toggles a full-window cheat sheet listing all keybindings (gameplay, mode hotkeys, overlays). 3 unit tests.
+- `AnimationPlugin` now surfaces `ChallengeAdvancedEvent` as a 3-second toast ("Challenge N cleared!").
+
 ## What Is Next
 
-### Phase 7 — Audio + Polish
+### Phase 7 (part 2+) — Audio + Pause Menu
 
-- Audio (`kira`): card deal/flip/place/invalid SFX, win fanfare, ambient loop. Volume sliders in a Settings overlay.
-- Onboarding: first-run hint overlay (rules summary + key list).
-- Pause menu (Esc currently logs a placeholder).
-- Optional: ChallengeAdvancedEvent → toast in `AnimationPlugin`.
+- Audio (`kira`): card deal/flip/place/invalid SFX, win fanfare, ambient loop. Volume sliders in a Settings overlay. **Blocker:** asset files are not yet in the repo; sourcing/recording these is the first step.
+- Pause menu: Esc currently logs a placeholder. Likely a small overlay similar to `HelpPlugin` with a `Paused` resource that gates `Time::delta_secs` propagation in `tick_elapsed_time` / `advance_time_attack`.
+- Onboarding: first-run banner pointing at the **H**/`?` cheat sheet (single-shot via `Settings.first_run_complete`).
 
 ### Phase 8 — Sync
 
