@@ -676,3 +676,103 @@ async fn opt_in_then_leaderboard_shows_entry() {
         .any(|e| e["display_name"] == "KarenTheGreat");
     assert!(found, "opted-in user must appear in leaderboard");
 }
+
+/// Pushing sync data after opting in updates the leaderboard best_score.
+#[tokio::test]
+async fn push_after_opt_in_updates_leaderboard_score() {
+    set_jwt_secret();
+    let pool = test_pool().await;
+    let app = build_test_router(pool);
+
+    let (access, _) = register_user(app.clone(), "scorer", "scorepass").await;
+    let user_id = decode_sub(&access);
+
+    // Opt in.
+    post_authed(
+        app.clone(),
+        "/api/leaderboard/opt-in",
+        &access,
+        serde_json::json!({ "display_name": "Scorer" }),
+    )
+    .await;
+
+    // Build a payload with a known best_single_score.
+    let payload = SyncPayload {
+        user_id: uuid::Uuid::parse_str(&user_id).unwrap(),
+        stats: StatsSnapshot {
+            best_single_score: 3_500,
+            fastest_win_seconds: 180,
+            games_won: 1,
+            games_played: 1,
+            ..StatsSnapshot::default()
+        },
+        achievements: vec![],
+        progress: PlayerProgress::default(),
+        last_modified: Utc::now(),
+    };
+
+    let push_resp = post_authed(
+        app.clone(),
+        "/api/sync/push",
+        &access,
+        serde_json::to_value(&payload).unwrap(),
+    )
+    .await;
+    assert_eq!(push_resp.status(), StatusCode::OK, "push must return 200");
+
+    // Leaderboard should reflect the pushed score.
+    let lb_resp = get_authed(app, "/api/leaderboard", &access).await;
+    let body = body_json(lb_resp).await;
+    let entries = body.as_array().unwrap();
+    let entry = entries.iter().find(|e| e["display_name"] == "Scorer").expect("entry missing");
+    assert_eq!(entry["best_score"], 3_500, "best_score must be updated from push");
+    assert_eq!(entry["best_time_secs"], 180, "best_time_secs must be updated from push");
+}
+
+/// Pushing a lower score after a higher one does not overwrite the best.
+#[tokio::test]
+async fn push_lower_score_does_not_overwrite_leaderboard_best() {
+    set_jwt_secret();
+    let pool = test_pool().await;
+    let app = build_test_router(pool);
+
+    let (access, _) = register_user(app.clone(), "champ", "champpass").await;
+    let user_id = decode_sub(&access);
+
+    post_authed(
+        app.clone(),
+        "/api/leaderboard/opt-in",
+        &access,
+        serde_json::json!({ "display_name": "Champ" }),
+    )
+    .await;
+
+    let make = |score: u32, time: u64| SyncPayload {
+        user_id: uuid::Uuid::parse_str(&user_id).unwrap(),
+        stats: StatsSnapshot {
+            best_single_score: score,
+            fastest_win_seconds: time,
+            games_won: 1,
+            games_played: 1,
+            ..StatsSnapshot::default()
+        },
+        achievements: vec![],
+        progress: PlayerProgress::default(),
+        last_modified: Utc::now(),
+    };
+
+    // First push: high score.
+    post_authed(app.clone(), "/api/sync/push", &access,
+        serde_json::to_value(make(5_000, 120)).unwrap()).await;
+
+    // Second push: lower score and slower time.
+    post_authed(app.clone(), "/api/sync/push", &access,
+        serde_json::to_value(make(1_000, 600)).unwrap()).await;
+
+    let lb_resp = get_authed(app, "/api/leaderboard", &access).await;
+    let body = body_json(lb_resp).await;
+    let entries = body.as_array().unwrap();
+    let entry = entries.iter().find(|e| e["display_name"] == "Champ").unwrap();
+    assert_eq!(entry["best_score"], 5_000, "best_score must not regress");
+    assert_eq!(entry["best_time_secs"], 120, "best_time_secs must stay at fastest");
+}

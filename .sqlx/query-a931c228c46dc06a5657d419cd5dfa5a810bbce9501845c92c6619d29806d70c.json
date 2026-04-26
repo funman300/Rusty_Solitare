@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE leaderboard\n           SET best_score     = MAX(COALESCE(best_score, 0), ?),\n               best_time_secs = CASE\n                   WHEN ? IS NULL THEN best_time_secs\n                   WHEN best_time_secs IS NULL THEN ?\n                   ELSE MIN(best_time_secs, ?)\n               END,\n               recorded_at = ?\n           WHERE user_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "a931c228c46dc06a5657d419cd5dfa5a810bbce9501845c92c6619d29806d70c"
+}

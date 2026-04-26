@@ -129,6 +129,10 @@ pub async fn pull(
 
 /// `POST /api/sync/push` — merge the client's payload with the server's
 /// stored payload, persist the result, and return it.
+///
+/// If the user has opted in to the leaderboard, the leaderboard row is also
+/// updated with the merged `best_single_score` and `fastest_win_seconds` so
+/// scores stay in sync without a separate submission step.
 pub async fn push(
     State(pool): State<SqlitePool>,
     user: AuthenticatedUser,
@@ -144,6 +148,7 @@ pub async fn push(
         None => {
             // First push — nothing to merge against; store directly.
             store_payload(&pool, &user.user_id, &client_payload).await?;
+            update_leaderboard_if_opted_in(&pool, &user.user_id, &client_payload).await?;
             return Ok(Json(SyncResponse {
                 merged: client_payload,
                 server_time: Utc::now(),
@@ -155,10 +160,63 @@ pub async fn push(
     let (merged, conflicts) = merge(&client_payload, &server_payload);
 
     store_payload(&pool, &user.user_id, &merged).await?;
+    update_leaderboard_if_opted_in(&pool, &user.user_id, &merged).await?;
 
     Ok(Json(SyncResponse {
         merged,
         server_time: Utc::now(),
         conflicts,
     }))
+}
+
+/// If the user is opted in to the leaderboard, update their row with the
+/// better of the stored and incoming `best_single_score` / `fastest_win_seconds`.
+///
+/// Uses SQLite `MIN`/`MAX` in the UPDATE so the database never regresses
+/// a score even if the client sends stale data.
+async fn update_leaderboard_if_opted_in(
+    pool: &SqlitePool,
+    user_id: &str,
+    payload: &SyncPayload,
+) -> Result<(), AppError> {
+    // Only update if the user has opted in (leaderboard row exists).
+    let opted_in: Option<i64> = sqlx::query_scalar!(
+        "SELECT leaderboard_opt_in FROM users WHERE id = ?",
+        user_id
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    if opted_in != Some(1) {
+        return Ok(());
+    }
+
+    let best_score = payload.stats.best_single_score as i64;
+    let fastest = if payload.stats.fastest_win_seconds == u64::MAX {
+        // Sentinel "never won" value — don't store.
+        None::<i64>
+    } else {
+        Some(payload.stats.fastest_win_seconds as i64)
+    };
+    let now = Utc::now().to_rfc3339();
+
+    sqlx::query!(
+        r#"UPDATE leaderboard
+           SET best_score     = MAX(COALESCE(best_score, 0), ?),
+               best_time_secs = CASE
+                   WHEN ? IS NULL THEN best_time_secs
+                   WHEN best_time_secs IS NULL THEN ?
+                   ELSE MIN(best_time_secs, ?)
+               END,
+               recorded_at = ?
+           WHERE user_id = ?"#,
+        best_score,
+        fastest, fastest, fastest,
+        now,
+        user_id
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }

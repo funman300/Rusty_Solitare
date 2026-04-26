@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT leaderboard_opt_in FROM users WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "leaderboard_opt_in",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "765c87463905b2edbf37f7416d5bc38e639c7e4c5feb0f5a9d8d6fb724e7a0a8"
+}
