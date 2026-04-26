@@ -54,6 +54,7 @@ fn spawn_help_screen(commands: &mut Commands) {
         "  S            Toggle stats / progression".to_string(),
         "  H or ?       Toggle this help".to_string(),
         "  Esc          Pause / resume".to_string(),
+        "  [ / ]        SFX volume down / up".to_string(),
         String::new(),
         "Press H or ? to close".to_string(),
     ];

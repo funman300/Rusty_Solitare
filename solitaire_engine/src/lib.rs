@@ -12,6 +12,7 @@ pub mod help_plugin;
 pub mod input_plugin;
 pub mod layout;
 pub mod pause_plugin;
+pub mod settings_plugin;
 pub mod progress_plugin;
 pub mod resources;
 pub mod stats_plugin;
@@ -39,6 +40,9 @@ pub use game_plugin::{GameMutation, GamePlugin};
 pub use help_plugin::{HelpPlugin, HelpScreen};
 pub use input_plugin::InputPlugin;
 pub use pause_plugin::{PausePlugin, PauseScreen, PausedResource};
+pub use settings_plugin::{
+    SettingsChangedEvent, SettingsPlugin, SettingsResource, SFX_STEP,
+};
 pub use layout::{compute_layout, Layout, LayoutResource};
 pub use resources::{DragState, GameStateResource, SyncStatus, SyncStatusResource};
 pub use stats_plugin::{StatsPlugin, StatsResource, StatsScreen, StatsUpdate};

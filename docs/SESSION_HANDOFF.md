@@ -2,7 +2,7 @@
 
 > Last updated: 2026-04-25
 > Branch: `master` — pushed to https://git.aleshym.co/funman300/Rusty_Solitare.git
-> Test count: **228 passing** (83 core + 54 data + 91 engine), `cargo clippy --workspace -- -D warnings` clean
+> Test count: **238 passing** (83 core + 60 data + 95 engine), `cargo clippy --workspace -- -D warnings` clean
 
 ---
 
@@ -166,14 +166,22 @@ All sub-phases (3A–3F) done. Plugins: `GamePlugin`, `TablePlugin`, `CardPlugin
 - New `PausePlugin` + `PausedResource(bool)`. **Esc** toggles a full-window pause overlay (ZIndex 220) and flips the resource. `tick_elapsed_time` and `advance_time_attack` skip work while paused. Input is deliberately not blocked — pause is a "stop the clock" screen, nothing more.
 - `HelpPlugin` cheat sheet updated to reflect the new Esc behaviour.
 
+### Phase 7 (part 4) — Settings + SFX Volume Control ✅ COMPLETE
+
+- New `solitaire_data::Settings { sfx_volume, first_run_complete }` with atomic JSON persistence (`save_settings_to` / `load_settings_from`). `sanitized()` clamps out-of-range volumes after deserialization. Default `sfx_volume = 0.8`.
+- New `SettingsPlugin` (engine) with `SettingsResource`, `headless()` ctor, and `SettingsChangedEvent`. **\[** / **\]** adjust SFX volume by `SFX_STEP` (0.1), clamped; persists on change. No-op + no event when already at the rail.
+- `AudioPlugin` applies `sfx_volume` to kira's main track at startup and on every `SettingsChangedEvent` (so changes take effect mid-game without restart).
+- `AnimationPlugin` shows a brief "SFX: 70%" toast on every change so players see the new value.
+- Help cheat sheet lists the **\[** / **\]** keys.
+- 4 plugin tests + 6 data tests added — defaults, clamping, round-trip persistence.
+
 ## What Is Next
 
-### Phase 7 (part 4+) — Polish
+### Phase 7 (part 5+) — Final Polish
 
-- **Volume controls**: Settings overlay with `sfx_volume` slider; persist via `solitaire_data::Settings`. Apply to kira's main-track gain.
-- **Ambient loop**: optional sixth WAV — needs taste, deferred.
-- **Onboarding**: first-run banner pointing at the **H**/`?` cheat sheet (single-shot via `Settings.first_run_complete`).
-- **Optional**: block input while paused (drag, hotkeys) for stricter pause semantics.
+- **Onboarding**: first-run banner pointing at the **H**/`?` cheat sheet, single-shot via `Settings.first_run_complete`.
+- **Ambient loop**: optional sixth WAV — needs taste, deferred until artwork phase.
+- **Block input while paused**: drag/hotkeys still work mid-pause; tightening this would make pause behave more like a true modal.
 
 ### Phase 8 — Sync
 

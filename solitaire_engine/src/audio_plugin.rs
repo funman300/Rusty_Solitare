@@ -22,10 +22,12 @@ use bevy::prelude::*;
 use kira::manager::backend::DefaultBackend;
 use kira::manager::{AudioManager, AudioManagerSettings};
 use kira::sound::static_sound::StaticSoundData;
+use kira::tween::Tween;
 
 use crate::events::{
     DrawRequestEvent, GameWonEvent, MoveRejectedEvent, MoveRequestEvent, NewGameRequestEvent,
 };
+use crate::settings_plugin::{SettingsChangedEvent, SettingsResource};
 
 /// Pre-decoded sound effects. Cheap to clone (frames are an `Arc<[Frame]>`),
 /// so we hand a fresh handle to `manager.play()` on every event.
@@ -66,6 +68,11 @@ impl Plugin for AudioPlugin {
             .add_event::<MoveRejectedEvent>()
             .add_event::<NewGameRequestEvent>()
             .add_event::<GameWonEvent>()
+            .add_event::<SettingsChangedEvent>()
+            .add_systems(
+                Startup,
+                apply_initial_volume,
+            )
             .add_systems(
                 Update,
                 (
@@ -74,6 +81,7 @@ impl Plugin for AudioPlugin {
                     play_on_rejected,
                     play_on_new_game,
                     play_on_win,
+                    apply_volume_on_change,
                 ),
             );
     }
@@ -110,6 +118,32 @@ fn play(audio: &mut AudioState, sound: &StaticSoundData) {
     };
     if let Err(e) = manager.play(sound.clone()) {
         warn!("failed to play SFX: {e}");
+    }
+}
+
+fn set_main_track_volume(audio: &mut AudioState, volume: f32) {
+    let Some(manager) = audio.manager.as_mut() else {
+        return;
+    };
+    manager
+        .main_track()
+        .set_volume(volume.clamp(0.0, 1.0) as f64, Tween::default());
+}
+
+fn apply_initial_volume(
+    mut audio: NonSendMut<AudioState>,
+    settings: Option<Res<SettingsResource>>,
+) {
+    let volume = settings.map_or(1.0, |s| s.0.sfx_volume);
+    set_main_track_volume(&mut audio, volume);
+}
+
+fn apply_volume_on_change(
+    mut events: EventReader<SettingsChangedEvent>,
+    mut audio: NonSendMut<AudioState>,
+) {
+    for ev in events.read() {
+        set_main_track_volume(&mut audio, ev.0.sfx_volume);
     }
 }
 

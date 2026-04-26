@@ -13,6 +13,7 @@ use crate::events::{AchievementUnlockedEvent, GameWonEvent};
 use crate::game_plugin::GameMutation;
 use crate::layout::LayoutResource;
 use crate::progress_plugin::LevelUpEvent;
+use crate::settings_plugin::SettingsChangedEvent;
 use crate::time_attack_plugin::TimeAttackEndedEvent;
 use crate::weekly_goals_plugin::WeeklyGoalCompletedEvent;
 
@@ -26,6 +27,7 @@ const DAILY_TOAST_SECS: f32 = 3.0;
 const WEEKLY_TOAST_SECS: f32 = 3.0;
 const TIME_ATTACK_TOAST_SECS: f32 = 5.0;
 const CHALLENGE_TOAST_SECS: f32 = 3.0;
+const VOLUME_TOAST_SECS: f32 = 1.4;
 const CASCADE_STAGGER: f32 = 0.05;
 const CASCADE_DURATION: f32 = 0.5;
 
@@ -65,6 +67,7 @@ impl Plugin for AnimationPlugin {
             .add_event::<WeeklyGoalCompletedEvent>()
             .add_event::<TimeAttackEndedEvent>()
             .add_event::<ChallengeAdvancedEvent>()
+            .add_event::<SettingsChangedEvent>()
             .add_systems(
                 Update,
                 (
@@ -76,6 +79,7 @@ impl Plugin for AnimationPlugin {
                     handle_weekly_toast,
                     handle_time_attack_toast,
                     handle_challenge_toast,
+                    handle_settings_toast,
                     tick_toasts,
                 )
                     .after(GameMutation),
@@ -211,6 +215,20 @@ fn handle_challenge_toast(
             &mut commands,
             format!("Challenge {} cleared!", ev.previous_index.saturating_add(1)),
             CHALLENGE_TOAST_SECS,
+        );
+    }
+}
+
+fn handle_settings_toast(
+    mut commands: Commands,
+    mut events: EventReader<SettingsChangedEvent>,
+) {
+    for ev in events.read() {
+        let pct = (ev.0.sfx_volume * 100.0).round() as i32;
+        spawn_toast(
+            &mut commands,
+            format!("SFX: {pct}%"),
+            VOLUME_TOAST_SECS,
         );
     }
 }
