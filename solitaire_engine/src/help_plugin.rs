@@ -53,7 +53,7 @@ fn spawn_help_screen(commands: &mut Commands) {
         "-- Overlays --".to_string(),
         "  S            Toggle stats / progression".to_string(),
         "  H or ?       Toggle this help".to_string(),
-        "  Esc          Pause (placeholder)".to_string(),
+        "  Esc          Pause / resume".to_string(),
         String::new(),
         "Press H or ? to close".to_string(),
     ];

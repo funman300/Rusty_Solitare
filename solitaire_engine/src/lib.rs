@@ -11,6 +11,7 @@ pub mod game_plugin;
 pub mod help_plugin;
 pub mod input_plugin;
 pub mod layout;
+pub mod pause_plugin;
 pub mod progress_plugin;
 pub mod resources;
 pub mod stats_plugin;
@@ -31,12 +32,13 @@ pub use animation_plugin::{AnimationPlugin, CardAnim};
 pub use audio_plugin::{AudioPlugin, AudioState, SoundLibrary};
 pub use card_plugin::{CardEntity, CardLabel, CardPlugin};
 pub use events::{
-    AchievementUnlockedEvent, CardFlippedEvent, DrawRequestEvent, GameWonEvent, MoveRequestEvent,
-    NewGameRequestEvent, StateChangedEvent, UndoRequestEvent,
+    AchievementUnlockedEvent, CardFlippedEvent, DrawRequestEvent, GameWonEvent, MoveRejectedEvent,
+    MoveRequestEvent, NewGameRequestEvent, StateChangedEvent, UndoRequestEvent,
 };
 pub use game_plugin::{GameMutation, GamePlugin};
 pub use help_plugin::{HelpPlugin, HelpScreen};
 pub use input_plugin::InputPlugin;
+pub use pause_plugin::{PausePlugin, PauseScreen, PausedResource};
 pub use layout::{compute_layout, Layout, LayoutResource};
 pub use resources::{DragState, GameStateResource, SyncStatus, SyncStatusResource};
 pub use stats_plugin::{StatsPlugin, StatsResource, StatsScreen, StatsUpdate};

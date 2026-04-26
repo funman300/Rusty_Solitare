@@ -7,11 +7,9 @@
 //! |---|---|
 //! | `DrawRequestEvent` | `card_flip.wav` |
 //! | `MoveRequestEvent` | `card_place.wav` |
+//! | `MoveRejectedEvent` | `card_invalid.wav` |
 //! | `NewGameRequestEvent` | `card_deal.wav` |
 //! | `GameWonEvent` | `win_fanfare.wav` |
-//!
-//! `card_invalid.wav` is loaded but not yet wired — there is no
-//! "rejected move" event today; adding one is a follow-up.
 //!
 //! If the audio device cannot be opened (e.g. a headless CI machine or a
 //! Linux box without a running PulseAudio/Pipewire session), the plugin
@@ -25,7 +23,9 @@ use kira::manager::backend::DefaultBackend;
 use kira::manager::{AudioManager, AudioManagerSettings};
 use kira::sound::static_sound::StaticSoundData;
 
-use crate::events::{DrawRequestEvent, GameWonEvent, MoveRequestEvent, NewGameRequestEvent};
+use crate::events::{
+    DrawRequestEvent, GameWonEvent, MoveRejectedEvent, MoveRequestEvent, NewGameRequestEvent,
+};
 
 /// Pre-decoded sound effects. Cheap to clone (frames are an `Arc<[Frame]>`),
 /// so we hand a fresh handle to `manager.play()` on every event.
@@ -63,6 +63,7 @@ impl Plugin for AudioPlugin {
 
         app.add_event::<DrawRequestEvent>()
             .add_event::<MoveRequestEvent>()
+            .add_event::<MoveRejectedEvent>()
             .add_event::<NewGameRequestEvent>()
             .add_event::<GameWonEvent>()
             .add_systems(
@@ -70,6 +71,7 @@ impl Plugin for AudioPlugin {
                 (
                     play_on_draw,
                     play_on_move,
+                    play_on_rejected,
                     play_on_new_game,
                     play_on_win,
                 ),
@@ -134,6 +136,19 @@ fn play_on_move(
     };
     for _ in events.read() {
         play(&mut audio, &lib.place);
+    }
+}
+
+fn play_on_rejected(
+    mut events: EventReader<MoveRejectedEvent>,
+    mut audio: NonSendMut<AudioState>,
+    lib: Option<Res<SoundLibrary>>,
+) {
+    let Some(lib) = lib else {
+        return;
+    };
+    for _ in events.read() {
+        play(&mut audio, &lib.invalid);
     }
 }
 

@@ -79,8 +79,12 @@ fn advance_time_attack(
     time: Res<Time>,
     mut session: ResMut<TimeAttackResource>,
     mut ended: EventWriter<TimeAttackEndedEvent>,
+    paused: Option<Res<crate::pause_plugin::PausedResource>>,
 ) {
     if !session.active {
+        return;
+    }
+    if paused.is_some_and(|p| p.0) {
         return;
     }
     session.remaining_secs -= time.delta_secs();

@@ -34,6 +34,16 @@ pub struct NewGameRequestEvent {
 #[derive(Event, Debug, Clone, Copy, Default)]
 pub struct StateChangedEvent;
 
+/// Fired by input/UI systems when a player attempts to drop dragged cards
+/// on a real pile but the move violates the rules. Drives the
+/// `card_invalid.wav` SFX. Not fired for drops in empty space.
+#[derive(Event, Debug, Clone)]
+pub struct MoveRejectedEvent {
+    pub from: PileType,
+    pub to: PileType,
+    pub count: usize,
+}
+
 /// Fired once when the active game transitions to won.
 #[derive(Event, Debug, Clone, Copy)]
 pub struct GameWonEvent {

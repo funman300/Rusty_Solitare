@@ -35,6 +35,7 @@ impl Plugin for GamePlugin {
             .add_event::<UndoRequestEvent>()
             .add_event::<NewGameRequestEvent>()
             .add_event::<StateChangedEvent>()
+            .add_event::<crate::events::MoveRejectedEvent>()
             .add_event::<GameWonEvent>()
             .add_event::<crate::events::CardFlippedEvent>()
             .add_event::<crate::events::AchievementUnlockedEvent>()
@@ -72,13 +73,18 @@ pub fn advance_elapsed(
 }
 
 /// Increment `GameState.elapsed_seconds` once per real-world second while
-/// the game is in progress (not won). Stops counting on win so the final
-/// time reflects how long the player took to solve the deal.
+/// the game is in progress (not won) and not paused. Stops counting on
+/// win so the final time reflects how long the player took to solve the
+/// deal; stops while the pause overlay is open.
 fn tick_elapsed_time(
     time: Res<Time>,
     mut game: ResMut<GameStateResource>,
     mut accumulator: Local<f32>,
+    paused: Option<Res<crate::pause_plugin::PausedResource>>,
 ) {
+    if paused.is_some_and(|p| p.0) {
+        return;
+    }
     let is_won = game.0.is_won;
     advance_elapsed(
         &mut game.0.elapsed_seconds,

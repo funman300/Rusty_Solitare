@@ -26,7 +26,8 @@ use solitaire_core::rules::{can_place_on_foundation, can_place_on_tableau};
 use crate::card_plugin::{CardEntity, TABLEAU_FAN_FRAC};
 use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
 use crate::events::{
-    DrawRequestEvent, MoveRequestEvent, NewGameRequestEvent, StateChangedEvent, UndoRequestEvent,
+    DrawRequestEvent, MoveRejectedEvent, MoveRequestEvent, NewGameRequestEvent, StateChangedEvent,
+    UndoRequestEvent,
 };
 use crate::game_plugin::GameMutation;
 use crate::progress_plugin::ProgressResource;
@@ -93,10 +94,7 @@ fn handle_keyboard(
     if keys.just_pressed(KeyCode::KeyD) {
         draw.send(DrawRequestEvent);
     }
-    if keys.just_pressed(KeyCode::Escape) {
-        // Pause placeholder — the pause screen hooks this up in a later phase.
-        info!("pause requested (not yet wired)");
-    }
+    // Esc is handled by `PausePlugin` (overlay toggle + paused flag).
 }
 
 fn handle_stock_click(
@@ -215,6 +213,7 @@ fn end_drag(
     game: Res<GameStateResource>,
     mut drag: ResMut<DragState>,
     mut moves: EventWriter<MoveRequestEvent>,
+    mut rejected: EventWriter<MoveRejectedEvent>,
     mut changed: EventWriter<StateChangedEvent>,
 ) {
     if !buttons.just_released(MouseButton::Left) || drag.is_idle() {
@@ -234,7 +233,9 @@ fn end_drag(
 
     // Whether we fire a MoveRequestEvent or not, always trigger a resync so
     // the dragged cards snap back to their resting positions if the move is
-    // rejected (or never fired).
+    // rejected (or never fired). When the cursor was over a real pile but
+    // the placement is illegal, fire MoveRejectedEvent so AudioPlugin can
+    // play card_invalid.wav.
     let mut fired = false;
     if let Some(target) = target {
         if target != origin {
@@ -256,11 +257,17 @@ fn end_drag(
                 };
                 if ok {
                     moves.send(MoveRequestEvent {
-                        from: origin,
-                        to: target,
+                        from: origin.clone(),
+                        to: target.clone(),
                         count,
                     });
                     fired = true;
+                } else {
+                    rejected.send(MoveRejectedEvent {
+                        from: origin.clone(),
+                        to: target.clone(),
+                        count,
+                    });
                 }
             }
         }
