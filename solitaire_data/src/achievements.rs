@@ -1,45 +1,17 @@
 //! Persistence for per-player achievement unlock records.
+//!
+//! The [`AchievementRecord`] struct is defined in `solitaire_sync` so the
+//! server can use the same type. This module re-exports it and provides
+//! file I/O helpers.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+pub use solitaire_sync::AchievementRecord;
 
 const APP_DIR_NAME: &str = "solitaire_quest";
 const FILE_NAME: &str = "achievements.json";
-
-/// One player's unlock state for a single achievement.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AchievementRecord {
-    pub id: String,
-    pub unlocked: bool,
-    pub unlock_date: Option<DateTime<Utc>>,
-    pub reward_granted: bool,
-}
-
-impl AchievementRecord {
-    /// Construct an initial record for an achievement that is not yet unlocked.
-    pub fn locked(id: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            unlocked: false,
-            unlock_date: None,
-            reward_granted: false,
-        }
-    }
-
-    /// Mark this record unlocked at the given timestamp. No-op if already unlocked
-    /// (preserves earliest `unlock_date`).
-    pub fn unlock(&mut self, at: DateTime<Utc>) {
-        if self.unlocked {
-            return;
-        }
-        self.unlocked = true;
-        self.unlock_date = Some(at);
-    }
-}
 
 /// Platform-specific default path for `achievements.json`.
 pub fn achievements_file_path() -> Option<PathBuf> {
@@ -70,6 +42,7 @@ pub fn save_achievements_to(path: &Path, records: &[AchievementRecord]) -> io::R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use std::env;
 
     fn tmp_path(name: &str) -> PathBuf {

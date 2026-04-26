@@ -1,11 +1,20 @@
 use bevy::prelude::*;
+use solitaire_data::{load_settings_from, provider_for_backend, settings_file_path, Settings};
 use solitaire_engine::{
     AchievementPlugin, AnimationPlugin, AudioPlugin, CardPlugin, ChallengePlugin,
     DailyChallengePlugin, GamePlugin, HelpPlugin, InputPlugin, OnboardingPlugin, PausePlugin,
-    ProgressPlugin, SettingsPlugin, StatsPlugin, TablePlugin, TimeAttackPlugin, WeeklyGoalsPlugin,
+    ProgressPlugin, SettingsPlugin, StatsPlugin, SyncPlugin, TablePlugin, TimeAttackPlugin,
+    WeeklyGoalsPlugin,
 };
 
 fn main() {
+    // Load settings before building the app so we can construct the right
+    // sync provider. Falls back to defaults if no settings file exists yet.
+    let settings: Settings = settings_file_path()
+        .map(|p| load_settings_from(&p))
+        .unwrap_or_default();
+    let sync_provider = provider_for_backend(&settings.sync_backend);
+
     App::new()
         .add_plugins(
             DefaultPlugins.set(WindowPlugin {
@@ -34,5 +43,6 @@ fn main() {
         .add_plugins(SettingsPlugin::default())
         .add_plugins(AudioPlugin)
         .add_plugins(OnboardingPlugin)
+        .add_plugins(SyncPlugin::new(sync_provider))
         .run();
 }

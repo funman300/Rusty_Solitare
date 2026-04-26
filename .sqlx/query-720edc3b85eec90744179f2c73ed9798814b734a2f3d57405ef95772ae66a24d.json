@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO sync_state (user_id, stats_json, achievements_json, progress_json, last_modified)\n           VALUES (?, ?, ?, ?, ?)\n           ON CONFLICT(user_id) DO UPDATE SET\n               stats_json        = excluded.stats_json,\n               achievements_json = excluded.achievements_json,\n               progress_json     = excluded.progress_json,\n               last_modified     = excluded.last_modified",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "720edc3b85eec90744179f2c73ed9798814b734a2f3d57405ef95772ae66a24d"
+}

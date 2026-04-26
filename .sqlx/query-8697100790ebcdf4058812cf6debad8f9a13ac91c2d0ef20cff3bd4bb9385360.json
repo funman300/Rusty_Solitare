@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO leaderboard (user_id, display_name, recorded_at)\n           VALUES (?, ?, ?)\n           ON CONFLICT(user_id) DO UPDATE SET\n               display_name = excluded.display_name,\n               recorded_at  = excluded.recorded_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "8697100790ebcdf4058812cf6debad8f9a13ac91c2d0ef20cff3bd4bb9385360"
+}

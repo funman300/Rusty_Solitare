@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use serde::{Deserialize, Serialize};
 use crate::card::{Card, Suit};
 use crate::deck::{deal_klondike, Deck};
@@ -60,7 +60,7 @@ pub struct GameState {
     /// Number of times `undo()` has been successfully invoked this game.
     /// Used by achievement conditions like `no_undo`.
     pub undo_count: u32,
-    undo_stack: Vec<StateSnapshot>,
+    undo_stack: VecDeque<StateSnapshot>,
 }
 
 impl GameState {
@@ -96,7 +96,7 @@ impl GameState {
             is_won: false,
             is_auto_completable: false,
             undo_count: 0,
-            undo_stack: Vec::new(),
+            undo_stack: VecDeque::new(),
         }
     }
 
@@ -115,9 +115,9 @@ impl GameState {
 
     fn push_snapshot(&mut self) {
         if self.undo_stack.len() >= MAX_UNDO_STACK {
-            self.undo_stack.remove(0);
+            self.undo_stack.pop_front();  // O(1)
         }
-        self.undo_stack.push(self.take_snapshot());
+        self.undo_stack.push_back(self.take_snapshot());
     }
 
     /// Draw cards from stock to waste. When stock is empty, recycles waste back to stock.
@@ -278,7 +278,7 @@ impl GameState {
                 "undo is disabled in Challenge mode".into(),
             ));
         }
-        let snapshot = self.undo_stack.pop().ok_or(MoveError::UndoStackEmpty)?;
+        let snapshot = self.undo_stack.pop_back().ok_or(MoveError::UndoStackEmpty)?;
         self.piles = snapshot.piles;
         self.score = if self.mode == GameMode::Zen {
             0

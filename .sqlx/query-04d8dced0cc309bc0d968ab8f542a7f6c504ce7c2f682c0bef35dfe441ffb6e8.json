@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT goal_json FROM daily_challenges WHERE date = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "goal_json",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "04d8dced0cc309bc0d968ab8f542a7f6c504ce7c2f682c0bef35dfe441ffb6e8"
+}

@@ -151,7 +151,7 @@ fn handle_achievement_toast(
     for ev in events.read() {
         spawn_toast(
             &mut commands,
-            format!("Achievement: {}", display_name_for(&ev.0)),
+            format!("Achievement: {}", display_name_for(&ev.0.id)),
             ACHIEVEMENT_TOAST_SECS,
         );
     }

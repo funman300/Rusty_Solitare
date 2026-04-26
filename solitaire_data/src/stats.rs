@@ -1,51 +1,24 @@
 //! Player statistics — persisted to `stats.json` between sessions.
+//!
+//! [`StatsSnapshot`] is defined in `solitaire_sync` and re-exported here.
+//! This module adds the [`StatsExt`] extension trait, which supplies the
+//! `update_on_win` method that depends on [`DrawMode`] from `solitaire_core`.
 
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::Utc;
 use solitaire_core::game_state::DrawMode;
 
-/// Cumulative game statistics. Stored as `stats.json` in the platform data dir.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StatsSnapshot {
-    pub games_played: u32,
-    pub games_won: u32,
-    pub games_lost: u32,
-    pub win_streak_current: u32,
-    pub win_streak_best: u32,
-    /// Rolling average of win times in seconds.
-    pub avg_time_seconds: u64,
-    /// Fastest win time. `u64::MAX` means no wins yet.
-    pub fastest_win_seconds: u64,
-    /// Sum of all winning scores.
-    pub lifetime_score: u64,
-    pub best_single_score: u32,
-    pub draw_one_wins: u32,
-    pub draw_three_wins: u32,
-    pub last_modified: DateTime<Utc>,
-}
+pub use solitaire_sync::StatsSnapshot;
 
-impl Default for StatsSnapshot {
-    fn default() -> Self {
-        Self {
-            games_played: 0,
-            games_won: 0,
-            games_lost: 0,
-            win_streak_current: 0,
-            win_streak_best: 0,
-            avg_time_seconds: 0,
-            fastest_win_seconds: u64::MAX,
-            lifetime_score: 0,
-            best_single_score: 0,
-            draw_one_wins: 0,
-            draw_three_wins: 0,
-            last_modified: DateTime::UNIX_EPOCH,
-        }
-    }
-}
-
-impl StatsSnapshot {
+/// Extension trait providing game-logic mutation helpers for [`StatsSnapshot`].
+///
+/// Import this trait alongside `StatsSnapshot` to use `update_on_win`.
+pub trait StatsExt {
     /// Record a completed win. Updates all relevant counters and rolling averages.
-    pub fn update_on_win(&mut self, score: i32, time_seconds: u64, draw_mode: &DrawMode) {
+    fn update_on_win(&mut self, score: i32, time_seconds: u64, draw_mode: &DrawMode);
+}
+
+impl StatsExt for StatsSnapshot {
+    fn update_on_win(&mut self, score: i32, time_seconds: u64, draw_mode: &DrawMode) {
         let prev_wins = self.games_won;
         self.games_played += 1;
         self.games_won += 1;
@@ -77,23 +50,6 @@ impl StatsSnapshot {
         }
 
         self.last_modified = Utc::now();
-    }
-
-    /// Record an abandoned game (player started a new game without winning).
-    pub fn record_abandoned(&mut self) {
-        self.games_played += 1;
-        self.games_lost += 1;
-        self.win_streak_current = 0;
-        self.last_modified = Utc::now();
-    }
-
-    /// Win percentage as 0–100, or `None` if no games played.
-    pub fn win_rate(&self) -> Option<f32> {
-        if self.games_played == 0 {
-            None
-        } else {
-            Some(self.games_won as f32 / self.games_played as f32 * 100.0)
-        }
     }
 }
 

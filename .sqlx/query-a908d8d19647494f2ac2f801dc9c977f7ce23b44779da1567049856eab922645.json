@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT stats_json, achievements_json, progress_json FROM sync_state WHERE user_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "stats_json",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "achievements_json",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "progress_json",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a908d8d19647494f2ac2f801dc9c977f7ce23b44779da1567049856eab922645"
+}

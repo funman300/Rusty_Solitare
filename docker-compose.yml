@@ -1,0 +1,30 @@
+services:
+  server:
+    build: .
+    env_file: .env
+    environment:
+      # Override DATABASE_URL so the DB always lands in the persistent volume,
+      # regardless of what .env contains.
+      DATABASE_URL: sqlite:///data/solitaire.db
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    expose:
+      - "${SERVER_PORT:-8080}"
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

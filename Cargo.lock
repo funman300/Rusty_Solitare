@@ -5669,6 +5669,7 @@ name = "solitaire_app"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "solitaire_data",
  "solitaire_engine",
 ]
 
@@ -5707,11 +5708,15 @@ dependencies = [
 name = "solitaire_engine"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bevy",
  "chrono",
  "kira",
  "solitaire_core",
  "solitaire_data",
+ "solitaire_sync",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -5738,6 +5743,7 @@ dependencies = [
  "sqlx",
  "thiserror 1.0.69",
  "tokio",
+ "tower",
  "tower_governor",
  "tracing",
  "tracing-subscriber",
@@ -5751,6 +5757,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
  "uuid",
 ]
 

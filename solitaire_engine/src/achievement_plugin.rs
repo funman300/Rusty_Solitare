@@ -124,7 +124,7 @@ fn evaluate_on_win(
         }
         record.unlock(now);
         changed = true;
-        unlocks.send(AchievementUnlockedEvent(def.id.to_string()));
+        unlocks.send(AchievementUnlockedEvent(record.clone()));
     }
 
     if changed {
@@ -201,7 +201,7 @@ mod tests {
         // Verify the event was emitted.
         let events = app.world().resource::<Events<AchievementUnlockedEvent>>();
         let mut cursor = events.get_cursor();
-        let fired: Vec<String> = cursor.read(events).map(|e| e.0.clone()).collect();
+        let fired: Vec<String> = cursor.read(events).map(|e| e.0.id.clone()).collect();
         assert!(fired.contains(&"first_win".to_string()));
     }
 
@@ -228,7 +228,7 @@ mod tests {
 
         let events = app.world().resource::<Events<AchievementUnlockedEvent>>();
         let mut cursor = events.get_cursor();
-        let fired: Vec<String> = cursor.read(events).map(|e| e.0.clone()).collect();
+        let fired: Vec<String> = cursor.read(events).map(|e| e.0.id.clone()).collect();
         assert!(
             !fired.contains(&"first_win".to_string()),
             "first_win must not re-fire on subsequent wins"

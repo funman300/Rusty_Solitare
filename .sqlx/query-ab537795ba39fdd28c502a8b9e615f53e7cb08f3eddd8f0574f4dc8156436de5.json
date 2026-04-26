@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO daily_challenges (date, seed, goal_json) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "ab537795ba39fdd28c502a8b9e615f53e7cb08f3eddd8f0574f4dc8156436de5"
+}

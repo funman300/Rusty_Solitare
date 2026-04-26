@@ -11,7 +11,8 @@ use std::path::PathBuf;
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use solitaire_data::{
-    load_stats_from, save_stats_to, stats_file_path, PlayerProgress, StatsSnapshot, WEEKLY_GOALS,
+    load_stats_from, save_stats_to, stats_file_path, PlayerProgress, StatsExt, StatsSnapshot,
+    WEEKLY_GOALS,
 };
 
 use crate::events::{GameWonEvent, NewGameRequestEvent};

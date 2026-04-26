@@ -153,7 +153,7 @@ Owns:
 > **Note:** This crate contains only a trait stub and compile-time stub implementations until Android support is actively developed. Do not implement JNI bindings until Phase: Android.
 
 ### `solitaire_engine`
-**Dependencies:** `bevy`, `bevy_egui`, `bevy_kira_audio`, `solitaire_core`, `solitaire_data`.
+**Dependencies:** `bevy`, `bevy_kira_audio`, `solitaire_core`, `solitaire_data`.
 
 All Bevy-specific code. Structured as a collection of Plugins that `solitaire_app` registers.
 
@@ -162,7 +162,7 @@ Owns:
 - Rendering systems (card sprites, table, backgrounds)
 - Drag-and-drop input handling
 - Animation systems (slide, flip, win cascade, toast)
-- All egui screens (Home, Stats, Achievements, Settings, Profile)
+- All Bevy UI screens (Home, Stats, Achievements, Settings, Profile)
 - Audio playback systems
 - Sync status display
 
@@ -209,7 +209,7 @@ RenderSystem          ScoreSystem          AchievementSystem
                                                 │
                                                 │ fires AchievementUnlockedEvent
                                                 ▼
-                                          ToastSystem (egui popup)
+                                          ToastSystem (Bevy UI popup)
                                           PersistenceSystem (write to disk)
 ```
 
@@ -262,7 +262,7 @@ Done
 | `TablePlugin` | Pile markers, background, layout calculation |
 | `AnimationPlugin` | Slide, flip, win cascade, toast animations |
 | `AudioPlugin` | Sound effect and music playback via bevy_kira_audio |
-| `UIPlugin` | All egui screens: Home, Stats, Achievements, Settings, Profile |
+| `UIPlugin` | All Bevy UI screens: Home, Stats, Achievements, Settings, Profile |
 | `AchievementPlugin` | Listens for game events, evaluates unlock conditions, fires toasts |
 | `SyncPlugin` | Manages sync lifecycle (pull on start, push on exit, status display) |
 | `GamePlugin` | Core game state resource, input routing, win detection |
@@ -861,7 +861,7 @@ Card backs: `assets/cards/backs/back_0.png` through `back_4.png`. Additional bac
 
 ### Fonts
 
-`assets/fonts/main.ttf` — used for card rank/suit text and all egui overrides.
+`assets/fonts/main.ttf` — used for card rank/suit text in Bevy UI.
 
 ---
 

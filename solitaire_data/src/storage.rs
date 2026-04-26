@@ -58,10 +58,48 @@ pub fn save_stats(stats: &StatsSnapshot) -> io::Result<()> {
     save_stats_to(&path, stats)
 }
 
+/// Remove any leftover `*.json.tmp` files in the app data directory.
+///
+/// These can be left behind if the process crashes between the write and rename
+/// in an atomic save. Safe to call on startup; missing or unreadable entries
+/// are silently skipped.
+pub fn cleanup_orphaned_tmp_files() -> io::Result<()> {
+    let dir = match dirs::data_dir() {
+        Some(d) => d.join(APP_DIR_NAME),
+        None => return Ok(()),
+    };
+
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    cleanup_tmp_files_in(&dir);
+    Ok(())
+}
+
+/// Inner helper: delete `*.json.tmp` entries inside `dir`.
+///
+/// Per-file errors (already deleted, permission denied) are silently ignored.
+fn cleanup_tmp_files_in(dir: &Path) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.ends_with(".json.tmp"))
+                .unwrap_or(false)
+            {
+                let _ = fs::remove_file(&path);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stats::StatsSnapshot;
+    use crate::stats::{StatsExt, StatsSnapshot};
     use solitaire_core::game_state::DrawMode;
     use std::env;
 
@@ -108,5 +146,45 @@ mod tests {
         fs::write(&path, b"not valid json!!!").expect("write corrupt");
         let stats = load_stats_from(&path);
         assert_eq!(stats, StatsSnapshot::default());
+    }
+
+    /// Test the core cleanup logic by creating `.json.tmp` files in a temporary
+    /// directory, running the cleanup loop manually, and verifying removal.
+    #[test]
+    fn cleanup_removes_tmp_files() {
+        let dir = env::temp_dir().join("solitaire_cleanup_test");
+        fs::create_dir_all(&dir).expect("create test dir");
+
+        // Create a pair of .json.tmp files and one regular file that must survive.
+        let tmp1 = dir.join("stats.json.tmp");
+        let tmp2 = dir.join("progress.json.tmp");
+        let keep = dir.join("settings.json");
+        fs::write(&tmp1, b"orphan1").expect("write tmp1");
+        fs::write(&tmp2, b"orphan2").expect("write tmp2");
+        fs::write(&keep, b"{}").expect("write keep");
+
+        // Run the cleanup logic directly against our test directory.
+        cleanup_tmp_files_in(&dir);
+
+        assert!(!tmp1.exists(), "stats.json.tmp should have been removed");
+        assert!(!tmp2.exists(), "progress.json.tmp should have been removed");
+        assert!(keep.exists(), "settings.json must not be removed");
+
+        // Tidy up.
+        let _ = fs::remove_file(&keep);
+        let _ = fs::remove_dir(&dir);
+    }
+
+    /// Calling `cleanup_orphaned_tmp_files` on a box with no app data dir is a
+    /// no-op and must not return an error.
+    #[test]
+    fn cleanup_on_nonexistent_dir_is_ok() {
+        // We can't control whether the real app dir exists in the test
+        // environment, but the public function must at least not panic or
+        // return an Err when the directory is absent.
+        // The real implementation returns Ok(()) for missing dirs.
+        let result = cleanup_orphaned_tmp_files();
+        // The function is allowed to succeed whether or not the dir exists.
+        assert!(result.is_ok());
     }
 }

@@ -8,4 +8,10 @@ bevy           = { workspace = true }
 kira           = { workspace = true }
 solitaire_core = { workspace = true }
 solitaire_data = { workspace = true }
+solitaire_sync = { workspace = true }
 chrono         = { workspace = true }
+uuid           = { workspace = true }
+tokio          = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }

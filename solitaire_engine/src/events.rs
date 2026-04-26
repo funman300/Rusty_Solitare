@@ -3,6 +3,7 @@
 use bevy::prelude::Event;
 use solitaire_core::game_state::GameMode;
 use solitaire_core::pile::PileType;
+use solitaire_data::AchievementRecord;
 
 /// Request to move `count` cards from `from` to `to`. Fired by input systems,
 /// consumed by `GamePlugin`.
@@ -55,8 +56,8 @@ pub struct GameWonEvent {
 #[derive(Event, Debug, Clone, Copy)]
 pub struct CardFlippedEvent(pub u32);
 
-/// Achievement unlocked notification — name of the achievement.
-///
-/// Uses `String` as a placeholder; replaced with `AchievementRecord` in Phase 5.
+/// Achievement unlocked notification carrying the full `AchievementRecord` for
+/// the newly unlocked achievement. Consumed by the toast renderer and any
+/// persistence/UI systems that need unlock metadata.
 #[derive(Event, Debug, Clone)]
-pub struct AchievementUnlockedEvent(pub String);
+pub struct AchievementUnlockedEvent(pub AchievementRecord);

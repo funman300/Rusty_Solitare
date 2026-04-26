@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT l.display_name, l.best_score, l.best_time_secs, l.recorded_at\n           FROM leaderboard l\n           JOIN users u ON u.id = l.user_id\n           WHERE u.leaderboard_opt_in = 1\n           ORDER BY\n               CASE WHEN l.best_score IS NULL THEN 1 ELSE 0 END ASC,\n               l.best_score DESC,\n               CASE WHEN l.best_time_secs IS NULL THEN 1 ELSE 0 END ASC,\n               l.best_time_secs ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "display_name",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "best_score",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "best_time_secs",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "recorded_at",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "57c93a6acd7eea44d00412e62f0d3fed7ffbe4cd759353d29f38a8eb37f69112"
+}

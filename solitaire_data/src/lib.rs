@@ -35,11 +35,35 @@ pub trait SyncProvider: Send + Sync {
     }
 }
 
+/// Blanket impl so `Box<dyn SyncProvider + Send + Sync>` (returned by
+/// `provider_for_backend`) can be passed directly to `SyncPlugin::new`.
+#[async_trait]
+impl SyncProvider for Box<dyn SyncProvider + Send + Sync> {
+    async fn pull(&self) -> Result<SyncPayload, SyncError> {
+        (**self).pull().await
+    }
+    async fn push(&self, payload: &SyncPayload) -> Result<SyncResponse, SyncError> {
+        (**self).push(payload).await
+    }
+    fn backend_name(&self) -> &'static str {
+        (**self).backend_name()
+    }
+    fn is_authenticated(&self) -> bool {
+        (**self).is_authenticated()
+    }
+    async fn mirror_achievement(&self, id: &str) -> Result<(), SyncError> {
+        (**self).mirror_achievement(id).await
+    }
+}
+
 pub mod stats;
-pub use stats::StatsSnapshot;
+pub use stats::{StatsExt, StatsSnapshot};
 
 pub mod storage;
-pub use storage::{load_stats, load_stats_from, save_stats, save_stats_to, stats_file_path};
+pub use storage::{
+    cleanup_orphaned_tmp_files, load_stats, load_stats_from, save_stats, save_stats_to,
+    stats_file_path,
+};
 
 pub mod achievements;
 pub use achievements::{
@@ -62,4 +86,15 @@ pub mod challenge;
 pub use challenge::{challenge_count, challenge_seed_for, CHALLENGE_SEEDS};
 
 pub mod settings;
-pub use settings::{load_settings_from, save_settings_to, settings_file_path, Settings};
+pub use settings::{
+    load_settings_from, save_settings_to, settings_file_path, AnimSpeed, Settings, SyncBackend,
+    Theme,
+};
+
+pub mod auth_tokens;
+pub use auth_tokens::{
+    delete_tokens, load_access_token, load_refresh_token, store_tokens, TokenError,
+};
+
+pub mod sync_client;
+pub use sync_client::{provider_for_backend, LocalOnlyProvider, SolitaireServerClient};
