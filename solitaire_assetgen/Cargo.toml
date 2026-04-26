@@ -1,0 +1,12 @@
+[package]
+name = "solitaire_assetgen"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+# Dev-only utility: synthesizes placeholder SFX WAV files into `assets/audio/`.
+# Not depended on by any other workspace crate.
+
+[[bin]]
+name = "gen_sfx"
+path = "src/bin/gen_sfx.rs"

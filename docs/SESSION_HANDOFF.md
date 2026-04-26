@@ -2,7 +2,7 @@
 
 > Last updated: 2026-04-25
 > Branch: `master` — pushed to https://git.aleshym.co/funman300/Rusty_Solitare.git
-> Test count: **225 passing** (83 core + 54 data + 88 engine), `cargo clippy --workspace -- -D warnings` clean
+> Test count: **226 passing** (83 core + 54 data + 89 engine), `cargo clippy --workspace -- -D warnings` clean
 
 ---
 
@@ -153,13 +153,22 @@ All sub-phases (3A–3F) done. Plugins: `GamePlugin`, `TablePlugin`, `CardPlugin
 - `HelpPlugin`: **H** or `?` toggles a full-window cheat sheet listing all keybindings (gameplay, mode hotkeys, overlays). 3 unit tests.
 - `AnimationPlugin` now surfaces `ChallengeAdvancedEvent` as a 3-second toast ("Challenge N cleared!").
 
+### Phase 7 (part 2) — Synthesized SFX + AudioPlugin ✅ COMPLETE
+
+- New workspace crate `solitaire_assetgen` with bin `gen_sfx`. Synthesizes five 44.1kHz mono 16-bit PCM WAVs from a deterministic LCG noise source + sine/square synths into `assets/audio/`. Run with `cargo run -p solitaire_assetgen --bin gen_sfx`. Output is committed; end users never run the generator.
+- `AudioPlugin` (`solitaire_engine`): embeds the WAVs via `include_bytes!()`, decodes once via `kira::StaticSoundData::from_cursor`, plays on `DrawRequestEvent` (flip), `MoveRequestEvent` (place), `NewGameRequestEvent` (deal), `GameWonEvent` (fanfare). `card_invalid.wav` is loaded but unused — wiring it needs a `MoveRejectedEvent` (no such event today).
+- Backend handle stored as `NonSend` (cpal stream is `!Send` on some platforms). Plugin degrades gracefully if no audio device is available — logs a warning, gameplay continues silently.
+- Single decode unit test (`embedded_wavs_decode_successfully`) keeps the loader and generator in sync.
+
 ## What Is Next
 
-### Phase 7 (part 2+) — Audio + Pause Menu
+### Phase 7 (part 3+) — Pause Menu + Polish
 
-- Audio (`kira`): card deal/flip/place/invalid SFX, win fanfare, ambient loop. Volume sliders in a Settings overlay. **Blocker:** asset files are not yet in the repo; sourcing/recording these is the first step.
-- Pause menu: Esc currently logs a placeholder. Likely a small overlay similar to `HelpPlugin` with a `Paused` resource that gates `Time::delta_secs` propagation in `tick_elapsed_time` / `advance_time_attack`.
-- Onboarding: first-run banner pointing at the **H**/`?` cheat sheet (single-shot via `Settings.first_run_complete`).
+- **Pause menu**: Esc currently logs a placeholder. Likely a small overlay similar to `HelpPlugin` with a `Paused` resource that gates `Time::delta_secs` in `tick_elapsed_time` / `advance_time_attack`.
+- **`MoveRejectedEvent`** (small): emit from `end_drag` when a drop is on a real pile but validation fails, so `card_invalid.wav` finally has something to fire on.
+- **Volume controls**: Settings overlay with `sfx_volume` slider; persist via `solitaire_data::Settings` (already defined). Apply to kira's main-track gain.
+- **Ambient loop**: optional sixth WAV — needs taste, deferred.
+- **Onboarding**: first-run banner pointing at the **H**/`?` cheat sheet (single-shot via `Settings.first_run_complete`).
 
 ### Phase 8 — Sync
 

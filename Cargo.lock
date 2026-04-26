@@ -5673,6 +5673,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "solitaire_assetgen"
+version = "0.1.0"
+
+[[package]]
 name = "solitaire_core"
 version = "0.1.0"
 dependencies = [
