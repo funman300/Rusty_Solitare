@@ -119,4 +119,37 @@ mod tests {
         let p = pile_with(PileType::Tableau(0), vec![card(Suit::Hearts, Rank::Seven)]);
         assert!(can_place_on_tableau(&c, &p));
     }
+
+    #[test]
+    fn foundation_king_on_queen_completes_suit() {
+        // The last card placed to complete a foundation is always King on Queen.
+        let c = card(Suit::Spades, Rank::King);
+        let p = pile_with(PileType::Foundation(Suit::Spades), vec![card(Suit::Spades, Rank::Queen)]);
+        assert!(can_place_on_foundation(&c, &p, Suit::Spades));
+    }
+
+    #[test]
+    fn foundation_king_wrong_suit_is_invalid() {
+        // King of Hearts cannot go on a Spades foundation even if rank matches.
+        let c = card(Suit::Hearts, Rank::King);
+        let p = pile_with(PileType::Foundation(Suit::Spades), vec![card(Suit::Spades, Rank::Queen)]);
+        assert!(!can_place_on_foundation(&c, &p, Suit::Spades));
+    }
+
+    #[test]
+    fn tableau_ace_on_two_different_color_is_valid() {
+        // Ace (rank 1) can be placed on a Two of the opposite colour in the tableau.
+        // rank check: Ace.value() + 1 = 2 == Two.value() — passes.
+        let c = card(Suit::Hearts, Rank::Ace);
+        let p = pile_with(PileType::Tableau(0), vec![card(Suit::Spades, Rank::Two)]);
+        assert!(can_place_on_tableau(&c, &p));
+    }
+
+    #[test]
+    fn tableau_same_rank_different_color_is_invalid() {
+        // Two cards of the same rank cannot be stacked regardless of colour.
+        let c = card(Suit::Hearts, Rank::Nine);
+        let p = pile_with(PileType::Tableau(0), vec![card(Suit::Spades, Rank::Nine)]);
+        assert!(!can_place_on_tableau(&c, &p));
+    }
 }
