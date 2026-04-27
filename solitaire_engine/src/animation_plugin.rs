@@ -485,6 +485,82 @@ mod tests {
     }
 
     #[test]
+    fn anim_speed_fast_is_less_than_normal() {
+        assert!(anim_speed_to_secs(&AnimSpeed::Fast) < anim_speed_to_secs(&AnimSpeed::Normal));
+    }
+
+    #[test]
+    fn anim_speed_instant_is_zero() {
+        assert_eq!(anim_speed_to_secs(&AnimSpeed::Instant), 0.0);
+    }
+
+    #[test]
+    fn toast_dismissed_after_timer_reaches_zero() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(AnimationPlugin);
+
+        // Manually spawn a toast with a timer that's already expired.
+        app.world_mut().spawn((ToastOverlay, ToastTimer(-0.001)));
+        app.update();
+
+        // The toast entity must have been despawned.
+        let remaining = app
+            .world_mut()
+            .query::<&ToastTimer>()
+            .iter(app.world())
+            .count();
+        assert_eq!(remaining, 0, "expired toast must be despawned");
+    }
+
+    #[test]
+    fn toast_not_dismissed_before_timer_reaches_zero() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(AnimationPlugin);
+
+        // Large positive timer — should survive one update.
+        app.world_mut().spawn((ToastOverlay, ToastTimer(100.0)));
+        app.update();
+
+        let remaining = app
+            .world_mut()
+            .query::<&ToastTimer>()
+            .iter(app.world())
+            .count();
+        assert_eq!(remaining, 1, "unexpired toast must not be despawned");
+    }
+
+    #[test]
+    fn info_toast_event_spawns_toast_overlay() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(AnimationPlugin);
+
+        app.world_mut().send_event(InfoToastEvent("hello".to_string()));
+        app.update();
+
+        let count = app
+            .world_mut()
+            .query::<&ToastOverlay>()
+            .iter(app.world())
+            .count();
+        assert_eq!(count, 1, "InfoToastEvent must spawn exactly one ToastOverlay");
+    }
+
+    #[test]
+    fn settings_changed_event_updates_slide_duration() {
+        use solitaire_data::Settings;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(AnimationPlugin);
+
+        let mut fast_settings = Settings::default();
+        fast_settings.animation_speed = AnimSpeed::Fast;
+        app.world_mut().send_event(SettingsChangedEvent(fast_settings));
+        app.update();
+
+        let dur = app.world().resource::<EffectiveSlideDuration>().slide_secs;
+        assert!((dur - anim_speed_to_secs(&AnimSpeed::Fast)).abs() < 1e-6);
+    }
+
+    #[test]
     fn win_cascade_adds_anim_to_all_52_cards() {
         let mut app = app_with_anim();
 

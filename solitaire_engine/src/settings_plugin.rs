@@ -882,4 +882,64 @@ mod tests {
         let mut cursor = events.get_cursor();
         assert_eq!(cursor.read(events).count(), 0);
     }
+
+    #[test]
+    fn volume_clamped_at_zero_does_not_emit_event() {
+        let mut app = headless_app();
+        app.world_mut().resource_mut::<SettingsResource>().0.sfx_volume = 0.0;
+
+        press(&mut app, KeyCode::BracketLeft);
+        app.update();
+
+        let after = app.world().resource::<SettingsResource>().0.sfx_volume;
+        assert!(after >= 0.0, "volume must not go below zero");
+
+        let events = app.world().resource::<Events<SettingsChangedEvent>>();
+        let mut cursor = events.get_cursor();
+        assert_eq!(cursor.read(events).count(), 0, "no event when clamped at floor");
+    }
+
+    #[test]
+    fn pressing_o_toggles_settings_screen_flag() {
+        let mut app = headless_app();
+        assert!(!app.world().resource::<SettingsScreen>().0, "screen is closed initially");
+
+        press(&mut app, KeyCode::KeyO);
+        app.update();
+        assert!(app.world().resource::<SettingsScreen>().0, "O opens settings");
+
+        press(&mut app, KeyCode::KeyO);
+        app.update();
+        assert!(!app.world().resource::<SettingsScreen>().0, "second O closes settings");
+    }
+
+    // cycle_unlocked pure-function tests
+    #[test]
+    fn cycle_unlocked_wraps_at_end() {
+        // [0, 1, 2] → cycling from 2 wraps to 0
+        assert_eq!(cycle_unlocked(&[0, 1, 2], 2), 0);
+    }
+
+    #[test]
+    fn cycle_unlocked_advances_normally() {
+        assert_eq!(cycle_unlocked(&[0, 1, 2], 0), 1);
+        assert_eq!(cycle_unlocked(&[0, 1, 2], 1), 2);
+    }
+
+    #[test]
+    fn cycle_unlocked_single_element_stays() {
+        // Only one unlockable — cycling always returns it.
+        assert_eq!(cycle_unlocked(&[0], 0), 0);
+    }
+
+    #[test]
+    fn cycle_unlocked_current_not_in_list_falls_back_to_second() {
+        // current=5 is not in [0,1,2]; falls back to pos=0, so next = unlocked[1] = 1
+        assert_eq!(cycle_unlocked(&[0, 1, 2], 5), 1);
+    }
+
+    #[test]
+    fn cycle_unlocked_empty_returns_zero() {
+        assert_eq!(cycle_unlocked(&[], 0), 0);
+    }
 }
