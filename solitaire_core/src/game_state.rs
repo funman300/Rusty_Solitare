@@ -475,6 +475,63 @@ mod tests {
     }
 
     #[test]
+    fn draw_three_partial_draw_when_fewer_than_three_remain() {
+        let mut g = GameState::new(42, DrawMode::DrawThree);
+        // Replace the stock with exactly 2 cards so the draw is a partial batch.
+        let two_cards: Vec<Card> = g.piles[&PileType::Stock].cards[..2].to_vec();
+        g.piles.get_mut(&PileType::Stock).unwrap().cards = two_cards;
+        g.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+
+        g.draw().unwrap();
+
+        assert_eq!(g.piles[&PileType::Waste].cards.len(), 2, "only 2 cards should move when stock has 2");
+        assert!(g.piles[&PileType::Stock].cards.is_empty());
+    }
+
+    #[test]
+    fn draw_three_all_drawn_cards_are_face_up() {
+        let mut g = GameState::new(42, DrawMode::DrawThree);
+        g.draw().unwrap();
+        assert!(
+            g.piles[&PileType::Waste].cards.iter().all(|c| c.face_up),
+            "all drawn cards must be face-up in waste"
+        );
+    }
+
+    #[test]
+    fn draw_three_undo_returns_all_cards_to_stock() {
+        let mut g = GameState::new(42, DrawMode::DrawThree);
+        let stock_before = g.piles[&PileType::Stock].cards.len();
+
+        g.draw().unwrap();
+        assert_eq!(g.piles[&PileType::Waste].cards.len(), 3);
+
+        g.undo().unwrap();
+        assert_eq!(g.piles[&PileType::Stock].cards.len(), stock_before);
+        assert!(g.piles[&PileType::Waste].cards.is_empty());
+    }
+
+    #[test]
+    fn draw_three_recycle_restores_waste_to_stock_face_down() {
+        let mut g = GameState::new(42, DrawMode::DrawThree);
+        // Drain all 24 stock cards into waste via repeated draws.
+        while !g.piles[&PileType::Stock].cards.is_empty() {
+            g.draw().unwrap();
+        }
+        let waste_count = g.piles[&PileType::Waste].cards.len();
+        assert!(waste_count > 0);
+
+        // Recycle: drawing when stock is empty returns all waste cards to stock.
+        g.draw().unwrap();
+        assert_eq!(g.piles[&PileType::Stock].cards.len(), waste_count);
+        assert!(g.piles[&PileType::Waste].cards.is_empty());
+        assert!(
+            g.piles[&PileType::Stock].cards.iter().all(|c| !c.face_up),
+            "recycled cards must be face-down"
+        );
+    }
+
+    #[test]
     fn draw_from_empty_stock_recycles_waste() {
         let mut g = new_game();
         while !g.piles[&PileType::Stock].cards.is_empty() {
@@ -691,6 +748,43 @@ mod tests {
         assert_eq!(g.undo_count, u32::MAX, "undo_count must saturate at u32::MAX");
     }
 
+    // --- Fields excluded from undo snapshot ---
+
+    #[test]
+    fn undo_does_not_roll_back_elapsed_seconds() {
+        // elapsed_seconds tracks wall time and must be monotonic; undo must never
+        // reduce it, otherwise the time-bonus calculation would be gamed.
+        let mut g = new_game();
+        g.elapsed_seconds = 120;
+        g.draw().unwrap();
+        g.undo().unwrap();
+        assert_eq!(g.elapsed_seconds, 120, "undo must leave elapsed_seconds unchanged");
+    }
+
+    #[test]
+    fn undo_does_not_roll_back_recycle_count() {
+        // recycle_count is a lifetime counter used for the 'comeback' achievement;
+        // rolling it back on undo would make the condition unachievable after recycling.
+        let mut g = new_game();
+        // Drain stock and recycle to increment recycle_count.
+        while !g.piles[&PileType::Stock].cards.is_empty() {
+            g.draw().unwrap();
+        }
+        g.draw().unwrap(); // recycle
+        assert_eq!(g.recycle_count, 1);
+        // Now draw one more card and undo it.
+        g.draw().unwrap();
+        g.undo().unwrap();
+        assert_eq!(g.recycle_count, 1, "undo must leave recycle_count unchanged");
+    }
+
+    #[test]
+    fn undo_after_win_returns_game_already_won() {
+        let mut g = new_game();
+        g.is_won = true;
+        assert_eq!(g.undo(), Err(MoveError::GameAlreadyWon));
+    }
+
     // --- Scoring ---
 
     #[test]
@@ -751,6 +845,37 @@ mod tests {
         // Note: Verifying score increases on actual moves would require
         // hand-crafting a legal move from the dealt state. We rely on the
         // fact that move_cards' score path is identical to Classic.
+    }
+
+    // --- GameMode: TimeAttack ---
+
+    #[test]
+    fn time_attack_mode_field_persists() {
+        let g = GameState::new_with_mode(1, DrawMode::DrawOne, GameMode::TimeAttack);
+        assert_eq!(g.mode, GameMode::TimeAttack);
+    }
+
+    #[test]
+    fn time_attack_allows_undo() {
+        let mut g = GameState::new_with_mode(42, DrawMode::DrawOne, GameMode::TimeAttack);
+        g.draw().unwrap();
+        // TimeAttack does not disable undo — only Challenge does.
+        assert!(g.undo().is_ok(), "undo must be permitted in TimeAttack mode");
+    }
+
+    #[test]
+    fn time_attack_score_starts_at_zero() {
+        let g = GameState::new_with_mode(42, DrawMode::DrawOne, GameMode::TimeAttack);
+        assert_eq!(g.score, 0);
+    }
+
+    #[test]
+    fn time_attack_draw_three_combination() {
+        // TimeAttack + DrawThree is a valid combination; verify construction.
+        let g = GameState::new_with_mode(7, DrawMode::DrawThree, GameMode::TimeAttack);
+        assert_eq!(g.mode, GameMode::TimeAttack);
+        assert_eq!(g.draw_mode, DrawMode::DrawThree);
+        assert_eq!(g.piles[&PileType::Stock].cards.len(), 24);
     }
 
     // --- Auto-complete ---

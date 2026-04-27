@@ -244,4 +244,25 @@ mod tests {
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].total_xp, total_xp);
     }
+
+    #[test]
+    fn zen_mode_win_awards_base_xp() {
+        // Zen mode suppresses score display but XP is still awarded normally.
+        // score=0 in the event (Zen keeps score at 0), time=300 (no speed bonus),
+        // undo_count=0 so no-undo bonus applies: expected 50+25=75.
+        let mut app = headless_app();
+        app.world_mut()
+            .resource_mut::<GameStateResource>()
+            .0
+            .mode = solitaire_core::game_state::GameMode::Zen;
+
+        app.world_mut().send_event(GameWonEvent {
+            score: 0,        // Zen mode keeps score at 0
+            time_seconds: 300,
+        });
+        app.update();
+
+        let xp = app.world().resource::<ProgressResource>().0.total_xp;
+        assert_eq!(xp, 75, "Zen win: base 50 + no-undo 25 = 75");
+    }
 }

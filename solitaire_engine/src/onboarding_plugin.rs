@@ -4,6 +4,10 @@
 //! welcome banner pointing at the **H**/`?` cheat sheet. The first key or
 //! mouse-button press dismisses it, sets the flag, and persists settings —
 //! so returning players never see it again.
+//!
+//! **Key highlights** (#49): The key names **D**, **H**, and **U** inside the
+//! instructional text are rendered in a bright orange colour via `TextSpan`
+//! children tagged with `KeyHighlightSpan`.
 
 use std::path::PathBuf;
 
@@ -15,6 +19,18 @@ use crate::settings_plugin::{SettingsResource, SettingsStoragePath};
 /// Marker on the onboarding overlay root node.
 #[derive(Component, Debug)]
 pub struct OnboardingScreen;
+
+/// Marker on `TextSpan` entities that display a key name (D, H, U …) in the
+/// onboarding banner.  Colour distinct from body text; usable by tests and any
+/// future flash-animation system.
+#[derive(Component, Debug)]
+pub struct KeyHighlightSpan;
+
+/// Body text colour — golden yellow matching the rest of the UI.
+const BODY_COLOR: Color = Color::srgb(1.0, 0.87, 0.0);
+
+/// Bright orange used for key-name spans so they stand out from body text.
+const KEY_COLOR: Color = Color::srgb(1.0, 0.55, 0.1);
 
 pub struct OnboardingPlugin;
 
@@ -66,21 +82,6 @@ fn persist(path: Option<&Option<PathBuf>>, settings: &Settings) {
 }
 
 fn spawn_onboarding_screen(commands: &mut Commands) {
-    let lines: Vec<(String, f32)> = vec![
-        ("Welcome to Solitaire Quest!".to_string(), 40.0),
-        (String::new(), 20.0),
-        (
-            "Drag cards between piles. Press D to draw, U to undo.".to_string(),
-            22.0,
-        ),
-        (
-            "Press H or ? at any time to see the full controls.".to_string(),
-            22.0,
-        ),
-        (String::new(), 20.0),
-        ("Press any key to begin".to_string(), 20.0),
-    ];
-
     commands
         .spawn((
             OnboardingScreen,
@@ -100,16 +101,62 @@ fn spawn_onboarding_screen(commands: &mut Commands) {
             ZIndex(230),
         ))
         .with_children(|b| {
-            for (line, size) in lines {
-                b.spawn((
-                    Text::new(line),
-                    TextFont {
-                        font_size: size,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(1.0, 0.87, 0.0)),
+            // Title
+            b.spawn((
+                Text::new("Welcome to Solitaire Quest!"),
+                TextFont { font_size: 40.0, ..default() },
+                TextColor(BODY_COLOR),
+            ));
+
+            // Spacer
+            b.spawn((Text::new(""), TextFont { font_size: 20.0, ..default() }));
+
+            // Instruction line: "Drag cards between piles. Press D to draw, U to undo."
+            // D and U rendered as KeyHighlightSpan children with KEY_COLOR.
+            b.spawn((
+                Text::new("Drag cards between piles. Press "),
+                TextFont { font_size: 22.0, ..default() },
+                TextColor(BODY_COLOR),
+            ))
+            .with_children(|t| {
+                t.spawn((
+                    TextSpan::new("D"),
+                    TextColor(KEY_COLOR),
+                    KeyHighlightSpan,
                 ));
-            }
+                t.spawn((TextSpan::new(" to draw, "), TextColor(BODY_COLOR)));
+                t.spawn((TextSpan::new("U"), TextColor(KEY_COLOR)));
+                t.spawn((TextSpan::new(" to undo."), TextColor(BODY_COLOR)));
+            });
+
+            // Help line: "Press H or ? at any time to see the full controls."
+            // H rendered as a KeyHighlightSpan child with KEY_COLOR.
+            b.spawn((
+                Text::new("Press "),
+                TextFont { font_size: 22.0, ..default() },
+                TextColor(BODY_COLOR),
+            ))
+            .with_children(|t| {
+                t.spawn((
+                    TextSpan::new("H"),
+                    TextColor(KEY_COLOR),
+                    KeyHighlightSpan,
+                ));
+                t.spawn((
+                    TextSpan::new(" or ? at any time to see the full controls."),
+                    TextColor(BODY_COLOR),
+                ));
+            });
+
+            // Spacer
+            b.spawn((Text::new(""), TextFont { font_size: 20.0, ..default() }));
+
+            // Dismiss hint
+            b.spawn((
+                Text::new("Press any key to begin"),
+                TextFont { font_size: 20.0, ..default() },
+                TextColor(Color::srgb(0.8, 0.8, 0.8)),
+            ));
         });
 }
 
@@ -187,5 +234,29 @@ mod tests {
         app.update();
 
         assert_eq!(count_screens(&mut app), 0);
+    }
+
+    #[test]
+    fn banner_has_two_key_highlight_spans() {
+        // D and H must be tagged KeyHighlightSpan so their colour is distinct
+        // from body text and future flash-animation systems can target them.
+        let mut app = headless_app();
+        app.update();
+        let count = app
+            .world_mut()
+            .query::<&KeyHighlightSpan>()
+            .iter(app.world())
+            .count();
+        assert_eq!(count, 2, "expected KeyHighlightSpan for D and H");
+    }
+
+    #[test]
+    fn key_highlight_colour_differs_from_body_colour() {
+        // Regression guard: KEY_COLOR must not accidentally match BODY_COLOR.
+        assert_ne!(
+            format!("{KEY_COLOR:?}"),
+            format!("{BODY_COLOR:?}"),
+            "key highlight colour should differ from body text colour"
+        );
     }
 }

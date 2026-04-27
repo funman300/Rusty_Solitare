@@ -16,7 +16,7 @@ use axum::{
     response::Response,
 };
 use chrono::Utc;
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::Deserialize;
 use serde_json::Value;
 use solitaire_server::build_test_router;
@@ -1050,5 +1050,90 @@ async fn login_trims_whitespace_from_username() {
         resp.status(),
         StatusCode::OK,
         "login with whitespace-padded username must succeed"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Security tests
+// ---------------------------------------------------------------------------
+
+/// `POST /api/sync/push` with a body exceeding the 1 MB limit must return 413.
+#[tokio::test]
+async fn push_oversized_body_returns_413() {
+    set_jwt_secret();
+    let app = build_test_router(test_pool().await);
+
+    let (access, _) = register_user(app.clone(), "sizetest", "password1!").await;
+
+    // 1_100_000-byte string embedded in JSON comfortably exceeds the 1 MB limit.
+    let big_string = "x".repeat(1_100_000);
+    let body_bytes =
+        serde_json::to_vec(&serde_json::json!({ "garbage": big_string })).unwrap();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/sync/push")
+        .header("content-type", "application/json")
+        .header("Authorization", format!("Bearer {access}"))
+        .header("x-forwarded-for", TEST_CLIENT_IP)
+        .body(Body::from(body_bytes))
+        .expect("failed to build oversized request");
+
+    let resp = app.oneshot(req).await.expect("oneshot failed");
+    assert_eq!(
+        resp.status(),
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "oversized body must be rejected with 413"
+    );
+}
+
+/// A JWT whose `exp` is in the past must be rejected with 401 on protected routes.
+#[tokio::test]
+async fn expired_access_token_returns_401() {
+    set_jwt_secret();
+    let app = build_test_router(test_pool().await);
+
+    // Craft a token that expired 2 hours ago — well past jsonwebtoken's 60 s leeway.
+    #[derive(serde::Serialize)]
+    struct ExpiredClaims {
+        sub: String,
+        exp: usize,
+        kind: String,
+    }
+    let exp = (chrono::Utc::now() - chrono::Duration::hours(2)).timestamp() as usize;
+    let expired_token = encode(
+        &Header::default(),
+        &ExpiredClaims {
+            sub: "00000000-0000-0000-0000-000000000000".into(),
+            exp,
+            kind: "access".into(),
+        },
+        &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
+    )
+    .unwrap();
+
+    let resp = get_authed(app, "/api/sync/pull", &expired_token).await;
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "expired JWT must be rejected with 401"
+    );
+}
+
+/// A refresh token must be rejected when used as a Bearer token on protected routes.
+#[tokio::test]
+async fn refresh_token_rejected_on_protected_routes() {
+    set_jwt_secret();
+    let app = build_test_router(test_pool().await);
+
+    let (_, refresh) = register_user(app.clone(), "kindtest", "password1!").await;
+
+    // Using the refresh token (kind = "refresh") as a Bearer on a protected route
+    // must return 401 because the middleware requires kind = "access".
+    let resp = get_authed(app, "/api/sync/pull", &refresh).await;
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "refresh token must be rejected on protected endpoints"
     );
 }

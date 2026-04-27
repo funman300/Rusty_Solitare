@@ -642,4 +642,26 @@ mod tests {
         assert_eq!(merged.progress.weekly_goal_week_iso, Some("2026-W17".to_string()));
         assert_eq!(merged.progress.weekly_goal_progress.get("weekly_5_wins"), Some(&1));
     }
+
+    #[test]
+    fn fastest_win_both_max_sentinel_stays_max() {
+        // Both sides have u64::MAX (no wins recorded on either) — result must remain MAX,
+        // not wrap or clamp to 0.
+        let local = default_payload();
+        let remote = default_payload();
+        assert_eq!(local.stats.fastest_win_seconds, u64::MAX);
+        assert_eq!(remote.stats.fastest_win_seconds, u64::MAX);
+        let (merged, _) = merge(&local, &remote);
+        assert_eq!(merged.stats.fastest_win_seconds, u64::MAX);
+    }
+
+    #[test]
+    fn fastest_win_one_side_max_takes_real_value() {
+        // Local has no wins (u64::MAX); remote has a real win. Merged must use the real time.
+        let local = default_payload(); // fastest_win_seconds = u64::MAX
+        let mut remote = default_payload();
+        remote.stats.fastest_win_seconds = 300;
+        let (merged, _) = merge(&local, &remote);
+        assert_eq!(merged.stats.fastest_win_seconds, 300);
+    }
 }

@@ -21,7 +21,8 @@ pub fn can_place_on_tableau(card: &Card, pile: &Pile) -> bool {
     match pile.cards.last() {
         None => card.rank.value() == 13,
         Some(top) => {
-            card.rank.value() + 1 == top.rank.value()
+            top.face_up
+                && card.rank.value() + 1 == top.rank.value()
                 && card.suit.is_red() != top.suit.is_red()
         }
     }
@@ -150,6 +151,16 @@ mod tests {
         // Two cards of the same rank cannot be stacked regardless of colour.
         let c = card(Suit::Hearts, Rank::Nine);
         let p = pile_with(PileType::Tableau(0), vec![card(Suit::Spades, Rank::Nine)]);
+        assert!(!can_place_on_tableau(&c, &p));
+    }
+
+    #[test]
+    fn tableau_face_down_destination_top_is_invalid() {
+        // A face-down top card must never be a valid placement target.
+        let c = card(Suit::Hearts, Rank::Nine);
+        let mut top = card(Suit::Spades, Rank::Ten);
+        top.face_up = false;
+        let p = pile_with(PileType::Tableau(0), vec![top]);
         assert!(!can_place_on_tableau(&c, &p));
     }
 }

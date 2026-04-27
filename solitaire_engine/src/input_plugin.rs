@@ -1,9 +1,12 @@
 //! Keyboard + mouse input for the game board.
 //!
+//! All systems exit immediately when `PausedResource(true)` — no moves,
+//! draws, undos, or drags are processed while the pause overlay is showing.
+//!
 //! Keyboard:
 //! - `U` → `UndoRequestEvent`
 //! - `N` → `NewGameRequestEvent { seed: None }`
-//! - `D` → `DrawRequestEvent`
+//! - `D` / `Space` → `DrawRequestEvent`
 //! - `Esc` → handled by `PausePlugin` (overlay toggle + paused flag)
 //!
 //! Mouse:
@@ -13,23 +16,26 @@
 //!   On rejection, the drag cards snap back to their origin via a
 //!   `StateChangedEvent` re-sync.
 
+use std::collections::HashMap;
+
 use bevy::input::ButtonInput;
 use bevy::math::{Vec2, Vec3};
 use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
-use solitaire_core::card::Suit;
+use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
+use solitaire_core::card::{Card, Suit};
 use solitaire_core::game_state::GameState;
 use solitaire_core::pile::PileType;
 use solitaire_core::rules::{can_place_on_foundation, can_place_on_tableau};
 
-use crate::card_plugin::{CardEntity, TABLEAU_FAN_FRAC};
+use crate::card_plugin::{CardEntity, HintHighlight, TABLEAU_FAN_FRAC};
 use solitaire_core::game_state::DrawMode;
 use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
 use crate::events::{
-    DrawRequestEvent, InfoToastEvent, MoveRejectedEvent, MoveRequestEvent, NewGameConfirmEvent,
-    NewGameRequestEvent, StateChangedEvent, UndoRequestEvent,
+    DrawRequestEvent, ForfeitEvent, InfoToastEvent, MoveRejectedEvent, MoveRequestEvent,
+    NewGameConfirmEvent, NewGameRequestEvent, StateChangedEvent, UndoRequestEvent,
 };
 use crate::game_plugin::GameMutation;
+use crate::pause_plugin::PausedResource;
 use crate::progress_plugin::ProgressResource;
 use crate::layout::{Layout, LayoutResource};
 use crate::resources::{DragState, GameStateResource};
@@ -50,17 +56,20 @@ impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<NewGameConfirmEvent>()
             .add_event::<InfoToastEvent>()
+            .add_event::<ForfeitEvent>()
             .add_systems(
                 Update,
                 (
                     handle_keyboard,
                     handle_stock_click,
+                    handle_double_click,
                     start_drag,
                     follow_drag,
                     end_drag.before(GameMutation),
                 )
                     .chain(),
-            );
+            )
+            .add_systems(Update, handle_fullscreen);
     }
 }
 
@@ -70,8 +79,9 @@ const NEW_GAME_CONFIRM_WINDOW: f32 = 3.0;
 #[allow(clippy::too_many_arguments)]
 fn handle_keyboard(
     keys: Res<ButtonInput<KeyCode>>,
+    paused: Option<Res<PausedResource>>,
     progress: Option<Res<ProgressResource>>,
-    game: Option<Res<crate::resources::GameStateResource>>,
+    game: Option<Res<GameStateResource>>,
     time: Res<Time>,
     mut confirm_countdown: Local<f32>,
     mut undo: EventWriter<UndoRequestEvent>,
@@ -79,7 +89,14 @@ fn handle_keyboard(
     mut confirm_event: EventWriter<NewGameConfirmEvent>,
     mut info_toast: EventWriter<InfoToastEvent>,
     mut draw: EventWriter<DrawRequestEvent>,
+    mut forfeit: EventWriter<ForfeitEvent>,
+    mut commands: Commands,
+    card_entities: Query<(Entity, &CardEntity, &Sprite)>,
+    layout: Option<Res<LayoutResource>>,
 ) {
+    if paused.is_some_and(|p| p.0) {
+        return;
+    }
     // Tick down any active confirmation window.
     if *confirm_countdown > 0.0 {
         *confirm_countdown -= time.delta_secs();
@@ -93,8 +110,9 @@ fn handle_keyboard(
     }
     if keys.just_pressed(KeyCode::KeyN) {
         let active_game = game.as_ref().is_some_and(|g| g.0.move_count > 0 && !g.0.is_won);
-        if !active_game {
-            // No active game — start immediately.
+        let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+        if shift_held || !active_game {
+            // Shift+N or no active game — start immediately, no confirmation.
             new_game.send(NewGameRequestEvent::default());
             *confirm_countdown = 0.0;
         } else if *confirm_countdown > 0.0 {
@@ -122,20 +140,78 @@ fn handle_keyboard(
             )));
         }
     }
-    if keys.just_pressed(KeyCode::KeyD) {
+    if keys.just_pressed(KeyCode::KeyD) || keys.just_pressed(KeyCode::Space) {
         draw.send(DrawRequestEvent);
     }
+    // H — show a hint (highlight the source card of the best available move).
+    if keys.just_pressed(KeyCode::KeyH) {
+        if let Some(ref g) = game {
+            if !g.0.is_won {
+                if let Some(ref layout_res) = layout {
+                    if let Some((from, _to, _count)) = find_hint(&g.0) {
+                        // Find the top face-up card in the source pile.
+                        let top_card_id = g.0.piles.get(&from)
+                            .and_then(|p| p.cards.last().filter(|c| c.face_up))
+                            .map(|c| c.id);
+                        if let Some(card_id) = top_card_id {
+                            for (entity, card_entity, _sprite) in card_entities.iter() {
+                                if card_entity.card_id == card_id {
+                                    commands.entity(entity)
+                                        .insert(HintHighlight { remaining: 1.5 })
+                                        .insert(Sprite {
+                                            color: Color::srgba(1.0, 1.0, 0.4, 1.0),
+                                            custom_size: Some(layout_res.0.card_size),
+                                            ..default()
+                                        });
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        info_toast.send(InfoToastEvent("No hints available".to_string()));
+                    }
+                }
+            }
+        }
+    }
+    // G — forfeit the current game (only when a game is actually in progress).
+    if keys.just_pressed(KeyCode::KeyG) {
+        let active_game = game.as_ref().is_some_and(|g| g.0.move_count > 0 && !g.0.is_won);
+        if active_game {
+            forfeit.send(ForfeitEvent);
+        }
+    }
     // Esc is handled by `PausePlugin` (overlay toggle + paused flag).
+}
+
+/// `F11` toggles between borderless-fullscreen and windowed mode.
+/// Not gated by the pause flag — the player can always resize the window.
+fn handle_fullscreen(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut windows: Query<&mut Window, With<PrimaryWindow>>,
+) {
+    if !keys.just_pressed(KeyCode::F11) {
+        return;
+    }
+    let Ok(mut window) = windows.get_single_mut() else { return };
+    window.mode = match window.mode {
+        WindowMode::Windowed => WindowMode::BorderlessFullscreen(MonitorSelection::Current),
+        _ => WindowMode::Windowed,
+    };
 }
 
 fn handle_stock_click(
     buttons: Res<ButtonInput<MouseButton>>,
     drag: Res<DragState>,
+    paused: Option<Res<PausedResource>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     layout: Option<Res<LayoutResource>>,
     mut draw: EventWriter<DrawRequestEvent>,
 ) {
+    if paused.is_some_and(|p| p.0) {
+        return;
+    }
     if !buttons.just_pressed(MouseButton::Left) || !drag.is_idle() {
         return;
     }
@@ -154,8 +230,10 @@ fn handle_stock_click(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn start_drag(
     buttons: Res<ButtonInput<MouseButton>>,
+    paused: Option<Res<PausedResource>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     layout: Option<Res<LayoutResource>>,
@@ -163,6 +241,9 @@ fn start_drag(
     mut drag: ResMut<DragState>,
     mut card_transforms: Query<(&CardEntity, &mut Transform)>,
 ) {
+    if paused.is_some_and(|p| p.0) {
+        return;
+    }
     if !buttons.just_pressed(MouseButton::Left) || !drag.is_idle() {
         return;
     }
@@ -238,6 +319,7 @@ fn follow_drag(
 #[allow(clippy::too_many_arguments)]
 fn end_drag(
     buttons: Res<ButtonInput<MouseButton>>,
+    paused: Option<Res<PausedResource>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     layout: Option<Res<LayoutResource>>,
@@ -247,6 +329,10 @@ fn end_drag(
     mut rejected: EventWriter<MoveRejectedEvent>,
     mut changed: EventWriter<StateChangedEvent>,
 ) {
+    if paused.is_some_and(|p| p.0) {
+        drag.clear();
+        return;
+    }
     if !buttons.just_released(MouseButton::Left) || drag.is_idle() {
         return;
     }
@@ -486,6 +572,146 @@ fn pile_drop_rect(pile: &PileType, layout: &Layout, game: &GameState) -> (Vec2, 
     (center, layout.card_size)
 }
 
+// ---------------------------------------------------------------------------
+// Task #27 — Double-click to auto-move
+// ---------------------------------------------------------------------------
+
+/// Maximum seconds between two clicks to count as a double-click.
+const DOUBLE_CLICK_WINDOW: f32 = 0.35;
+
+/// Find the best legal destination for `card` — Foundation first, then Tableau.
+///
+/// Returns `None` if no legal move exists from the card's current location.
+pub fn best_destination(card: &Card, game: &GameState) -> Option<PileType> {
+    // Try all four foundations first.
+    for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
+        let dest = PileType::Foundation(suit);
+        if let Some(pile) = game.piles.get(&dest) {
+            if can_place_on_foundation(card, pile, suit) {
+                return Some(dest);
+            }
+        }
+    }
+    // Then try all seven tableau piles.
+    for i in 0..7_usize {
+        let dest = PileType::Tableau(i);
+        if let Some(pile) = game.piles.get(&dest) {
+            if can_place_on_tableau(card, pile) {
+                return Some(dest);
+            }
+        }
+    }
+    None
+}
+
+/// System that detects double-clicks on face-up cards and fires `MoveRequestEvent`
+/// to the best legal destination (foundation before tableau).
+#[allow(clippy::too_many_arguments)]
+fn handle_double_click(
+    buttons: Res<ButtonInput<MouseButton>>,
+    paused: Option<Res<PausedResource>>,
+    time: Res<Time>,
+    drag: Res<DragState>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    cameras: Query<(&Camera, &GlobalTransform)>,
+    layout: Option<Res<LayoutResource>>,
+    game: Res<GameStateResource>,
+    mut last_click: Local<HashMap<u32, f32>>,
+    mut moves: EventWriter<MoveRequestEvent>,
+) {
+    if paused.is_some_and(|p| p.0) {
+        return;
+    }
+    if !buttons.just_pressed(MouseButton::Left) || !drag.is_idle() {
+        return;
+    }
+    let Some(layout) = layout else { return };
+    let Some(world) = cursor_world(&windows, &cameras) else { return };
+
+    // Identify which card was clicked (must be face-up and draggable).
+    let Some((pile, stack_index, card_ids)) = find_draggable_at(world, &game.0, &layout.0) else {
+        return;
+    };
+    // Only auto-move a single card (top card of the stack).
+    let Some(&top_card_id) = card_ids.last() else { return };
+    // The top draggable card is at `stack_index + card_ids.len() - 1`.
+    let top_index = stack_index + card_ids.len() - 1;
+    let Some(card) = game.0.piles.get(&pile)
+        .and_then(|p| p.cards.get(top_index)) else { return };
+
+    if !card.face_up || card.id != top_card_id {
+        return;
+    }
+
+    let now = time.elapsed_secs();
+    let prev = last_click.get(&top_card_id).copied().unwrap_or(f32::NEG_INFINITY);
+
+    if now - prev <= DOUBLE_CLICK_WINDOW {
+        // Double-click detected — find and fire the best move.
+        last_click.remove(&top_card_id);
+        if let Some(dest) = best_destination(card, &game.0) {
+            moves.send(MoveRequestEvent {
+                from: pile,
+                to: dest,
+                count: 1,
+            });
+        }
+    } else {
+        // Single click — record the time.
+        last_click.insert(top_card_id, now);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task #28 — Hint system helpers
+// ---------------------------------------------------------------------------
+
+/// Find one valid move in the current game state.
+///
+/// Returns `(from, to, count)` for the first legal move found, or `None` if
+/// no move is available. Sources checked: Waste top, then Tableau 0–6.
+/// Destinations checked: all 4 Foundations, then all 7 Tableau piles.
+pub fn find_hint(game: &GameState) -> Option<(PileType, PileType, usize)> {
+    let sources: Vec<PileType> = {
+        let mut s = vec![PileType::Waste];
+        for i in 0..7_usize {
+            s.push(PileType::Tableau(i));
+        }
+        s
+    };
+
+    let suits = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
+
+    for from in &sources {
+        let Some(from_pile) = game.piles.get(from) else { continue };
+        let Some(card) = from_pile.cards.last().filter(|c| c.face_up) else { continue };
+
+        // Check foundations.
+        for &suit in &suits {
+            let dest = PileType::Foundation(suit);
+            if let Some(dest_pile) = game.piles.get(&dest) {
+                if can_place_on_foundation(card, dest_pile, suit) {
+                    return Some((from.clone(), dest, 1));
+                }
+            }
+        }
+
+        // Check tableau piles (skip the source pile itself).
+        for i in 0..7_usize {
+            let dest = PileType::Tableau(i);
+            if dest == *from {
+                continue;
+            }
+            if let Some(dest_pile) = game.piles.get(&dest) {
+                if can_place_on_tableau(card, dest_pile) {
+                    return Some((from.clone(), dest, 1));
+                }
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -679,6 +905,17 @@ mod tests {
     }
 
     #[test]
+    fn find_draggable_returns_none_for_click_on_empty_pile() {
+        let mut game = GameState::new(42, DrawMode::DrawOne);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0));
+        // Clear tableau 0 so it's an empty slot.
+        game.piles.get_mut(&PileType::Tableau(0)).unwrap().cards.clear();
+        let pos = layout.pile_positions[&PileType::Tableau(0)];
+        let result = find_draggable_at(pos, &game, &layout);
+        assert!(result.is_none(), "clicking an empty pile must not produce a draggable");
+    }
+
+    #[test]
     fn pile_drop_rect_is_card_sized_for_non_tableau() {
         let game = GameState::new(42, DrawMode::DrawOne);
         let layout = compute_layout(Vec2::new(1280.0, 800.0));
@@ -689,6 +926,126 @@ mod tests {
             let (_, size) = pile_drop_rect(&pile, &layout, &game);
             assert_eq!(size, layout.card_size);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Task #27 — best_destination pure-function tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn best_destination_prefers_foundation_over_tableau() {
+        use solitaire_core::card::{Card, Rank, Suit};
+        use solitaire_core::game_state::GameMode;
+        let mut game = GameState::new_with_mode(1, DrawMode::DrawOne, GameMode::Classic);
+
+        // Put an Ace of Clubs in the waste pile.
+        let waste = game.piles.get_mut(&PileType::Waste).unwrap();
+        waste.cards.clear();
+        waste.cards.push(Card { id: 200, suit: Suit::Clubs, rank: Rank::Ace, face_up: true });
+
+        // Foundation for Clubs is empty — Ace should go there.
+        let foundation = game.piles.get_mut(&PileType::Foundation(Suit::Clubs)).unwrap();
+        foundation.cards.clear();
+
+        let card = Card { id: 200, suit: Suit::Clubs, rank: Rank::Ace, face_up: true };
+        let dest = best_destination(&card, &game);
+        assert_eq!(dest, Some(PileType::Foundation(Suit::Clubs)));
+    }
+
+    #[test]
+    fn best_destination_falls_back_to_tableau_when_no_foundation() {
+        use solitaire_core::card::{Card, Rank, Suit};
+        use solitaire_core::game_state::GameMode;
+        let mut game = GameState::new_with_mode(1, DrawMode::DrawOne, GameMode::Classic);
+
+        // Clear all foundations — a Two of Clubs cannot go there.
+        for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
+            game.piles.get_mut(&PileType::Foundation(suit)).unwrap().cards.clear();
+        }
+
+        // Put a Two of Clubs as the card.
+        let card = Card { id: 300, suit: Suit::Clubs, rank: Rank::Two, face_up: true };
+
+        // Set tableau 0 to have a Three of Hearts on top so we can place clubs two there.
+        for i in 0..7_usize {
+            game.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+        }
+        game.piles.get_mut(&PileType::Tableau(0)).unwrap().cards.push(Card {
+            id: 301,
+            suit: Suit::Hearts,
+            rank: Rank::Three,
+            face_up: true,
+        });
+
+        let dest = best_destination(&card, &game);
+        assert_eq!(dest, Some(PileType::Tableau(0)));
+    }
+
+    #[test]
+    fn best_destination_returns_none_when_no_legal_move() {
+        use solitaire_core::card::{Card, Rank, Suit};
+        let mut game = GameState::new(1, DrawMode::DrawOne);
+
+        // Clear everything except one card that has nowhere to go.
+        for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
+            game.piles.get_mut(&PileType::Foundation(suit)).unwrap().cards.clear();
+        }
+        for i in 0..7_usize {
+            game.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+        }
+
+        // A Two of Clubs with empty foundations and empty tableau has no destination.
+        let card = Card { id: 400, suit: Suit::Clubs, rank: Rank::Two, face_up: true };
+        assert!(best_destination(&card, &game).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Task #28 — find_hint pure-function tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn find_hint_finds_ace_to_foundation() {
+        use solitaire_core::card::{Card, Rank, Suit};
+        let mut game = GameState::new(1, DrawMode::DrawOne);
+
+        // Place Ace of Clubs on top of tableau 0.
+        for i in 0..7_usize {
+            game.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+        }
+        game.piles.get_mut(&PileType::Tableau(0)).unwrap().cards.push(Card {
+            id: 500, suit: Suit::Clubs, rank: Rank::Ace, face_up: true,
+        });
+        game.piles.get_mut(&PileType::Foundation(Suit::Clubs)).unwrap().cards.clear();
+
+        let hint = find_hint(&game);
+        assert!(hint.is_some(), "should find a hint");
+        let (from, to, count) = hint.unwrap();
+        assert_eq!(from, PileType::Tableau(0));
+        assert_eq!(to, PileType::Foundation(Suit::Clubs));
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn find_hint_returns_none_when_no_legal_move() {
+        use solitaire_core::card::{Card, Rank, Suit};
+        let mut game = GameState::new(1, DrawMode::DrawOne);
+
+        // Put only a Two on tableau 0, empty everything else.
+        for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
+            game.piles.get_mut(&PileType::Foundation(suit)).unwrap().cards.clear();
+        }
+        for i in 0..7_usize {
+            game.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+        }
+        game.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+        game.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+
+        // Two of Clubs has no legal destination.
+        game.piles.get_mut(&PileType::Tableau(0)).unwrap().cards.push(Card {
+            id: 600, suit: Suit::Clubs, rank: Rank::Two, face_up: true,
+        });
+
+        assert!(find_hint(&game).is_none(), "no hint should exist");
     }
 }
 

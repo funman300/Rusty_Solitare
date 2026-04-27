@@ -152,4 +152,30 @@ mod tests {
         assert_eq!(s.draw_one_wins, 1);
         assert_eq!(s.draw_three_wins, 1);
     }
+
+    #[test]
+    fn win_streak_best_never_decreases_after_shorter_subsequent_streak() {
+        let mut s = StatsSnapshot::default();
+        // Build a streak of 5.
+        for _ in 0..5 {
+            s.update_on_win(100, 60, &DrawMode::DrawOne);
+        }
+        assert_eq!(s.win_streak_best, 5);
+        // Lose (abandon), resetting current.
+        s.record_abandoned();
+        assert_eq!(s.win_streak_current, 0);
+        assert_eq!(s.win_streak_best, 5, "best must survive the loss");
+        // Win once — current becomes 1, best must remain 5.
+        s.update_on_win(100, 60, &DrawMode::DrawOne);
+        assert_eq!(s.win_streak_current, 1);
+        assert_eq!(s.win_streak_best, 5, "best must not drop to match shorter streak");
+    }
+
+    #[test]
+    fn lifetime_score_saturates_at_u64_max() {
+        let mut s = StatsSnapshot::default();
+        s.lifetime_score = u64::MAX - 100;
+        s.update_on_win(200, 60, &DrawMode::DrawOne);
+        assert_eq!(s.lifetime_score, u64::MAX, "lifetime_score must saturate, not overflow");
+    }
 }

@@ -194,4 +194,24 @@ mod tests {
         assert!(g.target_score.is_none());
         assert!(g.max_time_secs.is_none());
     }
+
+    #[test]
+    fn generate_goal_all_variants_have_sane_ranges() {
+        for variant_idx in 0u64..6 {
+            let g = generate_goal("2026-04-26", variant_idx);
+            assert!(!g.description.is_empty(), "variant {variant_idx}: description must not be empty");
+            if let Some(t) = g.max_time_secs {
+                assert!(
+                    (60..=3600).contains(&t),
+                    "variant {variant_idx}: max_time_secs {t} outside [60, 3600]"
+                );
+            }
+            if let Some(s) = g.target_score {
+                assert!(
+                    (1_000..=10_000).contains(&s),
+                    "variant {variant_idx}: target_score {s} outside [1000, 10000]"
+                );
+            }
+        }
+    }
 }

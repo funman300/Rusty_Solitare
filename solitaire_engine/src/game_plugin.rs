@@ -15,8 +15,8 @@ use solitaire_data::{delete_game_state_at, game_state_file_path, load_game_state
     save_game_state_to};
 
 use crate::events::{
-    DrawRequestEvent, GameWonEvent, MoveRequestEvent, NewGameRequestEvent, StateChangedEvent,
-    UndoRequestEvent,
+    DrawRequestEvent, GameWonEvent, InfoToastEvent, MoveRequestEvent, NewGameRequestEvent,
+    StateChangedEvent, UndoRequestEvent,
 };
 use crate::resources::{DragState, GameStateResource, SyncStatusResource};
 
@@ -64,6 +64,7 @@ impl Plugin for GamePlugin {
             .add_event::<GameWonEvent>()
             .add_event::<crate::events::CardFlippedEvent>()
             .add_event::<crate::events::AchievementUnlockedEvent>()
+            .add_event::<InfoToastEvent>()
             .add_systems(
                 Update,
                 (
@@ -75,7 +76,10 @@ impl Plugin for GamePlugin {
                     .chain()
                     .in_set(GameMutation),
             )
+            .add_systems(Update, check_no_moves.after(GameMutation))
+            .init_resource::<AutoSaveTimer>()
             .add_systems(Update, tick_elapsed_time)
+            .add_systems(Update, auto_save_game_state)
             .add_systems(Last, save_game_state_on_exit);
     }
 }
@@ -232,6 +236,136 @@ fn handle_undo(
                 changed.send(StateChangedEvent);
             }
             Err(e) => warn!("undo rejected: {e}"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task #29 — No-moves detection
+// ---------------------------------------------------------------------------
+
+/// Returns `true` if the current game state has at least one legal move.
+///
+/// Considers:
+/// - Any non-empty Stock or Waste pile (draw / recycle is always available).
+/// - Any face-up card on Waste or Tableau piles that can legally move to any
+///   Foundation or Tableau destination.
+pub fn has_legal_moves(game: &GameState) -> bool {
+    use solitaire_core::card::Suit;
+    use solitaire_core::pile::PileType;
+    use solitaire_core::rules::{can_place_on_foundation, can_place_on_tableau};
+
+    // If stock or waste is non-empty, the player can always draw.
+    if !game.piles.get(&PileType::Stock).is_some_and(|p| p.cards.is_empty())
+        || !game.piles.get(&PileType::Waste).is_some_and(|p| p.cards.is_empty())
+    {
+        return true;
+    }
+
+    let suits = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
+
+    // Check each playable source pile.
+    let sources: Vec<PileType> = {
+        let mut v = vec![PileType::Waste];
+        for i in 0..7_usize {
+            v.push(PileType::Tableau(i));
+        }
+        v
+    };
+
+    for from in &sources {
+        let Some(from_pile) = game.piles.get(from) else { continue };
+        let Some(card) = from_pile.cards.last().filter(|c| c.face_up) else { continue };
+
+        // Check foundations.
+        for &suit in &suits {
+            let dest = PileType::Foundation(suit);
+            if let Some(dest_pile) = game.piles.get(&dest) {
+                if can_place_on_foundation(card, dest_pile, suit) {
+                    return true;
+                }
+            }
+        }
+
+        // Check tableau piles.
+        for i in 0..7_usize {
+            let dest = PileType::Tableau(i);
+            if dest == *from {
+                continue;
+            }
+            if let Some(dest_pile) = game.piles.get(&dest) {
+                if can_place_on_tableau(card, dest_pile) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// After each `StateChangedEvent`, check if the game has no legal moves.
+/// Fires `InfoToastEvent` once per "stuck" state. Resets when any new
+/// `StateChangedEvent` arrives.
+fn check_no_moves(
+    mut events: EventReader<StateChangedEvent>,
+    game: Res<GameStateResource>,
+    mut toast: EventWriter<InfoToastEvent>,
+    mut already_fired: Local<bool>,
+) {
+    // Reset the debounce flag on every state change so if something changes
+    // we re-evaluate on the next state change.
+    let had_event = events.read().next().is_some();
+    // Drain remaining events to avoid leaking.
+    events.clear();
+
+    if !had_event {
+        return;
+    }
+
+    // Reset debounce whenever the state changes.
+    *already_fired = false;
+
+    if game.0.is_won {
+        return;
+    }
+
+    if !has_legal_moves(&game.0) && !*already_fired {
+        toast.send(InfoToastEvent(
+            "No moves available \u{2014} press D to draw or N for a new game".to_string(),
+        ));
+        *already_fired = true;
+    }
+}
+
+const AUTO_SAVE_INTERVAL_SECS: f32 = 30.0;
+
+/// Accumulated real-world seconds since the last auto-save. Exposed as a
+/// `Resource` so tests can pre-seed it past the threshold without needing to
+/// control `Time::delta_secs()`.
+#[derive(Resource, Default)]
+pub struct AutoSaveTimer(pub f32);
+
+/// Periodically saves game state every 30 real-world seconds while a game is
+/// in progress. The timer uses real delta time (not game elapsed_seconds) so
+/// it keeps ticking even if the game clock is paused.
+fn auto_save_game_state(
+    time: Res<Time>,
+    game: Res<GameStateResource>,
+    path: Option<Res<GameStatePath>>,
+    mut timer: ResMut<AutoSaveTimer>,
+    paused: Option<Res<crate::pause_plugin::PausedResource>>,
+) {
+    // Don't save if paused, game is won, or no moves have been made yet.
+    if paused.is_some_and(|p| p.0) || game.0.is_won || game.0.move_count == 0 {
+        return;
+    }
+    timer.0 += time.delta_secs();
+    if timer.0 >= AUTO_SAVE_INTERVAL_SECS {
+        timer.0 -= AUTO_SAVE_INTERVAL_SECS;
+        let Some(p) = path.as_ref().and_then(|r| r.0.as_deref()) else { return };
+        if let Err(e) = save_game_state_to(p, &game.0) {
+            warn!("game_state: auto-save failed: {e}");
         }
     }
 }
@@ -519,6 +653,49 @@ mod tests {
         assert_eq!(fired[0].0, 900, "event must carry the flipped card's id");
     }
 
+    /// auto_save_game_state writes to disk once the accumulator crosses 30 s.
+    #[test]
+    fn auto_save_writes_after_30_seconds() {
+        use solitaire_data::load_game_state_from;
+
+        let path = tmp_gs_path("auto_save_30s");
+        let _ = std::fs::remove_file(&path);
+
+        let mut app = test_app(42);
+        app.insert_resource(GameStatePath(Some(path.clone())));
+        // Give the game one move so move_count > 0 (auto-save guard).
+        app.world_mut()
+            .resource_mut::<GameStateResource>()
+            .0
+            .move_count = 1;
+
+        // Pre-seed the timer just past the threshold. The system will trigger
+        // on the very next update() without needing to control Time::delta_secs().
+        app.insert_resource(AutoSaveTimer(AUTO_SAVE_INTERVAL_SECS + 0.1));
+        app.update();
+
+        assert!(path.exists(), "auto-save file must exist after timer crosses threshold");
+        let loaded = load_game_state_from(&path).expect("file must be loadable");
+        assert_eq!(loaded.seed, 42);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// auto_save_game_state does NOT write to disk when no moves have been made.
+    #[test]
+    fn auto_save_skips_when_no_moves() {
+        let path = tmp_gs_path("auto_save_skip");
+        let _ = std::fs::remove_file(&path);
+
+        let mut app = test_app(99);
+        app.insert_resource(GameStatePath(Some(path.clone())));
+        // move_count stays at 0 (fresh game); timer is past threshold.
+        app.insert_resource(AutoSaveTimer(AUTO_SAVE_INTERVAL_SECS + 0.1));
+        app.update();
+
+        assert!(!path.exists(), "auto-save must not fire when move_count == 0");
+    }
+
     #[test]
     fn moving_cards_off_face_up_card_does_not_fire_card_flipped_event() {
         use solitaire_core::card::{Card, Rank, Suit};
@@ -559,5 +736,64 @@ mod tests {
         let mut cursor = events.get_cursor();
         let fired: Vec<_> = cursor.read(events).collect();
         assert!(fired.is_empty(), "no flip event when exposed card was already face-up");
+    }
+
+    // -----------------------------------------------------------------------
+    // Task #29 — has_legal_moves pure-function tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn has_legal_moves_returns_true_when_stock_nonempty() {
+        // A fresh game has 24 cards in stock — draw is always available.
+        let game = GameState::new(42, DrawMode::DrawOne);
+        assert!(has_legal_moves(&game), "draw is always available when stock is non-empty");
+    }
+
+    #[test]
+    fn has_legal_moves_returns_true_when_ace_can_go_to_foundation() {
+        use solitaire_core::card::{Card, Rank, Suit};
+        let mut game = GameState::new(1, DrawMode::DrawOne);
+
+        // Empty stock and waste so draw is NOT available.
+        game.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+        game.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+
+        // Clear all tableau and foundations, put Ace of Clubs on tableau 0.
+        for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
+            game.piles.get_mut(&PileType::Foundation(suit)).unwrap().cards.clear();
+        }
+        for i in 0..7_usize {
+            game.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+        }
+        game.piles.get_mut(&PileType::Tableau(0)).unwrap().cards.push(Card {
+            id: 1, suit: Suit::Clubs, rank: Rank::Ace, face_up: true,
+        });
+
+        assert!(has_legal_moves(&game), "Ace can always go to an empty foundation");
+    }
+
+    #[test]
+    fn has_legal_moves_returns_false_when_stuck() {
+        use solitaire_core::card::{Card, Rank, Suit};
+        let mut game = GameState::new(1, DrawMode::DrawOne);
+
+        // Empty stock and waste.
+        game.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+        game.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+
+        // Clear all foundations and all tableau.
+        for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
+            game.piles.get_mut(&PileType::Foundation(suit)).unwrap().cards.clear();
+        }
+        for i in 0..7_usize {
+            game.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+        }
+
+        // Place a Two of Clubs with no legal destination.
+        game.piles.get_mut(&PileType::Tableau(0)).unwrap().cards.push(Card {
+            id: 2, suit: Suit::Clubs, rank: Rank::Two, face_up: true,
+        });
+
+        assert!(!has_legal_moves(&game), "Two of Clubs with empty board has no legal move");
     }
 }

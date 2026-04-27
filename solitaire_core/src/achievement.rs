@@ -577,4 +577,46 @@ mod tests {
         let ids: Vec<&str> = check_achievements(&c).iter().map(|d| d.id).collect();
         assert!(!ids.contains(&"speed_demon"));
     }
+
+    #[test]
+    fn check_achievements_returns_multiple_when_conditions_met() {
+        // A context where first_win, on_a_roll, and no_undo all trigger at once.
+        let mut c = ctx();
+        c.games_won = 1;
+        c.win_streak_current = 3;
+        c.last_win_used_undo = false;
+        c.last_win_time_seconds = 999;
+
+        let ids: Vec<&str> = check_achievements(&c).iter().map(|d| d.id).collect();
+        assert!(ids.contains(&"first_win"), "first_win should unlock");
+        assert!(ids.contains(&"on_a_roll"), "on_a_roll should unlock");
+        assert!(ids.contains(&"no_undo"), "no_undo should unlock");
+        assert!(ids.len() >= 3, "at least 3 achievements must fire simultaneously");
+    }
+
+    #[test]
+    fn perfectionist_implies_no_undo_both_fire_together() {
+        // perfectionist requires !used_undo && score >= 5000, which is a strict
+        // superset of no_undo's condition. Both must appear in the result.
+        let mut c = ctx();
+        c.games_won = 1;
+        c.last_win_used_undo = false;
+        c.last_win_score = 5_000;
+        c.last_win_time_seconds = 999;
+
+        let ids: Vec<&str> = check_achievements(&c).iter().map(|d| d.id).collect();
+        assert!(ids.contains(&"perfectionist"), "perfectionist must unlock");
+        assert!(ids.contains(&"no_undo"), "no_undo must also unlock when perfectionist does");
+    }
+
+    #[test]
+    fn perfectionist_score_well_above_threshold_still_passes() {
+        let mut c = ctx();
+        c.games_won = 1;
+        c.last_win_used_undo = false;
+        c.last_win_score = 50_000;
+
+        let ids: Vec<&str> = check_achievements(&c).iter().map(|d| d.id).collect();
+        assert!(ids.contains(&"perfectionist"), "score far above threshold must pass");
+    }
 }

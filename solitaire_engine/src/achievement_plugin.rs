@@ -478,6 +478,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn no_undo_achievement_does_not_fire_when_undo_was_used() {
+        let mut app = headless_app();
+        // Simulate a win where the player used undo at least once.
+        app.world_mut()
+            .resource_mut::<GameStateResource>()
+            .0
+            .undo_count = 1;
+
+        app.world_mut().send_event(GameWonEvent {
+            score: 1000,
+            time_seconds: 300,
+        });
+        app.update();
+
+        // "no_undo" awards BonusXp(25). If undo was used it must NOT fire.
+        let events = app.world().resource::<Events<XpAwardedEvent>>();
+        let mut cursor = events.get_cursor();
+        let xp_events: Vec<u64> = cursor.read(events).map(|e| e.amount).collect();
+        assert!(
+            !xp_events.contains(&25),
+            "BonusXp(25) must not fire when undo_count > 0; got {xp_events:?}"
+        );
+    }
+
     fn press(app: &mut App, key: KeyCode) {
         let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
         input.release(key);

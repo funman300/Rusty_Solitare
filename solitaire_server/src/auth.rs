@@ -231,6 +231,65 @@ pub async fn delete_account(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsonwebtoken::{decode, DecodingKey, Validation};
+
+    const TEST_SECRET: &str = "test_secret_for_unit_tests_only";
+
+    fn decode_token(token: &str) -> Claims {
+        let mut validation = Validation::default();
+        validation.leeway = 60;
+        decode::<Claims>(
+            token,
+            &DecodingKey::from_secret(TEST_SECRET.as_bytes()),
+            &validation,
+        )
+        .unwrap()
+        .claims
+    }
+
+    #[test]
+    fn make_access_token_decodes_with_correct_claims() {
+        let token = make_access_token("user-123", TEST_SECRET).unwrap();
+        let claims = decode_token(&token);
+        assert_eq!(claims.sub, "user-123");
+        assert_eq!(claims.kind, "access");
+        let now = Utc::now().timestamp() as usize;
+        // expiry should be roughly 24 hours in the future (allow ±60s for test execution)
+        assert!(claims.exp > now + 86_400 - 60);
+        assert!(claims.exp < now + 86_400 + 60);
+    }
+
+    #[test]
+    fn make_refresh_token_decodes_with_correct_claims() {
+        let token = make_refresh_token("user-456", TEST_SECRET).unwrap();
+        let claims = decode_token(&token);
+        assert_eq!(claims.sub, "user-456");
+        assert_eq!(claims.kind, "refresh");
+        let now = Utc::now().timestamp() as usize;
+        // expiry should be roughly 30 days in the future (allow ±60s for test execution)
+        assert!(claims.exp > now + 30 * 86_400 - 60);
+        assert!(claims.exp < now + 30 * 86_400 + 60);
+    }
+
+    #[test]
+    fn make_access_token_wrong_secret_fails_decode() {
+        let token = make_access_token("user-789", TEST_SECRET).unwrap();
+        let result = decode::<Claims>(
+            &token,
+            &DecodingKey::from_secret(b"wrong_secret"),
+            &Validation::default(),
+        );
+        assert!(result.is_err(), "decoding with wrong secret must fail");
+    }
+
+    #[test]
+    fn access_and_refresh_tokens_have_different_kinds() {
+        let access = make_access_token("u", TEST_SECRET).unwrap();
+        let refresh = make_refresh_token("u", TEST_SECRET).unwrap();
+        let a_claims = decode_token(&access);
+        let r_claims = decode_token(&refresh);
+        assert_ne!(a_claims.kind, r_claims.kind);
+    }
 
     #[test]
     fn username_chars_ok_accepts_alphanumeric_and_underscore() {

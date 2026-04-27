@@ -27,8 +27,9 @@ use kira::tween::Tween;
 
 use crate::events::{
     CardFlippedEvent, DrawRequestEvent, GameWonEvent, MoveRejectedEvent, MoveRequestEvent,
-    NewGameRequestEvent,
+    NewGameRequestEvent, UndoRequestEvent,
 };
+use crate::pause_plugin::PausedResource;
 use crate::settings_plugin::{SettingsChangedEvent, SettingsResource};
 
 /// Pre-decoded sound effects. Cheap to clone (frames are an `Arc<[Frame]>`),
@@ -54,6 +55,17 @@ pub struct AudioState {
     music_track: Option<TrackHandle>,
 }
 
+/// Tracks which audio channels the player has silenced via the M / Shift+M shortcuts.
+///
+/// These booleans override the `sfx_volume` / `music_volume` settings.  When
+/// `true`, the corresponding track is forced to 0. When toggled back to `false`
+/// the volume is restored from `SettingsResource`.
+#[derive(Resource, Default)]
+pub struct MuteState {
+    pub sfx_muted: bool,
+    pub music_muted: bool,
+}
+
 pub struct AudioPlugin;
 
 impl Plugin for AudioPlugin {
@@ -72,7 +84,8 @@ impl Plugin for AudioPlugin {
             None => (None, None),
         };
 
-        app.insert_non_send_resource(AudioState { manager, sfx_track, music_track });
+        app.insert_non_send_resource(AudioState { manager, sfx_track, music_track })
+            .init_resource::<MuteState>();
 
         let library = build_library();
         if let Some(lib) = library {
@@ -87,6 +100,7 @@ impl Plugin for AudioPlugin {
             .add_event::<NewGameRequestEvent>()
             .add_event::<GameWonEvent>()
             .add_event::<CardFlippedEvent>()
+            .add_event::<UndoRequestEvent>()
             .add_event::<SettingsChangedEvent>()
             .add_systems(
                 Startup,
@@ -101,7 +115,9 @@ impl Plugin for AudioPlugin {
                     play_on_new_game,
                     play_on_win,
                     play_on_card_flip,
+                    play_on_undo,
                     apply_volume_on_change,
+                    handle_mute_keys,
                 ),
             );
     }
@@ -168,14 +184,60 @@ fn apply_initial_volume(
     set_music_volume(&mut audio, music);
 }
 
+fn play_on_undo(
+    mut events: EventReader<UndoRequestEvent>,
+    mut audio: NonSendMut<AudioState>,
+    lib: Option<Res<SoundLibrary>>,
+) {
+    let Some(lib) = lib else { return };
+    for _ in events.read() {
+        play(&mut audio, &lib.flip);
+    }
+}
+
 fn apply_volume_on_change(
     mut events: EventReader<SettingsChangedEvent>,
     mut audio: NonSendMut<AudioState>,
+    mute: Option<Res<MuteState>>,
 ) {
     for ev in events.read() {
-        set_sfx_volume(&mut audio, ev.0.sfx_volume);
-        set_music_volume(&mut audio, ev.0.music_volume);
+        let sfx_muted = mute.as_ref().is_some_and(|m| m.sfx_muted);
+        let music_muted = mute.as_ref().is_some_and(|m| m.music_muted);
+        set_sfx_volume(&mut audio, if sfx_muted { 0.0 } else { ev.0.sfx_volume });
+        set_music_volume(&mut audio, if music_muted { 0.0 } else { ev.0.music_volume });
     }
+}
+
+/// `M` toggles mute for all audio; `Shift+M` toggles music only.
+/// Volumes are restored from `SettingsResource` on unmute.
+fn handle_mute_keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut audio: NonSendMut<AudioState>,
+    mut mute: ResMut<MuteState>,
+    settings: Option<Res<SettingsResource>>,
+    paused: Option<Res<PausedResource>>,
+) {
+    if paused.is_some_and(|p| p.0) || !keys.just_pressed(KeyCode::KeyM) {
+        return;
+    }
+    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+    let (sfx_vol, music_vol) = settings
+        .as_ref()
+        .map(|s| (s.0.sfx_volume, s.0.music_volume))
+        .unwrap_or((1.0, 0.5));
+
+    if shift {
+        // Shift+M: toggle music mute only, SFX unaffected.
+        mute.music_muted = !mute.music_muted;
+    } else {
+        // M: mute all if either channel is audible; unmute all otherwise.
+        let new_state = !(mute.sfx_muted && mute.music_muted);
+        mute.sfx_muted = new_state;
+        mute.music_muted = new_state;
+    }
+
+    set_sfx_volume(&mut audio, if mute.sfx_muted { 0.0 } else { sfx_vol });
+    set_music_volume(&mut audio, if mute.music_muted { 0.0 } else { music_vol });
 }
 
 fn play_on_draw(
@@ -266,5 +328,59 @@ mod tests {
         // WAV (so the gen_sfx output stays in sync with the loader).
         let lib = build_library();
         assert!(lib.is_some(), "embedded SFX failed to decode");
+    }
+
+    // -----------------------------------------------------------------------
+    // MuteState toggle logic (pure, no AudioManager needed)
+    // -----------------------------------------------------------------------
+
+    /// Helper that mirrors the toggle logic inside `handle_mute_keys`
+    /// for M (mute-all).
+    fn toggle_all(mute: &mut MuteState) {
+        let new_state = !(mute.sfx_muted && mute.music_muted);
+        mute.sfx_muted = new_state;
+        mute.music_muted = new_state;
+    }
+
+    /// Helper that mirrors the toggle logic for Shift+M (music-only).
+    fn toggle_music(mute: &mut MuteState) {
+        mute.music_muted = !mute.music_muted;
+    }
+
+    #[test]
+    fn mute_all_toggles_both_channels() {
+        let mut m = MuteState::default();
+        toggle_all(&mut m);
+        assert!(m.sfx_muted && m.music_muted, "M should mute both channels");
+        toggle_all(&mut m);
+        assert!(!m.sfx_muted && !m.music_muted, "second M should unmute both channels");
+    }
+
+    #[test]
+    fn shift_m_toggles_music_only() {
+        let mut m = MuteState::default();
+        toggle_music(&mut m);
+        assert!(m.music_muted, "Shift+M should mute music");
+        assert!(!m.sfx_muted, "Shift+M must not mute SFX");
+        toggle_music(&mut m);
+        assert!(!m.music_muted, "second Shift+M should unmute music");
+    }
+
+    #[test]
+    fn mute_all_while_music_already_muted_mutes_sfx_too() {
+        let mut m = MuteState::default();
+        // Music already muted via Shift+M.
+        toggle_music(&mut m);
+        assert!(m.music_muted && !m.sfx_muted);
+        // M should mute sfx (not-all-muted → mute-all).
+        toggle_all(&mut m);
+        assert!(m.sfx_muted && m.music_muted, "M unmutes neither — it mutes all when sfx was audible");
+    }
+
+    #[test]
+    fn mute_all_when_both_already_muted_unmutes_both() {
+        let mut m = MuteState { sfx_muted: true, music_muted: true };
+        toggle_all(&mut m);
+        assert!(!m.sfx_muted && !m.music_muted, "M should unmute both when all were muted");
     }
 }

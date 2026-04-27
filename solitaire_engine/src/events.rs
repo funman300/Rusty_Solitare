@@ -87,3 +87,9 @@ pub struct InfoToastEvent(pub String);
 pub struct XpAwardedEvent {
     pub amount: u64,
 }
+
+/// Fired by `InputPlugin` when the player presses G to forfeit the current
+/// game. Consumed by `StatsPlugin` which records the abandoned game,
+/// persists stats, and starts a fresh deal.
+#[derive(Event, Debug, Clone, Copy, Default)]
+pub struct ForfeitEvent;
