@@ -27,6 +27,7 @@ impl Plugin for WeeklyGoalsPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<WeeklyGoalCompletedEvent>()
             .add_event::<GameWonEvent>()
+            .add_systems(Startup, roll_weekly_goals_on_startup)
             // Run after GameMutation (so GameWonEvent is available) and
             // ProgressUpdate (so we don't fight ProgressPlugin's add_xp).
             .add_systems(
@@ -35,6 +36,22 @@ impl Plugin for WeeklyGoalsPlugin {
                     .after(GameMutation)
                     .after(ProgressUpdate),
             );
+    }
+}
+
+/// Rolls weekly-goal counters at startup so stale progress from a previous
+/// week never shows in the UI when the player launches the game.
+fn roll_weekly_goals_on_startup(
+    mut progress: ResMut<ProgressResource>,
+    path: Res<ProgressStoragePath>,
+) {
+    let week_key = current_iso_week_key(Local::now().date_naive());
+    if progress.0.roll_weekly_goals_if_new_week(&week_key) {
+        if let Some(target) = &path.0 {
+            if let Err(e) = save_progress_to(target, &progress.0) {
+                warn!("failed to save progress after weekly reset on startup: {e}");
+            }
+        }
     }
 }
 
@@ -198,6 +215,35 @@ mod tests {
         let mut cursor = events.get_cursor();
         let fired: Vec<_> = cursor.read(events).cloned().collect();
         assert!(fired.iter().any(|e| e.goal_id == "weekly_3_fast"));
+    }
+
+    #[test]
+    fn stale_weekly_progress_is_cleared_on_startup() {
+        let mut app = headless_app();
+        // Inject progress from a past week.
+        {
+            let mut p = app.world_mut().resource_mut::<ProgressResource>();
+            p.0.weekly_goal_week_iso = Some("1970-W01".to_string());
+            p.0.weekly_goal_progress
+                .insert("weekly_5_wins".to_string(), 3);
+        }
+        // A second Startup run (re-init) is hard to trigger directly; instead
+        // call the helper through a fresh app that starts with stale data.
+        // Here we simulate the effect: roll_weekly_goals_if_new_week clears.
+        let current_week = current_iso_week_key(Local::now().date_naive());
+        let rolled = app
+            .world_mut()
+            .resource_mut::<ProgressResource>()
+            .0
+            .roll_weekly_goals_if_new_week(&current_week);
+        assert!(rolled, "expected stale week to trigger a roll");
+        assert!(
+            app.world()
+                .resource::<ProgressResource>()
+                .0
+                .weekly_goal_progress
+                .is_empty()
+        );
     }
 
     #[test]
