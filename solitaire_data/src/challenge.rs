@@ -10,11 +10,36 @@
 /// Curated Challenge-mode seeds. Order is stable across versions; add new
 /// seeds at the end.
 pub const CHALLENGE_SEEDS: &[u64] = &[
+    // Round 1 (original 5)
     0xDEAD_BEEF_CAFE_F00D,
     0xC0DE_FACE_8BAD_F00D,
     0xFEE1_DEAD_DEAD_BEEF,
     0xBAAD_F00D_BAAD_F00D,
     0x1337_C0DE_4242_BABE,
+    // Round 2
+    0xACED_CAFE_B0BA_1234,
+    0x5A1D_F00D_BEEF_CAFE,
+    0xF01D_BABE_CAFE_BEEF,
+    0xD00D_1E42_ABCD_EF01,
+    0x7EA5_ED01_2345_6789,
+    // Round 3
+    0xC1A5_51C0_F00D_CAFE,
+    0xBA5E_BA11_DEAD_BEEF,
+    0xFACE_B00C_C0DE_1010,
+    0x5EED_CAFE_5EED_CAFE,
+    0xABBA_ABBA_CAFE_BABE,
+    // Round 4
+    0x1234_5678_9ABC_DEF0,
+    0xFEDC_BA98_7654_3210,
+    0x0011_2233_4455_6677,
+    0x8899_AABB_CCDD_EEFF,
+    0x1111_2222_3333_4444,
+    // Round 5
+    0x5555_6666_7777_8888,
+    0x9999_AAAA_BBBB_CCCC,
+    0xDDDD_EEEE_FFFF_0000,
+    0x0101_0101_0101_0101,
+    0xA1B2_C3D4_E5F6_0718,
 ];
 
 /// Resolve a `challenge_index` to its corresponding seed, wrapping when
