@@ -545,6 +545,64 @@ mod tests {
         assert!(matches!(result, Err(MoveError::RuleViolation(_))));
     }
 
+    #[test]
+    fn move_face_down_card_returns_rule_violation() {
+        let mut g = new_game();
+        // Tableau(6) has 7 cards; card 0 is always face-down.
+        // Attempt to move 7 cards (the whole pile including face-down ones).
+        let result = g.move_cards(PileType::Tableau(6), PileType::Tableau(5), 7);
+        assert!(matches!(result, Err(MoveError::RuleViolation(_))));
+    }
+
+    #[test]
+    fn move_multiple_cards_to_foundation_returns_rule_violation() {
+        let mut g = new_game();
+        // Inject two face-up cards into tableau(0) so count=2 is a valid count.
+        g.piles.get_mut(&PileType::Tableau(0)).unwrap().cards = vec![
+            Card { id: 1, suit: Suit::Clubs, rank: Rank::Ace, face_up: true },
+            Card { id: 2, suit: Suit::Clubs, rank: Rank::Two, face_up: true },
+        ];
+        let result = g.move_cards(
+            PileType::Tableau(0),
+            PileType::Foundation(Suit::Clubs),
+            2,
+        );
+        assert!(
+            matches!(result, Err(MoveError::RuleViolation(_))),
+            "moving 2 cards to foundation must be rejected"
+        );
+    }
+
+    #[test]
+    fn move_count_exceeding_pile_size_returns_rule_violation() {
+        let mut g = new_game();
+        // Tableau(0) has exactly 1 card; asking for 2 should fail.
+        let result = g.move_cards(PileType::Tableau(0), PileType::Tableau(1), 2);
+        assert!(matches!(result, Err(MoveError::RuleViolation(_))));
+    }
+
+    #[test]
+    fn move_multi_card_sequence_tableau_to_tableau_succeeds() {
+        let mut g = new_game();
+        // Clear both piles and construct a known valid sequence.
+        let t0 = g.piles.get_mut(&PileType::Tableau(0)).unwrap();
+        t0.cards = vec![
+            Card { id: 10, suit: Suit::Spades,  rank: Rank::King,  face_up: true },
+            Card { id: 11, suit: Suit::Hearts,  rank: Rank::Queen, face_up: true },
+            Card { id: 12, suit: Suit::Spades,  rank: Rank::Jack,  face_up: true },
+        ];
+        // Tableau(1) needs an Ace so we can check empty pile correctly — use a red King target.
+        let t1 = g.piles.get_mut(&PileType::Tableau(1)).unwrap();
+        t1.cards.clear(); // empty accepts a King
+
+        // Move the whole 3-card sequence to the empty pile.
+        let result = g.move_cards(PileType::Tableau(0), PileType::Tableau(1), 3);
+        assert!(result.is_ok(), "valid multi-card move must succeed: {result:?}");
+        assert!(g.piles[&PileType::Tableau(0)].cards.is_empty());
+        assert_eq!(g.piles[&PileType::Tableau(1)].cards.len(), 3);
+        assert_eq!(g.move_count, 1);
+    }
+
     // --- Win detection ---
 
     #[test]
