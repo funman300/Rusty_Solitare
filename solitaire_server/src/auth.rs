@@ -227,3 +227,38 @@ pub async fn delete_account(
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn username_chars_ok_accepts_alphanumeric_and_underscore() {
+        assert!(username_chars_ok("alice"));
+        assert!(username_chars_ok("Alice_123"));
+        assert!(username_chars_ok("UPPER_case_99"));
+    }
+
+    #[test]
+    fn username_chars_ok_rejects_special_chars() {
+        assert!(!username_chars_ok("ali ce"));   // space
+        assert!(!username_chars_ok("ali-ce"));   // hyphen
+        assert!(!username_chars_ok("ali.ce"));   // dot
+        assert!(!username_chars_ok("ali@ce"));   // at
+        assert!(!username_chars_ok("ali!ce"));   // exclamation
+    }
+
+    #[test]
+    fn username_chars_ok_accepts_empty_string() {
+        // The length check in `register` guards against empty usernames;
+        // this function only validates characters, so empty is technically ok.
+        assert!(username_chars_ok(""));
+    }
+
+    #[test]
+    fn username_chars_ok_rejects_unicode_letters() {
+        // Non-ASCII characters must be rejected even if they look like letters.
+        assert!(!username_chars_ok("héro"));
+        assert!(!username_chars_ok("用户"));
+    }
+}
