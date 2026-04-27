@@ -11,6 +11,10 @@
 //! input-blocking on top if desired.
 
 use bevy::prelude::*;
+use solitaire_data::save_game_state_to;
+
+use crate::game_plugin::GameStatePath;
+use crate::resources::GameStateResource;
 
 /// Toggleable flag read by `tick_elapsed_time` and `advance_time_attack`.
 #[derive(Resource, Debug, Default)]
@@ -34,6 +38,8 @@ fn toggle_pause(
     keys: Res<ButtonInput<KeyCode>>,
     mut paused: ResMut<PausedResource>,
     screens: Query<Entity, With<PauseScreen>>,
+    game: Option<Res<GameStateResource>>,
+    path: Option<Res<GameStatePath>>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
@@ -44,6 +50,15 @@ fn toggle_pause(
     } else {
         spawn_pause_screen(&mut commands);
         paused.0 = true;
+        // Persist the current game state whenever the player opens the pause
+        // overlay so an OS-level kill still leaves a resumable save.
+        if let (Some(g), Some(p)) = (game, path) {
+            if let Some(disk_path) = p.0.as_deref() {
+                if let Err(e) = save_game_state_to(disk_path, &g.0) {
+                    warn!("game_state: failed to save on pause: {e}");
+                }
+            }
+        }
     }
 }
 

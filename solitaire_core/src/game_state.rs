@@ -9,6 +9,24 @@ use crate::scoring::{compute_time_bonus as scoring_time_bonus, score_move, score
 
 const MAX_UNDO_STACK: usize = 64;
 
+/// Serialize `HashMap<PileType, Pile>` as a `Vec` of `(key, value)` pairs so
+/// that JSON (which requires string map keys) round-trips correctly.
+mod pile_map_serde {
+    use std::collections::HashMap;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use crate::pile::{Pile, PileType};
+
+    pub fn serialize<S: Serializer>(map: &HashMap<PileType, Pile>, s: S) -> Result<S::Ok, S::Error> {
+        let entries: Vec<(&PileType, &Pile)> = map.iter().collect();
+        entries.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<HashMap<PileType, Pile>, D::Error> {
+        let entries: Vec<(PileType, Pile)> = Vec::deserialize(d)?;
+        Ok(entries.into_iter().collect())
+    }
+}
+
 /// Whether cards are drawn one at a time or three at a time from the stock.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DrawMode {
@@ -37,6 +55,7 @@ pub enum GameMode {
 /// Snapshot of game state used for undo.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct StateSnapshot {
+    #[serde(with = "pile_map_serde")]
     piles: HashMap<PileType, Pile>,
     score: i32,
     move_count: u32,
@@ -45,6 +64,7 @@ struct StateSnapshot {
 /// Full state of an in-progress Klondike Solitaire game.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameState {
+    #[serde(with = "pile_map_serde")]
     pub piles: HashMap<PileType, Pile>,
     pub draw_mode: DrawMode,
     /// Top-level mode (Classic / Zen). Defaults to Classic for backwards

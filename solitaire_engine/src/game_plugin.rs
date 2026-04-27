@@ -1,10 +1,18 @@
 //! Routes game-request events to `solitaire_core::GameState` and emits
 //! state-change notifications.
+//!
+//! Game state persistence: on startup the plugin attempts to restore an
+//! in-progress game from `game_state.json`. On app exit the current state is
+//! written back (unless the game is won). On a win or new-game request the
+//! file is deleted so the next launch starts fresh.
 
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
 use solitaire_core::game_state::{DrawMode, GameState};
+use solitaire_data::{delete_game_state_at, game_state_file_path, load_game_state_from,
+    save_game_state_to};
 
 use crate::events::{
     DrawRequestEvent, GameWonEvent, MoveRequestEvent, NewGameRequestEvent, StateChangedEvent,
@@ -18,16 +26,33 @@ use crate::resources::{DragState, GameStateResource, SyncStatusResource};
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GameMutation;
 
+/// Persistence path for the in-progress game state file. `None` disables I/O.
+#[derive(Resource, Debug, Clone)]
+pub struct GameStatePath(pub Option<PathBuf>);
+
 /// Registers game resources, events, and the systems that route user intent
 /// (events) into mutations on `GameState`.
 pub struct GamePlugin;
 
+impl GamePlugin {
+    /// Plugin with no persistence. Use in headless tests to avoid touching the
+    /// real `game_state.json` on disk.
+    pub fn headless() -> Self {
+        Self
+    }
+}
+
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(GameStateResource(GameState::new(
-            seed_from_system_time(),
-            DrawMode::DrawOne,
-        )))
+        let path = game_state_file_path();
+        // Restore any saved in-progress game, falling back to a fresh deal.
+        let initial_state = path
+            .as_deref()
+            .and_then(load_game_state_from)
+            .unwrap_or_else(|| GameState::new(seed_from_system_time(), DrawMode::DrawOne));
+
+        app.insert_resource(GameStateResource(initial_state))
+            .insert_resource(GameStatePath(path))
             .init_resource::<DragState>()
             .init_resource::<SyncStatusResource>()
             .add_event::<MoveRequestEvent>()
@@ -50,7 +75,8 @@ impl Plugin for GamePlugin {
                     .chain()
                     .in_set(GameMutation),
             )
-            .add_systems(Update, tick_elapsed_time);
+            .add_systems(Update, tick_elapsed_time)
+            .add_systems(Last, save_game_state_on_exit);
     }
 }
 
@@ -106,6 +132,7 @@ fn handle_new_game(
     mut game: ResMut<GameStateResource>,
     mut changed: EventWriter<StateChangedEvent>,
     settings: Option<Res<crate::settings_plugin::SettingsResource>>,
+    path: Option<Res<GameStatePath>>,
 ) {
     for ev in new_game.read() {
         let seed = ev.seed.unwrap_or_else(seed_from_system_time);
@@ -118,6 +145,12 @@ fn handle_new_game(
             .unwrap_or_else(|| game.0.draw_mode.clone());
         let mode = ev.mode.unwrap_or(game.0.mode);
         game.0 = GameState::new_with_mode(seed, draw_mode, mode);
+        // Delete any previously saved in-progress state — this is a fresh game.
+        if let Some(p) = path.as_ref().and_then(|r| r.0.as_deref()) {
+            if let Err(e) = delete_game_state_at(p) {
+                warn!("game_state: failed to delete saved game: {e}");
+            }
+        }
         changed.send(StateChangedEvent);
     }
 }
@@ -142,6 +175,7 @@ fn handle_move(
     mut game: ResMut<GameStateResource>,
     mut changed: EventWriter<StateChangedEvent>,
     mut won: EventWriter<GameWonEvent>,
+    path: Option<Res<GameStatePath>>,
 ) {
     for ev in moves.read() {
         let was_won = game.0.is_won;
@@ -153,6 +187,12 @@ fn handle_move(
                         score: game.0.score,
                         time_seconds: game.0.elapsed_seconds,
                     });
+                    // Delete the saved state — a won game should not be resumed.
+                    if let Some(p) = path.as_ref().and_then(|r| r.0.as_deref()) {
+                        if let Err(e) = delete_game_state_at(p) {
+                            warn!("game_state: failed to delete on win: {e}");
+                        }
+                    }
                 }
             }
             Err(e) => warn!("move rejected {:?} -> {:?} x{}: {e}", ev.from, ev.to, ev.count),
@@ -175,16 +215,38 @@ fn handle_undo(
     }
 }
 
+/// Last-schedule system: persists the current game state on `AppExit` so the
+/// player can resume where they left off. Won games are not saved (the
+/// `save_game_state_to` helper skips them). Blocking on exit is acceptable
+/// because the game loop is already shutting down.
+fn save_game_state_on_exit(
+    mut exit_events: EventReader<AppExit>,
+    game: Res<GameStateResource>,
+    path: Res<GameStatePath>,
+) {
+    if exit_events.is_empty() {
+        return;
+    }
+    exit_events.clear();
+    let Some(p) = path.0.as_deref() else { return };
+    if let Err(e) = save_game_state_to(p, &game.0) {
+        warn!("game_state: failed to save on exit: {e}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use solitaire_core::pile::PileType;
 
     /// Build a minimal headless `App` with just `GamePlugin` installed.
-    /// Overrides the default random seed so tests are deterministic.
+    /// Disables persistence and overrides the seed so tests are deterministic
+    /// and don't touch `~/.local/share/solitaire_quest/game_state.json`.
     fn test_app(seed: u64) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).add_plugins(GamePlugin);
+        // Disable I/O — tests must not touch the real game state file.
+        app.insert_resource(GameStatePath(None));
         // Override the system-time seed with a known value.
         app.world_mut()
             .resource_mut::<GameStateResource>()
@@ -196,6 +258,7 @@ mod tests {
     fn plugin_inserts_game_state_resource() {
         let app = test_app(1);
         assert!(app.world().get_resource::<GameStateResource>().is_some());
+        assert!(app.world().get_resource::<GameStatePath>().is_some());
         assert!(app.world().get_resource::<DragState>().is_some());
         assert!(app.world().get_resource::<SyncStatusResource>().is_some());
     }
@@ -331,5 +394,55 @@ mod tests {
         let events = app.world().resource::<Events<StateChangedEvent>>();
         let mut reader = events.get_cursor();
         assert!(reader.read(events).next().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Persistence tests
+    // -----------------------------------------------------------------------
+
+    fn tmp_gs_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("engine_test_gs_{name}.json"))
+    }
+
+    /// save_game_state_on_exit writes to disk when AppExit fires.
+    #[test]
+    fn exit_saves_game_state() {
+        use solitaire_data::load_game_state_from;
+
+        let path = tmp_gs_path("exit_save");
+        let _ = std::fs::remove_file(&path);
+
+        let mut app = test_app(7);
+        // Point persistence at our temp file.
+        app.insert_resource(GameStatePath(Some(path.clone())));
+        // Override the seed so we can verify it was written.
+        app.world_mut().resource_mut::<GameStateResource>().0 =
+            GameState::new(7654, DrawMode::DrawOne);
+
+        app.world_mut().send_event(AppExit::Success);
+        app.update();
+
+        let loaded = load_game_state_from(&path).expect("file should exist after exit");
+        assert_eq!(loaded.seed, 7654);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// new_game_request deletes any previously saved state file.
+    #[test]
+    fn new_game_deletes_saved_state() {
+        use solitaire_data::save_game_state_to;
+
+        let path = tmp_gs_path("new_game_delete");
+        // Pre-create a saved file.
+        save_game_state_to(&path, &GameState::new(1, DrawMode::DrawOne)).unwrap();
+        assert!(path.exists());
+
+        let mut app = test_app(1);
+        app.insert_resource(GameStatePath(Some(path.clone())));
+        app.world_mut().send_event(NewGameRequestEvent { seed: Some(2), mode: None });
+        app.update();
+
+        assert!(!path.exists(), "saved file should be deleted after new game");
     }
 }

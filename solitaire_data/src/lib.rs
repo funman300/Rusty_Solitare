@@ -61,8 +61,8 @@ pub use stats::{StatsExt, StatsSnapshot};
 
 pub mod storage;
 pub use storage::{
-    cleanup_orphaned_tmp_files, load_stats, load_stats_from, save_stats, save_stats_to,
-    stats_file_path,
+    cleanup_orphaned_tmp_files, delete_game_state_at, game_state_file_path, load_game_state_from,
+    load_stats, load_stats_from, save_game_state_to, save_stats, save_stats_to, stats_file_path,
 };
 
 pub mod achievements;

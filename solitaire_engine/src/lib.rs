@@ -38,7 +38,7 @@ pub use events::{
     AchievementUnlockedEvent, CardFlippedEvent, DrawRequestEvent, GameWonEvent, ManualSyncRequestEvent,
     MoveRejectedEvent, MoveRequestEvent, NewGameRequestEvent, StateChangedEvent, UndoRequestEvent,
 };
-pub use game_plugin::{GameMutation, GamePlugin};
+pub use game_plugin::{GameMutation, GamePlugin, GameStatePath};
 pub use help_plugin::{HelpPlugin, HelpScreen};
 pub use input_plugin::InputPlugin;
 pub use onboarding_plugin::{OnboardingPlugin, OnboardingScreen};
