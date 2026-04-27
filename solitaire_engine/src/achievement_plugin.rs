@@ -17,7 +17,7 @@ use solitaire_data::{
     save_progress_to,
 };
 
-use crate::events::{AchievementUnlockedEvent, GameWonEvent};
+use crate::events::{AchievementUnlockedEvent, GameWonEvent, XpAwardedEvent};
 use crate::game_plugin::GameMutation;
 use crate::progress_plugin::{LevelUpEvent, ProgressResource, ProgressStoragePath, ProgressUpdate};
 use crate::resources::GameStateResource;
@@ -72,6 +72,7 @@ impl Plugin for AchievementPlugin {
             .insert_resource(AchievementsStoragePath(self.storage_path.clone()))
             .add_event::<AchievementUnlockedEvent>()
             .add_event::<GameWonEvent>()
+            .add_event::<XpAwardedEvent>()
             // Run after GameMutation (so GameWonEvent is available), after
             // StatsUpdate (so stats reflect this win), and after ProgressUpdate
             // (so daily_challenge_streak is up to date for daily_devotee).
@@ -91,6 +92,7 @@ fn evaluate_on_win(
     mut wins: EventReader<GameWonEvent>,
     mut unlocks: EventWriter<AchievementUnlockedEvent>,
     mut levelups: EventWriter<LevelUpEvent>,
+    mut xp_awarded: EventWriter<XpAwardedEvent>,
     game: Res<GameStateResource>,
     stats: Res<StatsResource>,
     path: Res<AchievementsStoragePath>,
@@ -154,6 +156,7 @@ fn evaluate_on_win(
                         }
                     }
                     Reward::BonusXp(amount) => {
+                        xp_awarded.send(XpAwardedEvent { amount });
                         let prev_level = progress.0.add_xp(amount);
                         if progress.0.leveled_up_from(prev_level) {
                             levelups.send(LevelUpEvent {
@@ -452,6 +455,27 @@ mod tests {
     fn display_name_resolves_known_and_unknown_ids() {
         assert_eq!(display_name_for("first_win"), "First Win");
         assert_eq!(display_name_for("bogus"), "bogus");
+    }
+
+    #[test]
+    fn bonus_xp_reward_fires_xp_awarded_event() {
+        let mut app = headless_app();
+        // "no_undo" achievement awards BonusXp(25). Trigger it by sending a
+        // GameWonEvent with undo_count == 0 (default) and enough stats to match.
+        app.world_mut().send_event(GameWonEvent {
+            score: 1000,
+            time_seconds: 300,
+        });
+        app.update();
+
+        let events = app.world().resource::<Events<XpAwardedEvent>>();
+        let mut cursor = events.get_cursor();
+        let xp_events: Vec<u64> = cursor.read(events).map(|e| e.amount).collect();
+        // The no_undo achievement (BonusXp 25) must have fired an XpAwardedEvent.
+        assert!(
+            xp_events.contains(&25),
+            "BonusXp(25) must fire XpAwardedEvent; got {xp_events:?}"
+        );
     }
 
     fn press(app: &mut App, key: KeyCode) {
