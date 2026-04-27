@@ -4,22 +4,43 @@
 //! it directly when adding animations outside this file.
 
 use bevy::prelude::*;
+use solitaire_data::AnimSpeed;
 
 use crate::achievement_plugin::display_name_for;
 use crate::auto_complete_plugin::AutoCompleteState;
 use crate::card_plugin::CardEntity;
 use crate::challenge_plugin::ChallengeAdvancedEvent;
-use crate::daily_challenge_plugin::DailyChallengeCompletedEvent;
+use crate::daily_challenge_plugin::{DailyChallengeCompletedEvent, DailyGoalAnnouncementEvent};
 use crate::events::{AchievementUnlockedEvent, GameWonEvent};
 use crate::game_plugin::GameMutation;
 use crate::layout::LayoutResource;
 use crate::progress_plugin::LevelUpEvent;
-use crate::settings_plugin::SettingsChangedEvent;
+use crate::settings_plugin::{SettingsChangedEvent, SettingsResource};
 use crate::time_attack_plugin::TimeAttackEndedEvent;
 use crate::weekly_goals_plugin::WeeklyGoalCompletedEvent;
 
-/// Duration of a card slide (move) animation in seconds.
+/// Duration of a card slide (move) animation in seconds at Normal speed.
 pub const SLIDE_SECS: f32 = 0.15;
+
+/// The effective slide duration, updated whenever `Settings::animation_speed` changes.
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct EffectiveSlideDuration {
+    pub slide_secs: f32,
+}
+
+impl Default for EffectiveSlideDuration {
+    fn default() -> Self {
+        Self { slide_secs: SLIDE_SECS }
+    }
+}
+
+fn anim_speed_to_secs(speed: &AnimSpeed) -> f32 {
+    match speed {
+        AnimSpeed::Normal => SLIDE_SECS,
+        AnimSpeed::Fast => 0.07,
+        AnimSpeed::Instant => 0.0,
+    }
+}
 
 const WIN_TOAST_SECS: f32 = 4.0;
 const ACHIEVEMENT_TOAST_SECS: f32 = 3.0;
@@ -65,17 +86,22 @@ impl Plugin for AnimationPlugin {
             .add_event::<AchievementUnlockedEvent>()
             .add_event::<LevelUpEvent>()
             .add_event::<DailyChallengeCompletedEvent>()
+            .add_event::<DailyGoalAnnouncementEvent>()
             .add_event::<WeeklyGoalCompletedEvent>()
             .add_event::<TimeAttackEndedEvent>()
             .add_event::<ChallengeAdvancedEvent>()
             .add_event::<SettingsChangedEvent>()
+            .init_resource::<EffectiveSlideDuration>()
+            .add_systems(Startup, init_slide_duration)
             .add_systems(
                 Update,
                 (
                     advance_card_anims,
+                    sync_slide_duration,
                     handle_win_cascade,
                     handle_achievement_toast,
                     handle_levelup_toast,
+                    handle_daily_goal_announcement_toast,
                     handle_daily_toast,
                     handle_weekly_toast,
                     handle_time_attack_toast,
@@ -86,6 +112,24 @@ impl Plugin for AnimationPlugin {
                 )
                     .after(GameMutation),
             );
+    }
+}
+
+fn init_slide_duration(
+    settings: Option<Res<SettingsResource>>,
+    mut dur: ResMut<EffectiveSlideDuration>,
+) {
+    if let Some(s) = settings {
+        dur.slide_secs = anim_speed_to_secs(&s.0.animation_speed);
+    }
+}
+
+fn sync_slide_duration(
+    mut events: EventReader<SettingsChangedEvent>,
+    mut dur: ResMut<EffectiveSlideDuration>,
+) {
+    for ev in events.read() {
+        dur.slide_secs = anim_speed_to_secs(&ev.0.animation_speed);
     }
 }
 
@@ -166,6 +210,15 @@ fn handle_levelup_toast(mut commands: Commands, mut events: EventReader<LevelUpE
             format!("Level Up! → {}", ev.new_level),
             LEVELUP_TOAST_SECS,
         );
+    }
+}
+
+fn handle_daily_goal_announcement_toast(
+    mut commands: Commands,
+    mut events: EventReader<DailyGoalAnnouncementEvent>,
+) {
+    for ev in events.read() {
+        spawn_toast(&mut commands, format!("Goal: {}", ev.0), DAILY_TOAST_SECS);
     }
 }
 

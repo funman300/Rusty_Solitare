@@ -41,6 +41,11 @@ pub trait SyncProvider: Send + Sync {
     async fn fetch_daily_challenge(&self) -> Result<Option<ChallengeGoal>, SyncError> {
         Ok(None)
     }
+    /// Opt the authenticated player into the leaderboard with the given
+    /// display name. No-op for backends that don't support leaderboards.
+    async fn opt_in_leaderboard(&self, _display_name: &str) -> Result<(), SyncError> {
+        Ok(())
+    }
 }
 
 /// Blanket impl so `Box<dyn SyncProvider + Send + Sync>` (returned by
@@ -67,6 +72,9 @@ impl SyncProvider for Box<dyn SyncProvider + Send + Sync> {
     }
     async fn fetch_daily_challenge(&self) -> Result<Option<ChallengeGoal>, SyncError> {
         (**self).fetch_daily_challenge().await
+    }
+    async fn opt_in_leaderboard(&self, display_name: &str) -> Result<(), SyncError> {
+        (**self).opt_in_leaderboard(display_name).await
     }
 }
 

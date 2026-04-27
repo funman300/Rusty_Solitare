@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use solitaire_core::game_state::DrawMode;
-use solitaire_data::{load_settings_from, save_settings_to, settings_file_path, settings::Theme, Settings};
+use solitaire_data::{load_settings_from, save_settings_to, settings_file_path, settings::Theme, AnimSpeed, Settings};
 
 use crate::events::ManualSyncRequestEvent;
 use crate::progress_plugin::ProgressResource;
@@ -66,6 +66,10 @@ struct SyncStatusText;
 #[derive(Component, Debug)]
 struct CardBackText;
 
+/// Marks the `Text` node showing the current animation speed.
+#[derive(Component, Debug)]
+struct AnimSpeedText;
+
 /// Marks the `Text` node showing the active background index.
 #[derive(Component, Debug)]
 struct BackgroundText;
@@ -78,6 +82,7 @@ enum SettingsButton {
     MusicDown,
     MusicUp,
     ToggleDrawMode,
+    CycleAnimSpeed,
     ToggleTheme,
     CycleCardBack,
     CycleBackground,
@@ -135,6 +140,7 @@ impl Plugin for SettingsPlugin {
                     update_sync_status_text,
                     update_card_back_text,
                     update_background_text,
+                    update_anim_speed_text,
                 ),
             );
         }
@@ -283,6 +289,18 @@ fn update_background_text(
     }
 }
 
+fn update_anim_speed_text(
+    settings: Res<SettingsResource>,
+    mut text_nodes: Query<&mut Text, With<AnimSpeedText>>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+    for mut text in &mut text_nodes {
+        **text = anim_speed_label(&settings.0.animation_speed);
+    }
+}
+
 fn card_back_label(idx: usize) -> String {
     if idx == 0 {
         "Default".to_string()
@@ -328,10 +346,11 @@ fn handle_settings_buttons(
     mut changed: EventWriter<SettingsChangedEvent>,
     mut manual_sync: EventWriter<ManualSyncRequestEvent>,
     progress: Option<Res<ProgressResource>>,
-    mut sfx_text: Query<&mut Text, (With<SfxVolumeText>, Without<MusicVolumeText>, Without<DrawModeText>, Without<ThemeText>)>,
-    mut music_text: Query<&mut Text, (With<MusicVolumeText>, Without<SfxVolumeText>, Without<DrawModeText>, Without<ThemeText>)>,
-    mut draw_text: Query<&mut Text, (With<DrawModeText>, Without<SfxVolumeText>, Without<MusicVolumeText>, Without<ThemeText>)>,
-    mut theme_text: Query<&mut Text, (With<ThemeText>, Without<SfxVolumeText>, Without<MusicVolumeText>, Without<DrawModeText>)>,
+    mut sfx_text: Query<&mut Text, (With<SfxVolumeText>, Without<MusicVolumeText>, Without<DrawModeText>, Without<ThemeText>, Without<AnimSpeedText>)>,
+    mut music_text: Query<&mut Text, (With<MusicVolumeText>, Without<SfxVolumeText>, Without<DrawModeText>, Without<ThemeText>, Without<AnimSpeedText>)>,
+    mut draw_text: Query<&mut Text, (With<DrawModeText>, Without<SfxVolumeText>, Without<MusicVolumeText>, Without<ThemeText>, Without<AnimSpeedText>)>,
+    mut theme_text: Query<&mut Text, (With<ThemeText>, Without<SfxVolumeText>, Without<MusicVolumeText>, Without<DrawModeText>, Without<AnimSpeedText>)>,
+    mut anim_speed_text: Query<&mut Text, (With<AnimSpeedText>, Without<SfxVolumeText>, Without<MusicVolumeText>, Without<DrawModeText>, Without<ThemeText>)>,
 ) {
     for (interaction, button) in &interaction_query {
         if *interaction != Interaction::Pressed {
@@ -393,6 +412,18 @@ fn handle_settings_buttons(
                     **t = draw_mode_label(&settings.0.draw_mode);
                 }
             }
+            SettingsButton::CycleAnimSpeed => {
+                settings.0.animation_speed = match settings.0.animation_speed {
+                    AnimSpeed::Normal => AnimSpeed::Fast,
+                    AnimSpeed::Fast => AnimSpeed::Instant,
+                    AnimSpeed::Instant => AnimSpeed::Normal,
+                };
+                persist(&path, &settings.0);
+                changed.send(SettingsChangedEvent(settings.0.clone()));
+                if let Ok(mut t) = anim_speed_text.get_single_mut() {
+                    **t = anim_speed_label(&settings.0.animation_speed);
+                }
+            }
             SettingsButton::ToggleTheme => {
                 settings.0.theme = match settings.0.theme {
                     Theme::Green => Theme::Blue,
@@ -439,6 +470,14 @@ fn draw_mode_label(mode: &DrawMode) -> String {
     match mode {
         DrawMode::DrawOne => "Draw 1".into(),
         DrawMode::DrawThree => "Draw 3".into(),
+    }
+}
+
+fn anim_speed_label(speed: &AnimSpeed) -> String {
+    match speed {
+        AnimSpeed::Normal => "Normal".into(),
+        AnimSpeed::Fast => "Fast".into(),
+        AnimSpeed::Instant => "Instant".into(),
     }
 }
 
@@ -536,6 +575,28 @@ fn spawn_settings_panel(
                         TextColor(Color::WHITE),
                     ));
                     icon_button(row, "⇄", SettingsButton::ToggleDrawMode);
+                });
+
+                // Animation speed row
+                card.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                })
+                .with_children(|row| {
+                    row.spawn((
+                        Text::new("Anim Speed"),
+                        TextFont { font_size: 18.0, ..default() },
+                        TextColor(Color::srgb(0.85, 0.85, 0.80)),
+                    ));
+                    row.spawn((
+                        AnimSpeedText,
+                        Text::new(anim_speed_label(&settings.animation_speed)),
+                        TextFont { font_size: 18.0, ..default() },
+                        TextColor(Color::WHITE),
+                    ));
+                    icon_button(row, "⇄", SettingsButton::CycleAnimSpeed);
                 });
 
                 // --- Appearance section ---

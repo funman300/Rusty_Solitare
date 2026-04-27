@@ -19,7 +19,7 @@ use solitaire_core::card::{Card, Rank, Suit};
 use solitaire_core::game_state::GameState;
 use solitaire_core::pile::PileType;
 
-use crate::animation_plugin::{CardAnim, SLIDE_SECS};
+use crate::animation_plugin::{CardAnim, EffectiveSlideDuration};
 use crate::events::StateChangedEvent;
 use crate::game_plugin::GameMutation;
 use crate::layout::{Layout, LayoutResource};
@@ -69,10 +69,12 @@ fn sync_cards_startup(
     commands: Commands,
     game: Res<GameStateResource>,
     layout: Option<Res<LayoutResource>>,
+    slide_dur: Option<Res<EffectiveSlideDuration>>,
     entities: Query<(Entity, &CardEntity, &Transform)>,
 ) {
     if let Some(layout) = layout {
-        sync_cards(commands, &game.0, &layout.0, &entities);
+        let slide_secs = slide_dur.map_or(0.15, |d| d.slide_secs);
+        sync_cards(commands, &game.0, &layout.0, slide_secs, &entities);
     }
 }
 
@@ -81,13 +83,15 @@ fn sync_cards_on_change(
     commands: Commands,
     game: Res<GameStateResource>,
     layout: Option<Res<LayoutResource>>,
+    slide_dur: Option<Res<EffectiveSlideDuration>>,
     entities: Query<(Entity, &CardEntity, &Transform)>,
 ) {
     if events.read().next().is_none() {
         return;
     }
     if let Some(layout) = layout {
-        sync_cards(commands, &game.0, &layout.0, &entities);
+        let slide_secs = slide_dur.map_or(0.15, |d| d.slide_secs);
+        sync_cards(commands, &game.0, &layout.0, slide_secs, &entities);
     }
 }
 
@@ -95,6 +99,7 @@ fn sync_cards(
     mut commands: Commands,
     game: &GameState,
     layout: &Layout,
+    slide_secs: f32,
     entities: &Query<(Entity, &CardEntity, &Transform)>,
 ) {
     let positions = card_positions(game, layout);
@@ -118,7 +123,7 @@ fn sync_cards(
     for (card, position, z) in positions {
         match existing.get(&card.id) {
             Some(&(entity, cur)) => {
-                update_card_entity(&mut commands, entity, &card, position, z, layout, cur)
+                update_card_entity(&mut commands, entity, &card, position, z, layout, slide_secs, cur)
             }
             None => spawn_card_entity(&mut commands, &card, position, z, layout),
         }
@@ -202,6 +207,7 @@ fn spawn_card_entity(commands: &mut Commands, card: &Card, pos: Vec2, z: f32, la
         });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_card_entity(
     commands: &mut Commands,
     entity: Entity,
@@ -209,6 +215,7 @@ fn update_card_entity(
     pos: Vec2,
     z: f32,
     layout: &Layout,
+    slide_secs: f32,
     cur: Vec3,
 ) {
     let body_colour = if card.face_up {
@@ -227,7 +234,7 @@ fn update_card_entity(
     });
 
     // Slide to the new position when it differs meaningfully; snap otherwise.
-    if (cur.truncate() - target.truncate()).length() > 1.0 {
+    if (cur.truncate() - target.truncate()).length() > 1.0 && slide_secs > 0.0 {
         let start = Vec3::new(cur.x, cur.y, z); // update Z immediately
         commands
             .entity(entity)
@@ -236,7 +243,7 @@ fn update_card_entity(
                 start,
                 target,
                 elapsed: 0.0,
-                duration: SLIDE_SECS,
+                duration: slide_secs,
                 delay: 0.0,
             });
     } else {

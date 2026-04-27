@@ -27,12 +27,24 @@ use crate::sync_plugin::SyncProviderResource;
 /// Bonus XP awarded for completing today's daily challenge.
 pub const DAILY_BONUS_XP: u64 = 100;
 
-/// The active daily challenge — date + RNG seed for that date's deal.
-#[derive(Resource, Debug, Clone, Copy)]
+/// The active daily challenge — date + RNG seed for that date's deal,
+/// plus optional goal metadata fetched from the server.
+#[derive(Resource, Debug, Clone)]
 pub struct DailyChallengeResource {
     pub date: NaiveDate,
     pub seed: u64,
+    /// Human-readable goal description from the server, e.g. "Win in under 5 minutes".
+    pub goal_description: Option<String>,
+    /// Optional target score the server requires for this challenge.
+    pub target_score: Option<i32>,
+    /// Optional time limit in seconds the server imposes.
+    pub max_time_secs: Option<u64>,
 }
+
+/// Fired when the player presses C to start the daily challenge.
+/// Carries the current goal description so it can be displayed as a toast.
+#[derive(Event, Debug, Clone)]
+pub struct DailyGoalAnnouncementEvent(pub String);
 
 impl DailyChallengeResource {
     pub fn for_today() -> Self {
@@ -40,6 +52,9 @@ impl DailyChallengeResource {
         Self {
             date,
             seed: daily_seed_for(date),
+            goal_description: None,
+            target_score: None,
+            max_time_secs: None,
         }
     }
 }
@@ -63,6 +78,7 @@ impl Plugin for DailyChallengePlugin {
         app.insert_resource(DailyChallengeResource::for_today())
             .init_resource::<DailyChallengeTask>()
             .add_event::<DailyChallengeCompletedEvent>()
+            .add_event::<DailyGoalAnnouncementEvent>()
             .add_event::<GameWonEvent>()
             .add_event::<NewGameRequestEvent>()
             .add_systems(Startup, fetch_server_challenge)
@@ -115,9 +131,13 @@ fn poll_server_challenge(
     if date == daily.date {
         let old_seed = daily.seed;
         daily.seed = goal.seed;
+        daily.goal_description = Some(goal.description.clone());
+        daily.target_score = goal.target_score;
+        daily.max_time_secs = goal.max_time_secs;
         info!(
-            "daily challenge seed updated from server: {old_seed} → {}",
-            goal.seed
+            "daily challenge seed updated from server: {old_seed} → {} ({})",
+            goal.seed,
+            goal.description
         );
     }
 }
@@ -155,12 +175,18 @@ fn handle_start_daily_request(
     keys: Res<ButtonInput<KeyCode>>,
     daily: Res<DailyChallengeResource>,
     mut new_game: EventWriter<NewGameRequestEvent>,
+    mut announce: EventWriter<DailyGoalAnnouncementEvent>,
 ) {
     if keys.just_pressed(KeyCode::KeyC) {
         new_game.send(NewGameRequestEvent {
             seed: Some(daily.seed),
             mode: None,
         });
+        let desc = daily
+            .goal_description
+            .clone()
+            .unwrap_or_else(|| "Daily Challenge".to_string());
+        announce.send(DailyGoalAnnouncementEvent(desc));
     }
 }
 
@@ -279,5 +305,59 @@ mod tests {
         let fired: Vec<_> = cursor.read(events).copied().collect();
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].seed, Some(daily_seed));
+    }
+
+    #[test]
+    fn pressing_c_fires_announcement_event_with_description() {
+        let mut app = headless_app();
+        // Inject a goal description.
+        app.world_mut()
+            .resource_mut::<DailyChallengeResource>()
+            .goal_description = Some("Win in under 5 minutes".to_string());
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyC);
+        app.update();
+
+        let events = app.world().resource::<Events<DailyGoalAnnouncementEvent>>();
+        let mut cursor = events.get_cursor();
+        let fired: Vec<_> = cursor.read(events).cloned().collect();
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].0, "Win in under 5 minutes");
+    }
+
+    #[test]
+    fn pressing_c_with_no_description_uses_fallback() {
+        let mut app = headless_app();
+        // Ensure no description is set.
+        assert!(app.world().resource::<DailyChallengeResource>().goal_description.is_none());
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyC);
+        app.update();
+
+        let events = app.world().resource::<Events<DailyGoalAnnouncementEvent>>();
+        let mut cursor = events.get_cursor();
+        let fired: Vec<_> = cursor.read(events).cloned().collect();
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].0, "Daily Challenge");
+    }
+
+    #[test]
+    fn goal_fields_stored_from_server_fetch() {
+        let mut app = headless_app();
+        // Simulate what poll_server_challenge does when the server responds.
+        {
+            let mut daily = app.world_mut().resource_mut::<DailyChallengeResource>();
+            daily.goal_description = Some("Win without undo".to_string());
+            daily.target_score = Some(1_000);
+            daily.max_time_secs = Some(300);
+        }
+        let r = app.world().resource::<DailyChallengeResource>();
+        assert_eq!(r.goal_description.as_deref(), Some("Win without undo"));
+        assert_eq!(r.target_score, Some(1_000));
+        assert_eq!(r.max_time_secs, Some(300));
     }
 }

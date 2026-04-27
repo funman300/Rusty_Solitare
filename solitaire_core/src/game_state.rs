@@ -80,6 +80,10 @@ pub struct GameState {
     /// Number of times `undo()` has been successfully invoked this game.
     /// Used by achievement conditions like `no_undo`.
     pub undo_count: u32,
+    /// Number of times the waste pile has been recycled back to stock this game.
+    /// Used by the `comeback` achievement condition.
+    #[serde(default)]
+    pub recycle_count: u32,
     undo_stack: VecDeque<StateSnapshot>,
 }
 
@@ -116,6 +120,7 @@ impl GameState {
             is_won: false,
             is_auto_completable: false,
             undo_count: 0,
+            recycle_count: 0,
             undo_stack: VecDeque::new(),
         }
     }
@@ -167,6 +172,7 @@ impl GameState {
                 card.face_up = false;
                 stock.cards.push(card);
             }
+            self.recycle_count = self.recycle_count.saturating_add(1);
             return Ok(());
         }
 
@@ -479,6 +485,24 @@ mod tests {
         g.draw().unwrap(); // recycle
         assert_eq!(g.piles[&PileType::Stock].cards.len(), waste_count);
         assert!(g.piles[&PileType::Waste].cards.is_empty());
+    }
+
+    #[test]
+    fn recycle_count_increments_on_each_waste_recycle() {
+        let mut g = new_game();
+        assert_eq!(g.recycle_count, 0);
+        // Drain entire stock to waste.
+        while !g.piles[&PileType::Stock].cards.is_empty() {
+            g.draw().unwrap();
+        }
+        g.draw().unwrap(); // first recycle
+        assert_eq!(g.recycle_count, 1);
+        // Drain again and recycle a second time.
+        while !g.piles[&PileType::Stock].cards.is_empty() {
+            g.draw().unwrap();
+        }
+        g.draw().unwrap(); // second recycle
+        assert_eq!(g.recycle_count, 2);
     }
 
     #[test]

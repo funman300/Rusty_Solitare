@@ -32,6 +32,11 @@ pub struct AchievementContext {
 
     /// Local hour (0–23) at the time of win. `None` if unknown.
     pub wall_clock_hour: Option<u32>,
+
+    /// Number of times waste was recycled back to stock during the won game.
+    pub last_win_recycle_count: u32,
+    /// `true` if the game was played in Zen mode.
+    pub last_win_is_zen: bool,
 }
 
 /// Reward granted when an achievement is first unlocked.
@@ -117,6 +122,15 @@ fn speed_and_skill(c: &AchievementContext) -> bool {
 }
 fn daily_devotee(c: &AchievementContext) -> bool {
     c.daily_challenge_streak >= 7
+}
+fn perfectionist(c: &AchievementContext) -> bool {
+    !c.last_win_used_undo && c.last_win_score >= 5_000
+}
+fn comeback(c: &AchievementContext) -> bool {
+    c.last_win_recycle_count >= 3
+}
+fn zen_winner(c: &AchievementContext) -> bool {
+    c.last_win_is_zen
 }
 
 /// All currently-evaluable achievements. Order is stable so persistence files
@@ -242,6 +256,30 @@ pub const ALL_ACHIEVEMENTS: &[AchievementDef] = &[
         reward: Some(Reward::Background(3)),
         condition: daily_devotee,
     },
+    AchievementDef {
+        id: "perfectionist",
+        name: "Perfectionist",
+        description: "Win without undo and score at least 5,000",
+        secret: false,
+        reward: Some(Reward::Badge),
+        condition: perfectionist,
+    },
+    AchievementDef {
+        id: "comeback",
+        name: "???",
+        description: "A secret achievement",
+        secret: true,
+        reward: Some(Reward::Background(4)),
+        condition: comeback,
+    },
+    AchievementDef {
+        id: "zen_winner",
+        name: "???",
+        description: "A secret achievement",
+        secret: true,
+        reward: Some(Reward::Badge),
+        condition: zen_winner,
+    },
 ];
 
 /// Return every `AchievementDef` whose condition is satisfied by `ctx`.
@@ -274,6 +312,8 @@ mod tests {
             last_win_time_seconds: u64::MAX,
             last_win_used_undo: true,
             wall_clock_hour: None,
+            last_win_recycle_count: 0,
+            last_win_is_zen: false,
         }
     }
 
@@ -365,6 +405,48 @@ mod tests {
         c.daily_challenge_streak = 7;
         let ids: Vec<&str> = check_achievements(&c).iter().map(|d| d.id).collect();
         assert!(ids.contains(&"daily_devotee"));
+    }
+
+    #[test]
+    fn perfectionist_requires_no_undo_and_high_score() {
+        let mut c = ctx();
+        c.last_win_used_undo = false;
+        c.last_win_score = 5_000;
+        let ids: Vec<&str> = check_achievements(&c).iter().map(|d| d.id).collect();
+        assert!(ids.contains(&"perfectionist"));
+
+        c.last_win_used_undo = true;
+        let ids: Vec<&str> = check_achievements(&c).iter().map(|d| d.id).collect();
+        assert!(!ids.contains(&"perfectionist"));
+
+        c.last_win_used_undo = false;
+        c.last_win_score = 4_999;
+        let ids: Vec<&str> = check_achievements(&c).iter().map(|d| d.id).collect();
+        assert!(!ids.contains(&"perfectionist"));
+    }
+
+    #[test]
+    fn comeback_requires_at_least_three_recycles() {
+        let mut c = ctx();
+        c.last_win_recycle_count = 2;
+        let ids: Vec<&str> = check_achievements(&c).iter().map(|d| d.id).collect();
+        assert!(!ids.contains(&"comeback"));
+
+        c.last_win_recycle_count = 3;
+        let ids: Vec<&str> = check_achievements(&c).iter().map(|d| d.id).collect();
+        assert!(ids.contains(&"comeback"));
+    }
+
+    #[test]
+    fn zen_winner_requires_zen_mode() {
+        let mut c = ctx();
+        c.last_win_is_zen = false;
+        let ids: Vec<&str> = check_achievements(&c).iter().map(|d| d.id).collect();
+        assert!(!ids.contains(&"zen_winner"));
+
+        c.last_win_is_zen = true;
+        let ids: Vec<&str> = check_achievements(&c).iter().map(|d| d.id).collect();
+        assert!(ids.contains(&"zen_winner"));
     }
 
     #[test]

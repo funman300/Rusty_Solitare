@@ -114,6 +114,8 @@ fn evaluate_on_win(
         last_win_time_seconds: ev.time_seconds,
         last_win_used_undo: game.0.undo_count > 0,
         wall_clock_hour: Some(Local::now().hour()),
+        last_win_recycle_count: game.0.recycle_count,
+        last_win_is_zen: game.0.mode == solitaire_core::game_state::GameMode::Zen,
     };
 
     let hits = check_achievements(&ctx);

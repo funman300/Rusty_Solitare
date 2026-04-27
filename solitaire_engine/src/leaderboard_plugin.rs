@@ -11,8 +11,10 @@
 
 use bevy::prelude::*;
 use bevy::tasks::{futures_lite::future, AsyncComputeTaskPool, Task};
+use solitaire_data::settings::SyncBackend;
 use solitaire_sync::LeaderboardEntry;
 
+use crate::settings_plugin::SettingsResource;
 use crate::sync_plugin::SyncProviderResource;
 
 // ---------------------------------------------------------------------------
@@ -39,6 +41,14 @@ struct LeaderboardFetchTask(Option<Task<Result<Vec<LeaderboardEntry>, String>>>)
 #[derive(Component, Debug)]
 pub struct LeaderboardScreen;
 
+/// Marker on the "Opt In" button inside the leaderboard panel.
+#[derive(Component, Debug)]
+struct LeaderboardOptInButton;
+
+/// In-flight opt-in task.
+#[derive(Resource, Default)]
+struct OptInTask(Option<Task<Result<(), String>>>);
+
 // ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
@@ -51,6 +61,7 @@ impl Plugin for LeaderboardPlugin {
             .init_resource::<LeaderboardFetchResult>()
             .init_resource::<LeaderboardFetchTask>()
             .init_resource::<ClosedThisFrame>()
+            .init_resource::<OptInTask>()
             .add_systems(
                 Update,
                 (
@@ -58,6 +69,8 @@ impl Plugin for LeaderboardPlugin {
                     toggle_leaderboard_screen,
                     poll_leaderboard_fetch,
                     update_leaderboard_panel,
+                    handle_opt_in_button,
+                    poll_opt_in_task,
                 )
                     .chain(),
             );
@@ -154,6 +167,52 @@ fn update_leaderboard_panel(
     }
 }
 
+/// Fires an async opt-in request when the player presses the "Opt In" button.
+///
+/// The display name is taken from the configured server username in
+/// `SettingsResource`. If no server backend is active, the button is a no-op.
+fn handle_opt_in_button(
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<LeaderboardOptInButton>)>,
+    settings: Option<Res<SettingsResource>>,
+    provider: Option<Res<SyncProviderResource>>,
+    mut task_res: ResMut<OptInTask>,
+) {
+    if task_res.0.is_some() {
+        return; // already in flight
+    }
+    let Some(provider) = provider else { return };
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        let display_name = settings
+            .as_ref()
+            .and_then(|s| {
+                if let SyncBackend::SolitaireServer { username, .. } = &s.0.sync_backend {
+                    Some(username.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "Player".to_string());
+
+        let provider = provider.0.clone();
+        let task = AsyncComputeTaskPool::get()
+            .spawn(async move { provider.opt_in_leaderboard(&display_name).await.map_err(|e| e.to_string()) });
+        task_res.0 = Some(task);
+    }
+}
+
+/// Polls the opt-in task; logs on error, clears on completion.
+fn poll_opt_in_task(mut task_res: ResMut<OptInTask>) {
+    let Some(task) = task_res.0.as_mut() else { return };
+    let Some(result) = future::block_on(future::poll_once(task)) else { return };
+    task_res.0 = None;
+    if let Err(e) = result {
+        warn!("leaderboard opt-in failed: {e}");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // UI construction
 // ---------------------------------------------------------------------------
@@ -198,7 +257,7 @@ fn spawn_leaderboard_screen(commands: &mut Commands, entries: Option<&[Leaderboa
                     TextColor(Color::WHITE),
                 ));
                 card.spawn((
-                    Text::new("Press L to close"),
+                    Text::new("Press L to close  •  Opt in to appear on the board"),
                     TextFont { font_size: 14.0, ..default() },
                     TextColor(Color::srgb(0.55, 0.55, 0.60)),
                 ));
@@ -212,6 +271,28 @@ fn spawn_leaderboard_screen(commands: &mut Commands, entries: Option<&[Leaderboa
                     },
                     BackgroundColor(Color::srgb(0.25, 0.25, 0.30)),
                 ));
+
+                // Opt-in button
+                card.spawn((
+                    LeaderboardOptInButton,
+                    Button,
+                    Node {
+                        padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
+                        justify_content: JustifyContent::Center,
+                        margin: UiRect::bottom(Val::Px(8.0)),
+                        align_self: AlignSelf::FlexStart,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.18, 0.35, 0.50)),
+                    BorderRadius::all(Val::Px(4.0)),
+                ))
+                .with_children(|b| {
+                    b.spawn((
+                        Text::new("Opt In to Leaderboard"),
+                        TextFont { font_size: 15.0, ..default() },
+                        TextColor(Color::WHITE),
+                    ));
+                });
 
                 match entries {
                     None => {

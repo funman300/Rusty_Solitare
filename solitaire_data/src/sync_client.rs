@@ -225,6 +225,42 @@ impl SyncProvider for SolitaireServerClient {
         }
     }
 
+    async fn opt_in_leaderboard(&self, display_name: &str) -> Result<(), SyncError> {
+        let token = self.access_token()?;
+        let url = format!("{}/api/leaderboard/opt-in", self.base_url);
+
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(&token)
+            .json(&serde_json::json!({ "display_name": display_name }))
+            .send()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.refresh_token().await?;
+            let new_token = self.access_token()?;
+            let resp = self
+                .client
+                .post(&url)
+                .bearer_auth(new_token)
+                .json(&serde_json::json!({ "display_name": display_name }))
+                .send()
+                .await
+                .map_err(|e| SyncError::Network(e.to_string()))?;
+            if !resp.status().is_success() {
+                return Err(SyncError::Auth(format!("opt-in failed: {}", resp.status())));
+            }
+            return Ok(());
+        }
+
+        if !resp.status().is_success() {
+            return Err(SyncError::Auth(format!("opt-in failed: {}", resp.status())));
+        }
+        Ok(())
+    }
+
     async fn fetch_leaderboard(&self) -> Result<Vec<LeaderboardEntry>, SyncError> {
         let token = self.access_token()?;
         let url = format!("{}/api/leaderboard", self.base_url);
