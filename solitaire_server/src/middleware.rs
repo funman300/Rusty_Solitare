@@ -100,6 +100,128 @@ pub fn validate_refresh_token(token: &str, secret: &str) -> Result<Claims, AppEr
 // Axum extractor — allows handlers to receive AuthenticatedUser directly
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{HeaderMap, HeaderValue};
+    use chrono::Utc;
+    use jsonwebtoken::{encode, EncodingKey, Header};
+
+    const SECRET: &str = "test_secret_for_middleware_unit_tests_only";
+
+    fn make_token(user_id: &str, kind: &str, exp_offset_secs: i64) -> String {
+        let exp = (Utc::now() + chrono::Duration::seconds(exp_offset_secs)).timestamp() as usize;
+        let claims = Claims {
+            sub: user_id.to_string(),
+            exp,
+            kind: kind.to_string(),
+        };
+        encode(&Header::default(), &claims, &EncodingKey::from_secret(SECRET.as_bytes())).unwrap()
+    }
+
+    // -----------------------------------------------------------------------
+    // extract_bearer_token
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_bearer_token_returns_token_from_valid_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_static("Bearer my.jwt.token"),
+        );
+        assert_eq!(extract_bearer_token(&headers), Some("my.jwt.token".to_string()));
+    }
+
+    #[test]
+    fn extract_bearer_token_returns_none_when_header_missing() {
+        let headers = HeaderMap::new();
+        assert_eq!(extract_bearer_token(&headers), None);
+    }
+
+    #[test]
+    fn extract_bearer_token_returns_none_for_wrong_prefix() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_static("Token my.jwt.token"),
+        );
+        assert_eq!(extract_bearer_token(&headers), None);
+    }
+
+    #[test]
+    fn extract_bearer_token_returns_none_for_empty_value() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Authorization", HeaderValue::from_static(""));
+        assert_eq!(extract_bearer_token(&headers), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // validate_access_token
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn validate_access_token_accepts_valid_access_token() {
+        let token = make_token("user-abc", "access", 3600);
+        let claims = validate_access_token(&token, SECRET).expect("should accept valid access token");
+        assert_eq!(claims.sub, "user-abc");
+        assert_eq!(claims.kind, "access");
+    }
+
+    #[test]
+    fn validate_access_token_rejects_refresh_token() {
+        let token = make_token("user-abc", "refresh", 3600);
+        let result = validate_access_token(&token, SECRET);
+        assert!(result.is_err(), "refresh token must be rejected by access validator");
+    }
+
+    #[test]
+    fn validate_access_token_rejects_expired_token() {
+        // Use -7200 (2 hours past) to exceed jsonwebtoken's default 60-second leeway.
+        let token = make_token("user-abc", "access", -7200);
+        let result = validate_access_token(&token, SECRET);
+        assert!(result.is_err(), "expired token must be rejected");
+    }
+
+    #[test]
+    fn validate_access_token_rejects_wrong_secret() {
+        let token = make_token("user-abc", "access", 3600);
+        let result = validate_access_token(&token, "wrong_secret");
+        assert!(result.is_err(), "token signed with different secret must be rejected");
+    }
+
+    // -----------------------------------------------------------------------
+    // validate_refresh_token
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn validate_refresh_token_accepts_valid_refresh_token() {
+        let token = make_token("user-xyz", "refresh", 86400);
+        let claims = validate_refresh_token(&token, SECRET).expect("should accept valid refresh token");
+        assert_eq!(claims.sub, "user-xyz");
+        assert_eq!(claims.kind, "refresh");
+    }
+
+    #[test]
+    fn validate_refresh_token_rejects_access_token() {
+        let token = make_token("user-xyz", "access", 86400);
+        let result = validate_refresh_token(&token, SECRET);
+        assert!(result.is_err(), "access token must be rejected by refresh validator");
+    }
+
+    #[test]
+    fn validate_refresh_token_rejects_expired_token() {
+        // Use -7200 (2 hours past) to exceed jsonwebtoken's default 60-second leeway.
+        let token = make_token("user-xyz", "refresh", -7200);
+        let result = validate_refresh_token(&token, SECRET);
+        assert!(result.is_err(), "expired refresh token must be rejected");
+    }
+}
+
 #[axum::async_trait]
 impl<S> FromRequestParts<S> for AuthenticatedUser
 where
