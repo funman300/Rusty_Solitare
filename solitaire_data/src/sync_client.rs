@@ -12,7 +12,7 @@
 //! without matching on [`SyncBackend`] anywhere else in the codebase.
 
 use async_trait::async_trait;
-use solitaire_sync::{SyncPayload, SyncResponse};
+use solitaire_sync::{LeaderboardEntry, SyncPayload, SyncResponse};
 
 use crate::{
     auth_tokens::{load_access_token, load_refresh_token, store_tokens},
@@ -199,6 +199,34 @@ impl SyncProvider for SolitaireServerClient {
     fn is_authenticated(&self) -> bool {
         load_access_token(&self.username).is_ok()
     }
+
+    async fn fetch_leaderboard(&self) -> Result<Vec<LeaderboardEntry>, SyncError> {
+        let token = self.access_token()?;
+        let url = format!("{}/api/leaderboard", self.base_url);
+
+        let resp = self
+            .client
+            .get(&url)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.refresh_token().await?;
+            let new_token = self.access_token()?;
+            let resp = self
+                .client
+                .get(&url)
+                .bearer_auth(new_token)
+                .send()
+                .await
+                .map_err(|e| SyncError::Network(e.to_string()))?;
+            return extract_leaderboard_body(resp).await;
+        }
+
+        extract_leaderboard_body(resp).await
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +245,18 @@ async fn extract_pull_body(resp: reqwest::Response) -> Result<SyncPayload, SyncE
         Ok(sync_resp.merged)
     } else {
         Err(SyncError::Auth(format!("server returned {status}")))
+    }
+}
+
+/// Deserialize a leaderboard response body as `Vec<LeaderboardEntry>`.
+async fn extract_leaderboard_body(resp: reqwest::Response) -> Result<Vec<LeaderboardEntry>, SyncError> {
+    let status = resp.status();
+    if status.is_success() {
+        resp.json()
+            .await
+            .map_err(|e| SyncError::Serialization(e.to_string()))
+    } else {
+        Err(SyncError::Network(format!("server returned {status}")))
     }
 }
 

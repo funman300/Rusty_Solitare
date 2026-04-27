@@ -10,6 +10,7 @@ pub mod daily_challenge_plugin;
 pub mod events;
 pub mod game_plugin;
 pub mod help_plugin;
+pub mod leaderboard_plugin;
 pub mod input_plugin;
 pub mod layout;
 pub mod onboarding_plugin;
@@ -42,6 +43,7 @@ pub use events::{
 };
 pub use game_plugin::{GameMutation, GamePlugin, GameStatePath};
 pub use help_plugin::{HelpPlugin, HelpScreen};
+pub use leaderboard_plugin::{LeaderboardPlugin, LeaderboardResource, LeaderboardScreen};
 pub use input_plugin::InputPlugin;
 pub use onboarding_plugin::{OnboardingPlugin, OnboardingScreen};
 pub use pause_plugin::{PausePlugin, PauseScreen, PausedResource};
