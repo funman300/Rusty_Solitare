@@ -95,20 +95,47 @@ pub fn make_refresh_token(user_id: &str, secret: &str) -> Result<String, AppErro
 // ---------------------------------------------------------------------------
 
 /// `POST /api/auth/register` — create a new account and return tokens.
+/// Minimum and maximum allowed username lengths.
+const USERNAME_MIN: usize = 3;
+const USERNAME_MAX: usize = 32;
+/// Minimum password length.
+const PASSWORD_MIN: usize = 8;
+
+/// Returns `true` if every character in `s` is ASCII alphanumeric or `_`.
+fn username_chars_ok(s: &str) -> bool {
+    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 pub async fn register(
     State(pool): State<SqlitePool>,
     Json(body): Json<AuthRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
-    // Validate input minimally.
-    if body.username.trim().is_empty() || body.password.is_empty() {
-        return Err(AppError::BadRequest("username and password are required".into()));
+    // Validate username: 3–32 characters, alphanumeric + underscores only.
+    let trimmed = body.username.trim();
+    if trimmed.len() < USERNAME_MIN || trimmed.len() > USERNAME_MAX {
+        return Err(AppError::BadRequest(format!(
+            "username must be {USERNAME_MIN}–{USERNAME_MAX} characters"
+        )));
     }
+    if !username_chars_ok(trimmed) {
+        return Err(AppError::BadRequest(
+            "username may only contain letters, digits, and underscores".into(),
+        ));
+    }
+    // Validate password: minimum 8 characters.
+    if body.password.len() < PASSWORD_MIN {
+        return Err(AppError::BadRequest(format!(
+            "password must be at least {PASSWORD_MIN} characters"
+        )));
+    }
+
+    let username = trimmed.to_string();
 
     // Check for duplicate username. SQLite returns TEXT as nullable so we
     // flatten the Option<Option<String>> produced by fetch_optional.
     let existing: Option<String> = sqlx::query_scalar!(
         "SELECT id FROM users WHERE username = ?",
-        body.username
+        username
     )
     .fetch_optional(&pool)
     .await?
@@ -125,7 +152,7 @@ pub async fn register(
     sqlx::query!(
         "INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
         user_id,
-        body.username,
+        username,
         password_hash,
         now
     )

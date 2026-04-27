@@ -208,7 +208,7 @@ async fn register_creates_account_and_returns_tokens() {
     let resp = post_json(
         app,
         "/api/auth/register",
-        serde_json::json!({ "username": "alice", "password": "hunter2" }),
+        serde_json::json!({ "username": "alice", "password": "hunter2!" }),
     )
     .await;
 
@@ -229,7 +229,7 @@ async fn register_creates_account_and_returns_tokens() {
 async fn register_duplicate_username_returns_conflict() {
     set_jwt_secret();
     let app = build_test_router(test_pool().await);
-    let creds = serde_json::json!({ "username": "bob", "password": "secret" });
+    let creds = serde_json::json!({ "username": "bob", "password": "s3cr3t!!" });
 
     // First registration succeeds.
     let first = post_json(app.clone(), "/api/auth/register", creds.clone()).await;
@@ -242,6 +242,48 @@ async fn register_duplicate_username_returns_conflict() {
         StatusCode::CONFLICT,
         "duplicate username must return 409"
     );
+}
+
+/// Short username (< 3 chars) is rejected with 400.
+#[tokio::test]
+async fn register_rejects_short_username() {
+    set_jwt_secret();
+    let app = build_test_router(test_pool().await);
+    let resp = post_json(
+        app,
+        "/api/auth/register",
+        serde_json::json!({ "username": "ab", "password": "validpassword" }),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+/// Username with disallowed characters is rejected with 400.
+#[tokio::test]
+async fn register_rejects_invalid_username_chars() {
+    set_jwt_secret();
+    let app = build_test_router(test_pool().await);
+    let resp = post_json(
+        app,
+        "/api/auth/register",
+        serde_json::json!({ "username": "bad name!", "password": "validpassword" }),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+/// Password shorter than 8 characters is rejected with 400.
+#[tokio::test]
+async fn register_rejects_short_password() {
+    set_jwt_secret();
+    let app = build_test_router(test_pool().await);
+    let resp = post_json(
+        app,
+        "/api/auth/register",
+        serde_json::json!({ "username": "validuser", "password": "short" }),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
 /// `POST /api/auth/login` with correct credentials returns 200 with both tokens.
@@ -433,7 +475,7 @@ async fn pull_before_push_returns_default_payload() {
     set_jwt_secret();
     let app = build_test_router(test_pool().await);
 
-    let (access, _) = register_user(app.clone(), "ivan", "nopush").await;
+    let (access, _) = register_user(app.clone(), "ivan", "nopush!!").await;
 
     let resp = get_authed(app, "/api/sync/pull", &access).await;
     assert_eq!(resp.status(), StatusCode::OK, "pull with no data must return 200");
