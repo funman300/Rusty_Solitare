@@ -518,13 +518,15 @@ fn spawn_settings_panel(
             ZIndex(200),
         ))
         .with_children(|root| {
-            // Inner card
+            // Inner card — max_height + clip_y keeps it on-screen on small windows.
             root.spawn((
                 Node {
                     flex_direction: FlexDirection::Column,
                     padding: UiRect::all(Val::Px(28.0)),
                     row_gap: Val::Px(14.0),
                     min_width: Val::Px(340.0),
+                    max_height: Val::Percent(88.0),
+                    overflow: Overflow::clip_y(),
                     ..default()
                 },
                 BackgroundColor(Color::srgb(0.11, 0.11, 0.14)),
