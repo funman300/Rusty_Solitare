@@ -15,6 +15,7 @@ use solitaire_data::{
     WEEKLY_GOALS,
 };
 
+use crate::challenge_plugin::challenge_progress_label;
 use crate::events::{GameWonEvent, NewGameRequestEvent};
 use crate::game_plugin::GameMutation;
 use crate::progress_plugin::ProgressResource;
@@ -193,6 +194,10 @@ fn spawn_stats_screen(
         lines.push(format!(
             "Daily Streak:  {}",
             p.daily_challenge_streak
+        ));
+        lines.push(format!(
+            "Challenge:     {}",
+            challenge_progress_label(p.challenge_index)
         ));
         lines.push(String::new());
         lines.push("-- Weekly Goals --".to_string());
