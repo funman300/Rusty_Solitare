@@ -18,7 +18,7 @@ use chrono::{Local, NaiveDate};
 use solitaire_data::{daily_seed_for, save_progress_to};
 use solitaire_sync::ChallengeGoal;
 
-use crate::events::{GameWonEvent, NewGameRequestEvent};
+use crate::events::{GameWonEvent, NewGameRequestEvent, XpAwardedEvent};
 use crate::game_plugin::GameMutation;
 use crate::progress_plugin::{ProgressResource, ProgressStoragePath, ProgressUpdate};
 use crate::resources::GameStateResource;
@@ -81,6 +81,7 @@ impl Plugin for DailyChallengePlugin {
             .add_event::<DailyGoalAnnouncementEvent>()
             .add_event::<GameWonEvent>()
             .add_event::<NewGameRequestEvent>()
+            .add_event::<XpAwardedEvent>()
             .add_systems(Startup, fetch_server_challenge)
             .add_systems(Update, poll_server_challenge)
             // record/award after the base ProgressUpdate so we don't fight
@@ -149,6 +150,7 @@ fn handle_daily_completion(
     mut progress: ResMut<ProgressResource>,
     path: Res<ProgressStoragePath>,
     mut completed: EventWriter<DailyChallengeCompletedEvent>,
+    mut xp_awarded: EventWriter<XpAwardedEvent>,
 ) {
     for ev in wins.read() {
         if game.0.seed != daily.seed {
@@ -170,6 +172,7 @@ fn handle_daily_completion(
             continue;
         }
         progress.0.add_xp(DAILY_BONUS_XP);
+        xp_awarded.send(XpAwardedEvent { amount: DAILY_BONUS_XP });
         if let Some(target) = &path.0 {
             if let Err(e) = save_progress_to(target, &progress.0) {
                 warn!("failed to save progress after daily completion: {e}");

@@ -9,7 +9,7 @@ use solitaire_data::{
     WEEKLY_GOAL_XP,
 };
 
-use crate::events::GameWonEvent;
+use crate::events::{GameWonEvent, XpAwardedEvent};
 use crate::game_plugin::GameMutation;
 use crate::progress_plugin::{LevelUpEvent, ProgressResource, ProgressStoragePath, ProgressUpdate};
 use crate::resources::GameStateResource;
@@ -27,6 +27,7 @@ impl Plugin for WeeklyGoalsPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<WeeklyGoalCompletedEvent>()
             .add_event::<GameWonEvent>()
+            .add_event::<XpAwardedEvent>()
             .add_systems(Startup, roll_weekly_goals_on_startup)
             // Run after GameMutation (so GameWonEvent is available) and
             // ProgressUpdate (so we don't fight ProgressPlugin's add_xp).
@@ -62,6 +63,7 @@ fn evaluate_weekly_goals(
     path: Res<ProgressStoragePath>,
     mut completions: EventWriter<WeeklyGoalCompletedEvent>,
     mut levelups: EventWriter<LevelUpEvent>,
+    mut xp_awarded: EventWriter<XpAwardedEvent>,
 ) {
     let mut events: Vec<&GameWonEvent> = wins.read().collect();
     if events.is_empty() {
@@ -99,6 +101,7 @@ fn evaluate_weekly_goals(
     }
 
     if bonus_xp > 0 {
+        xp_awarded.send(XpAwardedEvent { amount: bonus_xp });
         let prev_level = progress.0.add_xp(bonus_xp);
         if progress.0.leveled_up_from(prev_level) {
             levelups.send(LevelUpEvent {
