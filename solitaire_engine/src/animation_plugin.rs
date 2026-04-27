@@ -287,14 +287,24 @@ fn handle_challenge_toast(
 fn handle_settings_toast(
     mut commands: Commands,
     mut events: EventReader<SettingsChangedEvent>,
+    mut last_sfx: Local<Option<f32>>,
+    mut last_music: Local<Option<f32>>,
 ) {
     for ev in events.read() {
-        let pct = (ev.0.sfx_volume * 100.0).round() as i32;
-        spawn_toast(
-            &mut commands,
-            format!("SFX: {pct}%"),
-            VOLUME_TOAST_SECS,
-        );
+        let sfx = ev.0.sfx_volume;
+        let music = ev.0.music_volume;
+        let sfx_changed = last_sfx.is_none_or(|prev| (prev - sfx).abs() > f32::EPSILON);
+        let music_changed = last_music.is_none_or(|prev| (prev - music).abs() > f32::EPSILON);
+        *last_sfx = Some(sfx);
+        *last_music = Some(music);
+        if sfx_changed {
+            let pct = (sfx * 100.0).round() as i32;
+            spawn_toast(&mut commands, format!("SFX: {pct}%"), VOLUME_TOAST_SECS);
+        }
+        if music_changed {
+            let pct = (music * 100.0).round() as i32;
+            spawn_toast(&mut commands, format!("Music: {pct}%"), VOLUME_TOAST_SECS);
+        }
     }
 }
 
