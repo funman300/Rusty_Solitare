@@ -26,8 +26,11 @@ use crate::layout::{Layout, LayoutResource};
 use crate::resources::GameStateResource;
 use crate::settings_plugin::{SettingsChangedEvent, SettingsResource};
 
-/// Fraction of card height used as vertical offset between stacked tableau cards.
+/// Fraction of card height used as vertical offset between face-up tableau cards.
 pub const TABLEAU_FAN_FRAC: f32 = 0.25;
+
+/// Tighter fan for face-down cards in the tableau — just enough to show the stack.
+const TABLEAU_FACEDOWN_FAN_FRAC: f32 = 0.12;
 
 /// Fraction of card height used as a tiny offset between stacked cards in
 /// non-tableau piles, so stacking is visible.
@@ -196,16 +199,24 @@ fn card_positions(game: &GameState, layout: &Layout) -> Vec<(Card, Vec2, f32)> {
             continue;
         };
         let is_tableau = matches!(pile_type, PileType::Tableau(_));
-        let fan_y = if is_tableau {
-            -layout.card_size.y * TABLEAU_FAN_FRAC
-        } else {
-            0.0
-        };
 
-        for (i, card) in pile.cards.iter().enumerate() {
-            let pos = Vec2::new(base.x, base.y + fan_y * i as f32);
+        // Tableau uses a two-speed fan: face-down cards are packed tighter
+        // than face-up cards so the visible (playable) portion stands out.
+        // Non-tableau piles stack with a negligible offset.
+        let cards = &pile.cards;
+        let mut y_offset = 0.0_f32;
+        for (i, card) in cards.iter().enumerate() {
+            let pos = Vec2::new(base.x, base.y + y_offset);
             let z = 1.0 + (i as f32) * STACK_FAN_FRAC;
             out.push((card.clone(), pos, z));
+            if is_tableau {
+                let step = if card.face_up {
+                    TABLEAU_FAN_FRAC
+                } else {
+                    TABLEAU_FACEDOWN_FAN_FRAC
+                };
+                y_offset -= layout.card_size.y * step;
+            }
         }
     }
     out
@@ -500,5 +511,30 @@ mod tests {
         for w in ys.windows(2) {
             assert!(w[0] > w[1]);
         }
+    }
+
+    #[test]
+    fn facedown_cards_use_tighter_fan_than_uniform_faceup_fan() {
+        let g = GameState::new(42, solitaire_core::game_state::DrawMode::DrawOne);
+        let layout = crate::layout::compute_layout(Vec2::new(1280.0, 800.0));
+        let positions = card_positions(&g, &layout);
+
+        // Tableau(6) has 7 cards: 6 face-down + 1 face-up on top.
+        // Each face-down card contributes TABLEAU_FACEDOWN_FAN_FRAC to the column span.
+        // Total span should be 6 * FACEDOWN < 6 * TABLEAU_FAN_FRAC (the old uniform value).
+        let col6_base = layout.pile_positions[&PileType::Tableau(6)];
+        let mut col6_ys: Vec<f32> = positions
+            .iter()
+            .filter(|(_, pos, _)| (pos.x - col6_base.x).abs() < 1e-3)
+            .map(|(_, pos, _)| pos.y)
+            .collect();
+        col6_ys.sort_by(|a, b| b.partial_cmp(a).unwrap());
+        assert_eq!(col6_ys.len(), 7);
+        let actual_span = col6_ys[0] - col6_ys[6];
+        let uniform_span = 6.0 * TABLEAU_FAN_FRAC * layout.card_size.y;
+        assert!(
+            actual_span < uniform_span,
+            "tighter face-down fan should reduce column span ({actual_span:.1} >= uniform {uniform_span:.1})"
+        );
     }
 }
