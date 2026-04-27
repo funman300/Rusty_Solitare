@@ -123,4 +123,31 @@ mod tests {
         let s = StatsSnapshot::default();
         assert_eq!(s.fastest_win_seconds, u64::MAX);
     }
+
+    #[test]
+    fn record_abandoned_increments_played_and_lost() {
+        let mut s = StatsSnapshot::default();
+        s.record_abandoned();
+        assert_eq!(s.games_played, 1);
+        assert_eq!(s.games_lost, 1);
+        assert_eq!(s.games_won, 0);
+    }
+
+    #[test]
+    fn record_abandoned_resets_win_streak() {
+        let mut s = StatsSnapshot::default();
+        s.win_streak_current = 5;
+        s.record_abandoned();
+        assert_eq!(s.win_streak_current, 0, "abandoned game must break the win streak");
+    }
+
+    #[test]
+    fn record_abandoned_preserves_best_streak() {
+        let mut s = StatsSnapshot::default();
+        s.win_streak_best = 7;
+        s.win_streak_current = 7;
+        s.record_abandoned();
+        assert_eq!(s.win_streak_best, 7, "best streak must not be reduced on abandon");
+        assert_eq!(s.win_streak_current, 0);
+    }
 }
