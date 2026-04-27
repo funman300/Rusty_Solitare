@@ -11,7 +11,7 @@ use solitaire_data::{
 
 use crate::events::GameWonEvent;
 use crate::game_plugin::GameMutation;
-use crate::progress_plugin::{ProgressResource, ProgressStoragePath, ProgressUpdate};
+use crate::progress_plugin::{LevelUpEvent, ProgressResource, ProgressStoragePath, ProgressUpdate};
 use crate::resources::GameStateResource;
 
 /// Fired when the player has just completed a weekly goal.
@@ -61,6 +61,7 @@ fn evaluate_weekly_goals(
     mut progress: ResMut<ProgressResource>,
     path: Res<ProgressStoragePath>,
     mut completions: EventWriter<WeeklyGoalCompletedEvent>,
+    mut levelups: EventWriter<LevelUpEvent>,
 ) {
     let mut events: Vec<&GameWonEvent> = wins.read().collect();
     if events.is_empty() {
@@ -97,7 +98,14 @@ fn evaluate_weekly_goals(
     }
 
     if bonus_xp > 0 {
-        progress.0.add_xp(bonus_xp);
+        let prev_level = progress.0.add_xp(bonus_xp);
+        if progress.0.leveled_up_from(prev_level) {
+            levelups.send(LevelUpEvent {
+                previous_level: prev_level,
+                new_level: progress.0.level,
+                total_xp: progress.0.total_xp,
+            });
+        }
     }
 
     if any_change {
@@ -244,6 +252,35 @@ mod tests {
                 .weekly_goal_progress
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn weekly_bonus_xp_fires_levelup_when_threshold_crossed() {
+        let mut app = headless_app();
+        // Set XP just below the first level boundary (500) so the 75-XP bonus crosses it.
+        app.world_mut().resource_mut::<ProgressResource>().0.total_xp = 430;
+        // Pre-set goal to 2/3 so the next fast win completes it.
+        app.world_mut()
+            .resource_mut::<ProgressResource>()
+            .0
+            .weekly_goal_progress
+            .insert("weekly_3_fast".to_string(), 2);
+        let key = current_iso_week_key(Local::now().date_naive());
+        app.world_mut()
+            .resource_mut::<ProgressResource>()
+            .0
+            .weekly_goal_week_iso = Some(key);
+
+        app.world_mut().send_event(GameWonEvent {
+            score: 500,
+            time_seconds: 60,
+        });
+        app.update();
+
+        let events = app.world().resource::<Events<LevelUpEvent>>();
+        let mut cursor = events.get_cursor();
+        let fired: Vec<_> = cursor.read(events).copied().collect();
+        assert!(!fired.is_empty(), "LevelUpEvent must fire when weekly bonus pushes past a level threshold");
     }
 
     #[test]
