@@ -70,4 +70,27 @@ mod tests {
     fn time_bonus_at_one_second() {
         assert_eq!(compute_time_bonus(1), 700_000);
     }
+
+    #[test]
+    fn non_waste_to_tableau_scores_zero() {
+        // Foundation → Tableau is impossible in practice but must score 0.
+        assert_eq!(score_move(&PileType::Foundation(Suit::Clubs), &PileType::Tableau(0)), 0);
+        // Tableau → Tableau (restack) scores 0.
+        assert_eq!(score_move(&PileType::Tableau(1), &PileType::Tableau(2)), 0);
+    }
+
+    #[test]
+    fn move_to_stock_or_waste_scores_zero() {
+        // These destinations are illegal moves in practice, but the function
+        // must not panic and should return 0.
+        assert_eq!(score_move(&PileType::Waste, &PileType::Stock), 0);
+        assert_eq!(score_move(&PileType::Waste, &PileType::Waste), 0);
+    }
+
+    #[test]
+    fn time_bonus_is_capped_at_i32_max_for_huge_values() {
+        // Very short elapsed time would overflow without the .min() guard.
+        let bonus = compute_time_bonus(1);
+        assert!(bonus <= i32::MAX, "time bonus must fit in i32");
+    }
 }
