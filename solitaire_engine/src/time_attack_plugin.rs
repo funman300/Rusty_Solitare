@@ -265,4 +265,32 @@ mod tests {
         let session = app.world().resource::<TimeAttackResource>();
         assert_eq!(session.wins, 0);
     }
+
+    #[test]
+    fn paused_session_does_not_fire_ended_event() {
+        // Insert PausedResource(true) so the advance system exits early.
+        // Even with remaining_secs at -1 (which would normally trigger expiry),
+        // the timer must not fire while the game is paused.
+        let mut app = headless_app();
+        app.insert_resource(crate::pause_plugin::PausedResource(true));
+        *app.world_mut().resource_mut::<TimeAttackResource>() = TimeAttackResource {
+            active: true,
+            remaining_secs: -1.0, // would normally expire
+            wins: 3,
+        };
+        app.update();
+
+        // remaining_secs must not have been reset to 0.0 (pause blocked the update).
+        let session = app.world().resource::<TimeAttackResource>();
+        assert!(session.active, "session must still be active while paused");
+        assert!(session.remaining_secs < 0.0, "remaining_secs must not change while paused");
+
+        // No ended event must have been emitted.
+        let events = app.world().resource::<Events<TimeAttackEndedEvent>>();
+        let mut cursor = events.get_cursor();
+        assert!(
+            cursor.read(events).next().is_none(),
+            "TimeAttackEndedEvent must not fire while paused"
+        );
+    }
 }
