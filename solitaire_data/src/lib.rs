@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use solitaire_sync::{LeaderboardEntry, SyncPayload, SyncResponse};
+use solitaire_sync::{ChallengeGoal, LeaderboardEntry, SyncPayload, SyncResponse};
 use thiserror::Error;
 
 /// All errors that can arise during sync operations.
@@ -36,6 +36,11 @@ pub trait SyncProvider: Send + Sync {
     async fn fetch_leaderboard(&self) -> Result<Vec<LeaderboardEntry>, SyncError> {
         Ok(vec![])
     }
+    /// Fetch today's daily challenge from the server. Returns `None` for
+    /// backends that don't support it, or on any non-fatal network failure.
+    async fn fetch_daily_challenge(&self) -> Result<Option<ChallengeGoal>, SyncError> {
+        Ok(None)
+    }
 }
 
 /// Blanket impl so `Box<dyn SyncProvider + Send + Sync>` (returned by
@@ -59,6 +64,9 @@ impl SyncProvider for Box<dyn SyncProvider + Send + Sync> {
     }
     async fn fetch_leaderboard(&self) -> Result<Vec<LeaderboardEntry>, SyncError> {
         (**self).fetch_leaderboard().await
+    }
+    async fn fetch_daily_challenge(&self) -> Result<Option<ChallengeGoal>, SyncError> {
+        (**self).fetch_daily_challenge().await
     }
 }
 

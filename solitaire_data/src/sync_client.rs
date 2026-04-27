@@ -12,7 +12,7 @@
 //! without matching on [`SyncBackend`] anywhere else in the codebase.
 
 use async_trait::async_trait;
-use solitaire_sync::{LeaderboardEntry, SyncPayload, SyncResponse};
+use solitaire_sync::{ChallengeGoal, LeaderboardEntry, SyncPayload, SyncResponse};
 
 use crate::{
     auth_tokens::{load_access_token, load_refresh_token, store_tokens},
@@ -198,6 +198,31 @@ impl SyncProvider for SolitaireServerClient {
     /// Returns `true` if a valid access token is present in the OS keychain.
     fn is_authenticated(&self) -> bool {
         load_access_token(&self.username).is_ok()
+    }
+
+    /// Fetch today's daily challenge from the server.
+    ///
+    /// Does not require authentication — the endpoint is public. Returns `None`
+    /// on any non-success HTTP status so the caller falls back to the local seed.
+    async fn fetch_daily_challenge(&self) -> Result<Option<ChallengeGoal>, SyncError> {
+        let url = format!("{}/api/daily-challenge", self.base_url);
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+
+        if resp.status().is_success() {
+            let goal: ChallengeGoal = resp
+                .json()
+                .await
+                .map_err(|e| SyncError::Serialization(e.to_string()))?;
+            Ok(Some(goal))
+        } else {
+            // Non-fatal — caller will use the locally computed seed instead.
+            Ok(None)
+        }
     }
 
     async fn fetch_leaderboard(&self) -> Result<Vec<LeaderboardEntry>, SyncError> {

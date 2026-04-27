@@ -13,13 +13,16 @@
 
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
+use bevy::tasks::{futures_lite::future, AsyncComputeTaskPool, Task};
 use chrono::{Local, NaiveDate};
 use solitaire_data::{daily_seed_for, save_progress_to};
+use solitaire_sync::ChallengeGoal;
 
 use crate::events::{GameWonEvent, NewGameRequestEvent};
 use crate::game_plugin::GameMutation;
 use crate::progress_plugin::{ProgressResource, ProgressStoragePath, ProgressUpdate};
 use crate::resources::GameStateResource;
+use crate::sync_plugin::SyncProviderResource;
 
 /// Bonus XP awarded for completing today's daily challenge.
 pub const DAILY_BONUS_XP: u64 = 100;
@@ -48,18 +51,74 @@ pub struct DailyChallengeCompletedEvent {
     pub streak: u32,
 }
 
+/// Holds the in-flight server challenge fetch so the result can be polled
+/// each frame without blocking the main thread.
+#[derive(Resource, Default)]
+struct DailyChallengeTask(Option<Task<Option<ChallengeGoal>>>);
+
 pub struct DailyChallengePlugin;
 
 impl Plugin for DailyChallengePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(DailyChallengeResource::for_today())
+            .init_resource::<DailyChallengeTask>()
             .add_event::<DailyChallengeCompletedEvent>()
             .add_event::<GameWonEvent>()
             .add_event::<NewGameRequestEvent>()
+            .add_systems(Startup, fetch_server_challenge)
+            .add_systems(Update, poll_server_challenge)
             // record/award after the base ProgressUpdate so we don't fight
             // ProgressPlugin's add_xp on the same frame.
             .add_systems(Update, handle_daily_completion.after(ProgressUpdate))
             .add_systems(Update, handle_start_daily_request.before(GameMutation));
+    }
+}
+
+/// Startup system: spawns an async task to fetch the server's daily challenge.
+///
+/// Only runs when `SyncProviderResource` is present (i.e. `SyncPlugin` is
+/// installed). The endpoint is public so authentication is not required.
+fn fetch_server_challenge(
+    provider: Option<Res<SyncProviderResource>>,
+    mut task_res: ResMut<DailyChallengeTask>,
+) {
+    let Some(provider) = provider else { return };
+    let provider = provider.0.clone();
+    let task = AsyncComputeTaskPool::get()
+        .spawn(async move { provider.fetch_daily_challenge().await.ok().flatten() });
+    task_res.0 = Some(task);
+}
+
+/// Update system: polls the server-challenge fetch task.
+///
+/// On success, replaces the locally-computed seed in `DailyChallengeResource`
+/// with the server's authoritative seed — ensuring all players worldwide get
+/// the same deal on a given date regardless of their local clock hash.
+///
+/// Silently no-ops if the task is still in flight, already consumed, or
+/// if the server returned a challenge for a different date.
+fn poll_server_challenge(
+    mut task_res: ResMut<DailyChallengeTask>,
+    mut daily: ResMut<DailyChallengeResource>,
+) {
+    let Some(task) = task_res.0.as_mut() else {
+        return;
+    };
+    let Some(result) = future::block_on(future::poll_once(task)) else {
+        return;
+    };
+    task_res.0 = None;
+    let Some(goal) = result else { return };
+    let Ok(date) = NaiveDate::parse_from_str(&goal.date, "%Y-%m-%d") else {
+        return;
+    };
+    if date == daily.date {
+        let old_seed = daily.seed;
+        daily.seed = goal.seed;
+        info!(
+            "daily challenge seed updated from server: {old_seed} → {}",
+            goal.seed
+        );
     }
 }
 
