@@ -23,7 +23,7 @@ pub mod table_plugin;
 pub mod time_attack_plugin;
 pub mod weekly_goals_plugin;
 
-pub use achievement_plugin::{AchievementPlugin, AchievementsResource};
+pub use achievement_plugin::{AchievementPlugin, AchievementsResource, AchievementsScreen};
 pub use challenge_plugin::{
     challenge_progress_label, ChallengeAdvancedEvent, ChallengePlugin, CHALLENGE_UNLOCK_LEVEL,
 };
