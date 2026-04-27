@@ -512,4 +512,28 @@ mod tests {
             .count();
         assert_eq!(count, 0);
     }
+
+    // -----------------------------------------------------------------------
+    // format_reward
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn format_reward_card_back() {
+        assert_eq!(format_reward(Reward::CardBack(2)), "Card Back #2");
+    }
+
+    #[test]
+    fn format_reward_background() {
+        assert_eq!(format_reward(Reward::Background(3)), "Background #3");
+    }
+
+    #[test]
+    fn format_reward_bonus_xp() {
+        assert_eq!(format_reward(Reward::BonusXp(25)), "+25 XP");
+    }
+
+    #[test]
+    fn format_reward_badge() {
+        assert_eq!(format_reward(Reward::Badge), "Badge");
+    }
 }
