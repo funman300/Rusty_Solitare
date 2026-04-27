@@ -986,6 +986,50 @@ async fn opt_in_33_unicode_chars_display_name_returns_400() {
     );
 }
 
+/// A second push with lower stats must not overwrite the higher stored values —
+/// the server merges (max wins) rather than blindly replacing.
+#[tokio::test]
+async fn second_push_with_lower_stats_preserves_higher_stored_values() {
+    set_jwt_secret();
+    let app = build_test_router(test_pool().await);
+
+    let (access, _) = register_user(app.clone(), "merge_test", "merge_pass").await;
+    let user_id = decode_sub(&access);
+
+    // First push: 20 games_played.
+    let high_payload = make_payload(&user_id, 20);
+    let r1 = post_authed(
+        app.clone(),
+        "/api/sync/push",
+        &access,
+        serde_json::to_value(&high_payload).unwrap(),
+    )
+    .await;
+    assert_eq!(r1.status(), StatusCode::OK);
+
+    // Second push: 5 games_played (lower — should be ignored by merge).
+    let low_payload = make_payload(&user_id, 5);
+    let r2 = post_authed(
+        app.clone(),
+        "/api/sync/push",
+        &access,
+        serde_json::to_value(&low_payload).unwrap(),
+    )
+    .await;
+    assert_eq!(r2.status(), StatusCode::OK);
+
+    // Pull and verify the higher value survived.
+    let pull_resp = get_authed(app, "/api/sync/pull", &access).await;
+    let body = body_json(pull_resp).await;
+    let games_played = body["merged"]["stats"]["games_played"]
+        .as_u64()
+        .expect("games_played must be present");
+    assert_eq!(
+        games_played, 20,
+        "server merge must keep the higher games_played value"
+    );
+}
+
 /// Login with leading/trailing whitespace in the username still succeeds.
 #[tokio::test]
 async fn login_trims_whitespace_from_username() {
