@@ -134,3 +134,64 @@ pub async fn daily_challenge(
 
     Ok(Json(goal))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hash_date_is_deterministic() {
+        let date = "2026-04-26";
+        assert_eq!(hash_date_to_u64(date), hash_date_to_u64(date));
+    }
+
+    #[test]
+    fn hash_date_differs_across_adjacent_days() {
+        assert_ne!(hash_date_to_u64("2026-04-26"), hash_date_to_u64("2026-04-27"));
+        assert_ne!(hash_date_to_u64("2026-04-26"), hash_date_to_u64("2026-04-25"));
+    }
+
+    #[test]
+    fn hash_date_differs_across_years() {
+        assert_ne!(hash_date_to_u64("2026-01-01"), hash_date_to_u64("2027-01-01"));
+    }
+
+    #[test]
+    fn hash_date_is_nonzero_for_real_dates() {
+        // Zero would be pathological — every date must produce a non-zero seed
+        // so the RNG initialises properly.
+        assert_ne!(hash_date_to_u64("2026-04-26"), 0);
+        assert_ne!(hash_date_to_u64("2026-01-01"), 0);
+    }
+
+    #[test]
+    fn generate_goal_covers_all_six_variants() {
+        // The six variants are selected by seed % 6. Verify each branch
+        // produces a non-empty description and a non-empty date string.
+        for variant_idx in 0u64..6 {
+            let goal = generate_goal("2026-04-26", variant_idx);
+            assert_eq!(goal.date, "2026-04-26");
+            assert!(!goal.description.is_empty());
+            // seed field must match the passed-in seed.
+            assert_eq!(goal.seed, variant_idx);
+        }
+    }
+
+    #[test]
+    fn generate_goal_time_and_score_variants_are_set_correctly() {
+        // Variant 0: max_time_secs = 300, no score.
+        let g = generate_goal("2026-04-26", 0);
+        assert_eq!(g.max_time_secs, Some(300));
+        assert!(g.target_score.is_none());
+
+        // Variant 1: target_score = 4000, no time.
+        let g = generate_goal("2026-04-26", 1);
+        assert_eq!(g.target_score, Some(4_000));
+        assert!(g.max_time_secs.is_none());
+
+        // Variant 5: fallback — no time, no score (just win).
+        let g = generate_goal("2026-04-26", 5);
+        assert!(g.target_score.is_none());
+        assert!(g.max_time_secs.is_none());
+    }
+}
