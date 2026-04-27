@@ -150,9 +150,20 @@ fn handle_daily_completion(
     path: Res<ProgressStoragePath>,
     mut completed: EventWriter<DailyChallengeCompletedEvent>,
 ) {
-    for _ in wins.read() {
+    for ev in wins.read() {
         if game.0.seed != daily.seed {
             continue;
+        }
+        // Enforce server-supplied goal constraints when present.
+        if let Some(target) = daily.target_score {
+            if ev.score < target {
+                continue; // score goal not met
+            }
+        }
+        if let Some(max_secs) = daily.max_time_secs {
+            if ev.time_seconds > max_secs {
+                continue; // time limit exceeded
+            }
         }
         if !progress.0.record_daily_completion(daily.date) {
             // Already counted today — no-op.

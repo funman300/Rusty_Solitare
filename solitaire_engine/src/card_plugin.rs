@@ -24,6 +24,7 @@ use crate::events::StateChangedEvent;
 use crate::game_plugin::GameMutation;
 use crate::layout::{Layout, LayoutResource};
 use crate::resources::GameStateResource;
+use crate::settings_plugin::{SettingsChangedEvent, SettingsResource};
 
 /// Fraction of card height used as vertical offset between stacked tableau cards.
 pub const TABLEAU_FAN_FRAC: f32 = 0.25;
@@ -36,9 +37,20 @@ const STACK_FAN_FRAC: f32 = 0.003;
 const FONT_SIZE_FRAC: f32 = 0.28;
 
 const CARD_FACE_COLOUR: Color = Color::srgb(0.98, 0.98, 0.95);
-const CARD_BACK_COLOUR: Color = Color::srgb(0.15, 0.30, 0.55);
 const RED_SUIT_COLOUR: Color = Color::srgb(0.78, 0.12, 0.15);
 const BLACK_SUIT_COLOUR: Color = Color::srgb(0.08, 0.08, 0.08);
+
+/// Returns the card back color for the given unlocked card-back index.
+/// Index 0 = default blue; 1–4 are unlockable alternate designs.
+fn card_back_colour(selected_card_back: usize) -> Color {
+    match selected_card_back {
+        0 => Color::srgb(0.15, 0.30, 0.55), // default blue
+        1 => Color::srgb(0.55, 0.10, 0.10), // deep red
+        2 => Color::srgb(0.05, 0.40, 0.10), // forest green
+        3 => Color::srgb(0.35, 0.08, 0.52), // purple
+        _ => Color::srgb(0.05, 0.40, 0.42), // teal (4+)
+    }
+}
 
 /// Marker component linking a Bevy entity to a `solitaire_core::Card::id`.
 #[derive(Component, Debug, Clone, Copy)]
@@ -57,8 +69,26 @@ impl Plugin for CardPlugin {
     fn build(&self, app: &mut App) {
         // PostStartup ensures TablePlugin's Startup system has inserted
         // LayoutResource before we try to read it.
-        app.add_systems(PostStartup, sync_cards_startup)
-            .add_systems(Update, sync_cards_on_change.after(GameMutation));
+        app.add_event::<SettingsChangedEvent>()
+            .add_systems(PostStartup, sync_cards_startup)
+            .add_systems(
+                Update,
+                (
+                    sync_cards_on_change.after(GameMutation),
+                    resync_cards_on_settings_change.before(sync_cards_on_change),
+                ),
+            );
+    }
+}
+
+/// When card-back selection changes in Settings, re-render all cards so the
+/// new back colour is applied immediately (without waiting for a state change).
+fn resync_cards_on_settings_change(
+    mut setting_events: EventReader<SettingsChangedEvent>,
+    mut state_events: EventWriter<StateChangedEvent>,
+) {
+    if setting_events.read().next().is_some() {
+        state_events.send(StateChangedEvent);
     }
 }
 
@@ -70,11 +100,15 @@ fn sync_cards_startup(
     game: Res<GameStateResource>,
     layout: Option<Res<LayoutResource>>,
     slide_dur: Option<Res<EffectiveSlideDuration>>,
+    settings: Option<Res<SettingsResource>>,
     entities: Query<(Entity, &CardEntity, &Transform)>,
 ) {
     if let Some(layout) = layout {
         let slide_secs = slide_dur.map_or(0.15, |d| d.slide_secs);
-        sync_cards(commands, &game.0, &layout.0, slide_secs, &entities);
+        let back_colour = settings
+            .as_ref()
+            .map_or_else(|| card_back_colour(0), |s| card_back_colour(s.0.selected_card_back));
+        sync_cards(commands, &game.0, &layout.0, slide_secs, back_colour, &entities);
     }
 }
 
@@ -84,6 +118,7 @@ fn sync_cards_on_change(
     game: Res<GameStateResource>,
     layout: Option<Res<LayoutResource>>,
     slide_dur: Option<Res<EffectiveSlideDuration>>,
+    settings: Option<Res<SettingsResource>>,
     entities: Query<(Entity, &CardEntity, &Transform)>,
 ) {
     if events.read().next().is_none() {
@@ -91,7 +126,10 @@ fn sync_cards_on_change(
     }
     if let Some(layout) = layout {
         let slide_secs = slide_dur.map_or(0.15, |d| d.slide_secs);
-        sync_cards(commands, &game.0, &layout.0, slide_secs, &entities);
+        let back_colour = settings
+            .as_ref()
+            .map_or_else(|| card_back_colour(0), |s| card_back_colour(s.0.selected_card_back));
+        sync_cards(commands, &game.0, &layout.0, slide_secs, back_colour, &entities);
     }
 }
 
@@ -100,6 +138,7 @@ fn sync_cards(
     game: &GameState,
     layout: &Layout,
     slide_secs: f32,
+    back_colour: Color,
     entities: &Query<(Entity, &CardEntity, &Transform)>,
 ) {
     let positions = card_positions(game, layout);
@@ -123,9 +162,9 @@ fn sync_cards(
     for (card, position, z) in positions {
         match existing.get(&card.id) {
             Some(&(entity, cur)) => {
-                update_card_entity(&mut commands, entity, &card, position, z, layout, slide_secs, cur)
+                update_card_entity(&mut commands, entity, &card, position, z, layout, slide_secs, back_colour, cur)
             }
-            None => spawn_card_entity(&mut commands, &card, position, z, layout),
+            None => spawn_card_entity(&mut commands, &card, position, z, layout, back_colour),
         }
     }
 }
@@ -172,11 +211,11 @@ fn card_positions(game: &GameState, layout: &Layout) -> Vec<(Card, Vec2, f32)> {
     out
 }
 
-fn spawn_card_entity(commands: &mut Commands, card: &Card, pos: Vec2, z: f32, layout: &Layout) {
+fn spawn_card_entity(commands: &mut Commands, card: &Card, pos: Vec2, z: f32, layout: &Layout, back_colour: Color) {
     let body_colour = if card.face_up {
         CARD_FACE_COLOUR
     } else {
-        CARD_BACK_COLOUR
+        back_colour
     };
 
     commands
@@ -216,12 +255,13 @@ fn update_card_entity(
     z: f32,
     layout: &Layout,
     slide_secs: f32,
+    back_colour: Color,
     cur: Vec3,
 ) {
     let body_colour = if card.face_up {
         CARD_FACE_COLOUR
     } else {
-        CARD_BACK_COLOUR
+        back_colour
     };
 
     let target = Vec3::new(pos.x, pos.y, z);

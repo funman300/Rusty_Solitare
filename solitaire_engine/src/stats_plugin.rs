@@ -171,12 +171,16 @@ fn spawn_stats_screen(
         "=== Statistics ===".to_string(),
         format!("Games Played:  {}", stats.games_played),
         format!("Games Won:     {}", stats.games_won),
+        format!("Games Lost:    {}", stats.games_lost),
         format!("Win Rate:      {win_rate}"),
         format!(
             "Win Streak:    {} (Best: {})",
             stats.win_streak_current, stats.win_streak_best
         ),
+        format!("Draw 1 Wins:   {}", stats.draw_one_wins),
+        format!("Draw 3 Wins:   {}", stats.draw_three_wins),
         format!("Best Score:    {}", stats.best_single_score),
+        format!("Lifetime Score:{}", stats.lifetime_score),
         format!("Fastest Win:   {fastest}"),
         format!("Avg Win Time:  {avg}"),
     ];

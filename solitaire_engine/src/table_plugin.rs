@@ -11,7 +11,7 @@ use solitaire_core::pile::PileType;
 use solitaire_data::settings::Theme;
 
 use crate::layout::{compute_layout, Layout, LayoutResource, TABLE_COLOUR};
-use crate::settings_plugin::SettingsChangedEvent;
+use crate::settings_plugin::{SettingsChangedEvent, SettingsResource};
 
 /// Z-depth used for the background — below everything.
 const Z_BACKGROUND: f32 = -10.0;
@@ -51,6 +51,18 @@ fn theme_colour(theme: &Theme) -> Color {
     }
 }
 
+/// Effective table background colour: unlocked background index overrides the
+/// Theme when `selected_background > 0`.
+fn effective_background_colour(theme: &Theme, selected_background: usize) -> Color {
+    match selected_background {
+        0 => theme_colour(theme),
+        1 => Color::srgb(0.25, 0.18, 0.10), // dark wood
+        2 => Color::srgb(0.05, 0.08, 0.22), // navy
+        3 => Color::srgb(0.30, 0.05, 0.08), // burgundy
+        _ => Color::srgb(0.12, 0.12, 0.14), // charcoal (4+)
+    }
+}
+
 fn default_window_size(window: &Window) -> Vec2 {
     Vec2::new(window.resolution.width(), window.resolution.height())
 }
@@ -59,7 +71,7 @@ fn setup_table(
     mut commands: Commands,
     windows: Query<&Window>,
     existing_camera: Query<(), With<Camera>>,
-    settings: Option<Res<crate::settings_plugin::SettingsResource>>,
+    settings: Option<Res<SettingsResource>>,
 ) {
     // Only spawn a camera if one does not already exist (e.g. a parent app
     // may have added one in tests).
@@ -76,7 +88,7 @@ fn setup_table(
 
     let initial_colour = settings
         .as_ref()
-        .map(|s| theme_colour(&s.0.theme))
+        .map(|s| effective_background_colour(&s.0.theme, s.0.selected_background))
         .unwrap_or_else(|| Color::srgb(TABLE_COLOUR[0], TABLE_COLOUR[1], TABLE_COLOUR[2]));
 
     spawn_background(&mut commands, window_size, initial_colour);
@@ -106,7 +118,7 @@ fn apply_theme_on_settings_change(
     let Some(ev) = events.read().last() else {
         return;
     };
-    let colour = theme_colour(&ev.0.theme);
+    let colour = effective_background_colour(&ev.0.theme, ev.0.selected_background);
     for mut sprite in &mut backgrounds {
         sprite.color = colour;
     }
