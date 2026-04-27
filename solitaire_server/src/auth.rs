@@ -173,10 +173,11 @@ pub async fn login(
     State(pool): State<SqlitePool>,
     Json(body): Json<AuthRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
+    let username = body.username.trim().to_string();
     let row = sqlx::query_as!(
         UserRow,
         "SELECT id, password_hash FROM users WHERE username = ?",
-        body.username
+        username
     )
     .fetch_optional(&pool)
     .await?;

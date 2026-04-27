@@ -873,3 +873,26 @@ async fn opt_out_hides_then_opt_in_restores() {
         "re-opted-in user must appear again"
     );
 }
+
+/// Login with leading/trailing whitespace in the username still succeeds.
+#[tokio::test]
+async fn login_trims_whitespace_from_username() {
+    set_jwt_secret();
+    let app = build_test_router(test_pool().await);
+
+    let _ = register_user(app.clone(), "trimtest", "password1!").await;
+
+    // Login with surrounding whitespace — should still authenticate.
+    let resp = post_json(
+        app,
+        "/api/auth/login",
+        serde_json::json!({ "username": "  trimtest  ", "password": "password1!" }),
+    )
+    .await;
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "login with whitespace-padded username must succeed"
+    );
+}
