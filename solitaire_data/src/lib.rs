@@ -51,6 +51,11 @@ pub trait SyncProvider: Send + Sync {
     async fn opt_out_leaderboard(&self) -> Result<(), SyncError> {
         Ok(())
     }
+    /// Permanently delete the authenticated player's account and all server
+    /// data. No-op for backends that don't support account management.
+    async fn delete_account(&self) -> Result<(), SyncError> {
+        Ok(())
+    }
 }
 
 /// Blanket impl so `Box<dyn SyncProvider + Send + Sync>` (returned by
@@ -83,6 +88,9 @@ impl SyncProvider for Box<dyn SyncProvider + Send + Sync> {
     }
     async fn opt_out_leaderboard(&self) -> Result<(), SyncError> {
         (**self).opt_out_leaderboard().await
+    }
+    async fn delete_account(&self) -> Result<(), SyncError> {
+        (**self).delete_account().await
     }
 }
 

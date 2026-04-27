@@ -295,6 +295,40 @@ impl SyncProvider for SolitaireServerClient {
         Ok(())
     }
 
+    async fn delete_account(&self) -> Result<(), SyncError> {
+        let token = self.access_token()?;
+        let url = format!("{}/api/account", self.base_url);
+
+        let resp = self
+            .client
+            .delete(&url)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.refresh_token().await?;
+            let new_token = self.access_token()?;
+            let resp = self
+                .client
+                .delete(&url)
+                .bearer_auth(new_token)
+                .send()
+                .await
+                .map_err(|e| SyncError::Network(e.to_string()))?;
+            if !resp.status().is_success() {
+                return Err(SyncError::Auth(format!("delete account failed: {}", resp.status())));
+            }
+            return Ok(());
+        }
+
+        if !resp.status().is_success() {
+            return Err(SyncError::Auth(format!("delete account failed: {}", resp.status())));
+        }
+        Ok(())
+    }
+
     async fn fetch_leaderboard(&self) -> Result<Vec<LeaderboardEntry>, SyncError> {
         let token = self.access_token()?;
         let url = format!("{}/api/leaderboard", self.base_url);
