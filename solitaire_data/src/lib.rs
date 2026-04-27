@@ -46,6 +46,11 @@ pub trait SyncProvider: Send + Sync {
     async fn opt_in_leaderboard(&self, _display_name: &str) -> Result<(), SyncError> {
         Ok(())
     }
+    /// Remove the authenticated player from the leaderboard.
+    /// No-op for backends that don't support leaderboards.
+    async fn opt_out_leaderboard(&self) -> Result<(), SyncError> {
+        Ok(())
+    }
 }
 
 /// Blanket impl so `Box<dyn SyncProvider + Send + Sync>` (returned by
@@ -75,6 +80,9 @@ impl SyncProvider for Box<dyn SyncProvider + Send + Sync> {
     }
     async fn opt_in_leaderboard(&self, display_name: &str) -> Result<(), SyncError> {
         (**self).opt_in_leaderboard(display_name).await
+    }
+    async fn opt_out_leaderboard(&self) -> Result<(), SyncError> {
+        (**self).opt_out_leaderboard().await
     }
 }
 

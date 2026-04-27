@@ -776,3 +776,58 @@ async fn push_lower_score_does_not_overwrite_leaderboard_best() {
     assert_eq!(entry["best_score"], 5_000, "best_score must not regress");
     assert_eq!(entry["best_time_secs"], 120, "best_time_secs must stay at fastest");
 }
+
+/// Opting out hides the player from the leaderboard; opting back in restores them.
+#[tokio::test]
+async fn opt_out_hides_then_opt_in_restores() {
+    set_jwt_secret();
+    let pool = test_pool().await;
+    let app = build_test_router(pool);
+
+    let (access, _) = register_user(app.clone(), "visible", "pass1234").await;
+
+    // Opt in.
+    let resp = post_authed(
+        app.clone(),
+        "/api/leaderboard/opt-in",
+        &access,
+        serde_json::json!({ "display_name": "Visible" }),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Verify they appear.
+    let lb = get_authed(app.clone(), "/api/leaderboard", &access).await;
+    let entries = body_json(lb).await;
+    assert!(
+        entries.as_array().unwrap().iter().any(|e| e["display_name"] == "Visible"),
+        "opted-in user must appear"
+    );
+
+    // Opt out.
+    let resp = delete_authed(app.clone(), "/api/leaderboard/opt-in", &access).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Verify they are hidden.
+    let lb = get_authed(app.clone(), "/api/leaderboard", &access).await;
+    let entries = body_json(lb).await;
+    assert!(
+        !entries.as_array().unwrap().iter().any(|e| e["display_name"] == "Visible"),
+        "opted-out user must be hidden"
+    );
+
+    // Opt back in — should restore without losing display name.
+    post_authed(
+        app.clone(),
+        "/api/leaderboard/opt-in",
+        &access,
+        serde_json::json!({ "display_name": "Visible" }),
+    )
+    .await;
+    let lb = get_authed(app.clone(), "/api/leaderboard", &access).await;
+    let entries = body_json(lb).await;
+    assert!(
+        entries.as_array().unwrap().iter().any(|e| e["display_name"] == "Visible"),
+        "re-opted-in user must appear again"
+    );
+}

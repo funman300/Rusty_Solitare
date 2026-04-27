@@ -45,9 +45,17 @@ pub struct LeaderboardScreen;
 #[derive(Component, Debug)]
 struct LeaderboardOptInButton;
 
+/// Marker on the "Opt Out" button inside the leaderboard panel.
+#[derive(Component, Debug)]
+struct LeaderboardOptOutButton;
+
 /// In-flight opt-in task.
 #[derive(Resource, Default)]
 struct OptInTask(Option<Task<Result<(), String>>>);
+
+/// In-flight opt-out task.
+#[derive(Resource, Default)]
+struct OptOutTask(Option<Task<Result<(), String>>>);
 
 // ---------------------------------------------------------------------------
 // Plugin
@@ -62,6 +70,7 @@ impl Plugin for LeaderboardPlugin {
             .init_resource::<LeaderboardFetchTask>()
             .init_resource::<ClosedThisFrame>()
             .init_resource::<OptInTask>()
+            .init_resource::<OptOutTask>()
             .add_systems(
                 Update,
                 (
@@ -71,6 +80,8 @@ impl Plugin for LeaderboardPlugin {
                     update_leaderboard_panel,
                     handle_opt_in_button,
                     poll_opt_in_task,
+                    handle_opt_out_button,
+                    poll_opt_out_task,
                 )
                     .chain(),
             );
@@ -213,6 +224,37 @@ fn poll_opt_in_task(mut task_res: ResMut<OptInTask>) {
     }
 }
 
+/// Fires an async opt-out request when the player presses the "Opt Out" button.
+fn handle_opt_out_button(
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<LeaderboardOptOutButton>)>,
+    provider: Option<Res<SyncProviderResource>>,
+    mut task_res: ResMut<OptOutTask>,
+) {
+    if task_res.0.is_some() {
+        return;
+    }
+    let Some(provider) = provider else { return };
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        let provider = provider.0.clone();
+        let task = AsyncComputeTaskPool::get()
+            .spawn(async move { provider.opt_out_leaderboard().await.map_err(|e| e.to_string()) });
+        task_res.0 = Some(task);
+    }
+}
+
+/// Polls the opt-out task; logs on error, clears on completion.
+fn poll_opt_out_task(mut task_res: ResMut<OptOutTask>) {
+    let Some(task) = task_res.0.as_mut() else { return };
+    let Some(result) = future::block_on(future::poll_once(task)) else { return };
+    task_res.0 = None;
+    if let Err(e) = result {
+        warn!("leaderboard opt-out failed: {e}");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // UI construction
 // ---------------------------------------------------------------------------
@@ -257,7 +299,7 @@ fn spawn_leaderboard_screen(commands: &mut Commands, entries: Option<&[Leaderboa
                     TextColor(Color::WHITE),
                 ));
                 card.spawn((
-                    Text::new("Press L to close  •  Opt in to appear on the board"),
+                    Text::new("Press L to close  •  Opt In / Opt Out to control your visibility"),
                     TextFont { font_size: 14.0, ..default() },
                     TextColor(Color::srgb(0.55, 0.55, 0.60)),
                 ));
@@ -272,26 +314,51 @@ fn spawn_leaderboard_screen(commands: &mut Commands, entries: Option<&[Leaderboa
                     BackgroundColor(Color::srgb(0.25, 0.25, 0.30)),
                 ));
 
-                // Opt-in button
-                card.spawn((
-                    LeaderboardOptInButton,
-                    Button,
-                    Node {
-                        padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
-                        justify_content: JustifyContent::Center,
-                        margin: UiRect::bottom(Val::Px(8.0)),
-                        align_self: AlignSelf::FlexStart,
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.18, 0.35, 0.50)),
-                    BorderRadius::all(Val::Px(4.0)),
-                ))
-                .with_children(|b| {
-                    b.spawn((
-                        Text::new("Opt In to Leaderboard"),
-                        TextFont { font_size: 15.0, ..default() },
-                        TextColor(Color::WHITE),
-                    ));
+                // Opt-in / Opt-out buttons row
+                card.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(10.0),
+                    margin: UiRect::bottom(Val::Px(8.0)),
+                    ..default()
+                })
+                .with_children(|row| {
+                    row.spawn((
+                        LeaderboardOptInButton,
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.18, 0.35, 0.50)),
+                        BorderRadius::all(Val::Px(4.0)),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((
+                            Text::new("Opt In"),
+                            TextFont { font_size: 15.0, ..default() },
+                            TextColor(Color::WHITE),
+                        ));
+                    });
+
+                    row.spawn((
+                        LeaderboardOptOutButton,
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.42, 0.15, 0.15)),
+                        BorderRadius::all(Val::Px(4.0)),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((
+                            Text::new("Opt Out"),
+                            TextFont { font_size: 15.0, ..default() },
+                            TextColor(Color::WHITE),
+                        ));
+                    });
                 });
 
                 match entries {

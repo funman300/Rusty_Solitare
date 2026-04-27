@@ -84,6 +84,25 @@ pub async fn get_leaderboard(
     Ok(Json(entries?))
 }
 
+/// `DELETE /api/leaderboard/opt-in` — opt out, hiding the player's entry.
+///
+/// Sets `leaderboard_opt_in = 0` on the user row so the entry no longer
+/// appears in `GET /api/leaderboard`. The leaderboard row itself is kept
+/// so scores are preserved if the player opts back in later.
+pub async fn opt_out(
+    State(pool): State<SqlitePool>,
+    user: AuthenticatedUser,
+) -> Result<Json<serde_json::Value>, AppError> {
+    sqlx::query!(
+        "UPDATE users SET leaderboard_opt_in = 0 WHERE id = ?",
+        user.user_id
+    )
+    .execute(&pool)
+    .await?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 /// `POST /api/leaderboard/opt-in` — opt in and upsert the player's entry.
 ///
 /// Sets `leaderboard_opt_in = 1` on the user row and creates/updates the

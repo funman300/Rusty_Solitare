@@ -44,6 +44,7 @@ fn build_router_inner(pool: SqlitePool, rate_limit: bool) -> Router {
         .route("/api/sync/push", post(sync::push))
         .route("/api/leaderboard", get(leaderboard::get_leaderboard))
         .route("/api/leaderboard/opt-in", post(leaderboard::opt_in))
+        .route("/api/leaderboard/opt-in", delete(leaderboard::opt_out))
         .route("/api/account", delete(auth::delete_account))
         .layer(axum_middleware::from_fn(middleware::require_auth));
 
