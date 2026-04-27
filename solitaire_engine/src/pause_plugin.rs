@@ -151,4 +151,28 @@ mod tests {
             0
         );
     }
+
+    #[test]
+    fn toggle_is_symmetric_for_multiple_cycles() {
+        let mut app = headless_app();
+        // Third press re-pauses after resume.
+        press_esc(&mut app);
+        app.update();
+        press_esc(&mut app);
+        app.update();
+        press_esc(&mut app);
+        app.update();
+        assert!(
+            app.world().resource::<PausedResource>().0,
+            "third Esc must re-pause"
+        );
+        assert_eq!(
+            app.world_mut()
+                .query::<&PauseScreen>()
+                .iter(app.world())
+                .count(),
+            1,
+            "third Esc must re-spawn PauseScreen"
+        );
+    }
 }

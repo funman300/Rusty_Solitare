@@ -586,4 +586,25 @@ mod tests {
     fn format_secs_above_minute() {
         assert_eq!(format_secs(183), "3:03");
     }
+
+    #[test]
+    fn format_secs_zero() {
+        assert_eq!(format_secs(0), "0s");
+    }
+
+    #[test]
+    fn format_secs_59_stays_below_minute() {
+        assert_eq!(format_secs(59), "59s");
+    }
+
+    #[test]
+    fn format_secs_60_crosses_into_minutes() {
+        assert_eq!(format_secs(60), "1:00");
+    }
+
+    #[test]
+    fn format_secs_pads_seconds_with_leading_zero() {
+        // 65 seconds = 1:05, not 1:5
+        assert_eq!(format_secs(65), "1:05");
+    }
 }
