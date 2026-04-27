@@ -159,9 +159,9 @@ fn handle_win_cascade(
     cards: Query<(Entity, &Transform), With<CardEntity>>,
     layout: Option<Res<LayoutResource>>,
 ) {
-    if events.read().next().is_none() {
+    let Some(ev) = events.read().next() else {
         return;
-    }
+    };
 
     let margin = layout.as_ref().map_or(800.0, |l| l.0.card_size.x * 8.0);
 
@@ -177,7 +177,10 @@ fn handle_win_cascade(
         Vec3::new(-margin, 0.0, 300.0),
     ];
 
-    spawn_toast(&mut commands, "You Win!".to_string(), WIN_TOAST_SECS);
+    let m = ev.time_seconds / 60;
+    let s = ev.time_seconds % 60;
+    let win_msg = format!("You Win!  Score: {}  Time: {m}:{s:02}", ev.score);
+    spawn_toast(&mut commands, win_msg, WIN_TOAST_SECS);
 
     for (i, (entity, transform)) in cards.iter().enumerate() {
         commands.entity(entity).insert(CardAnim {
