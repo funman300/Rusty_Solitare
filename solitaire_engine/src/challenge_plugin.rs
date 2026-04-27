@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use solitaire_core::game_state::GameMode;
 use solitaire_data::{challenge_count, challenge_seed_for, save_progress_to};
 
-use crate::events::{GameWonEvent, NewGameRequestEvent};
+use crate::events::{GameWonEvent, InfoToastEvent, NewGameRequestEvent};
 use crate::game_plugin::GameMutation;
 use crate::progress_plugin::{ProgressResource, ProgressStoragePath, ProgressUpdate};
 use crate::resources::GameStateResource;
@@ -31,6 +31,7 @@ impl Plugin for ChallengePlugin {
         app.add_event::<ChallengeAdvancedEvent>()
             .add_event::<GameWonEvent>()
             .add_event::<NewGameRequestEvent>()
+            .add_event::<InfoToastEvent>()
             // Run after ProgressUpdate so we don't fight ProgressPlugin's add_xp.
             .add_systems(Update, advance_on_challenge_win.after(ProgressUpdate))
             .add_systems(Update, handle_start_challenge_request.before(GameMutation));
@@ -66,15 +67,15 @@ fn handle_start_challenge_request(
     keys: Res<ButtonInput<KeyCode>>,
     progress: Res<ProgressResource>,
     mut new_game: EventWriter<NewGameRequestEvent>,
+    mut info_toast: EventWriter<InfoToastEvent>,
 ) {
     if !keys.just_pressed(KeyCode::KeyX) {
         return;
     }
     if progress.0.level < CHALLENGE_UNLOCK_LEVEL {
-        info!(
-            "Challenge mode locked — reach level {} (currently {}).",
-            CHALLENGE_UNLOCK_LEVEL, progress.0.level
-        );
+        info_toast.send(InfoToastEvent(format!(
+            "Challenge mode unlocks at level {CHALLENGE_UNLOCK_LEVEL}"
+        )));
         return;
     }
     let Some(seed) = challenge_seed_for(progress.0.challenge_index) else {

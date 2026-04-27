@@ -25,8 +25,8 @@ use solitaire_core::rules::{can_place_on_foundation, can_place_on_tableau};
 use crate::card_plugin::{CardEntity, TABLEAU_FAN_FRAC};
 use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
 use crate::events::{
-    DrawRequestEvent, MoveRejectedEvent, MoveRequestEvent, NewGameConfirmEvent, NewGameRequestEvent,
-    StateChangedEvent, UndoRequestEvent,
+    DrawRequestEvent, InfoToastEvent, MoveRejectedEvent, MoveRequestEvent, NewGameConfirmEvent,
+    NewGameRequestEvent, StateChangedEvent, UndoRequestEvent,
 };
 use crate::game_plugin::GameMutation;
 use crate::progress_plugin::ProgressResource;
@@ -48,6 +48,7 @@ pub struct InputPlugin;
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.add_event::<NewGameConfirmEvent>()
+            .add_event::<InfoToastEvent>()
             .add_systems(
                 Update,
                 (
@@ -75,6 +76,7 @@ fn handle_keyboard(
     mut undo: EventWriter<UndoRequestEvent>,
     mut new_game: EventWriter<NewGameRequestEvent>,
     mut confirm_event: EventWriter<NewGameConfirmEvent>,
+    mut info_toast: EventWriter<InfoToastEvent>,
     mut draw: EventWriter<DrawRequestEvent>,
 ) {
     // Tick down any active confirmation window.
@@ -114,10 +116,9 @@ fn handle_keyboard(
                 mode: Some(solitaire_core::game_state::GameMode::Zen),
             });
         } else {
-            info!(
-                "Zen mode locked — reach level {} (currently {}).",
-                CHALLENGE_UNLOCK_LEVEL, level
-            );
+            info_toast.send(InfoToastEvent(format!(
+                "Zen mode unlocks at level {CHALLENGE_UNLOCK_LEVEL}"
+            )));
         }
     }
     if keys.just_pressed(KeyCode::KeyD) {

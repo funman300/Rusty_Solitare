@@ -11,7 +11,7 @@ use crate::auto_complete_plugin::AutoCompleteState;
 use crate::card_plugin::CardEntity;
 use crate::challenge_plugin::ChallengeAdvancedEvent;
 use crate::daily_challenge_plugin::{DailyChallengeCompletedEvent, DailyGoalAnnouncementEvent};
-use crate::events::NewGameConfirmEvent;
+use crate::events::{InfoToastEvent, NewGameConfirmEvent};
 use crate::events::{AchievementUnlockedEvent, GameWonEvent};
 use crate::game_plugin::GameMutation;
 use crate::layout::LayoutResource;
@@ -93,6 +93,7 @@ impl Plugin for AnimationPlugin {
             .add_event::<ChallengeAdvancedEvent>()
             .add_event::<SettingsChangedEvent>()
             .add_event::<NewGameConfirmEvent>()
+            .add_event::<InfoToastEvent>()
             .init_resource::<EffectiveSlideDuration>()
             .add_systems(Startup, init_slide_duration)
             .add_systems(
@@ -111,6 +112,7 @@ impl Plugin for AnimationPlugin {
                     handle_settings_toast,
                     handle_auto_complete_toast,
                     handle_new_game_confirm_toast,
+                    handle_info_toast,
                     tick_toasts,
                 )
                     .after(GameMutation),
@@ -319,6 +321,12 @@ fn handle_new_game_confirm_toast(
 ) {
     for _ in events.read() {
         spawn_toast(&mut commands, "Press N again to start a new game".to_string(), 3.0);
+    }
+}
+
+fn handle_info_toast(mut commands: Commands, mut events: EventReader<InfoToastEvent>) {
+    for ev in events.read() {
+        spawn_toast(&mut commands, ev.0.clone(), 3.0);
     }
 }
 

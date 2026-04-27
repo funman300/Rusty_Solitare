@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use solitaire_core::game_state::GameMode;
 
 use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
-use crate::events::{GameWonEvent, NewGameRequestEvent};
+use crate::events::{GameWonEvent, InfoToastEvent, NewGameRequestEvent};
 use crate::game_plugin::GameMutation;
 use crate::progress_plugin::ProgressResource;
 use crate::resources::GameStateResource;
@@ -39,6 +39,7 @@ impl Plugin for TimeAttackPlugin {
             .add_event::<TimeAttackEndedEvent>()
             .add_event::<GameWonEvent>()
             .add_event::<NewGameRequestEvent>()
+            .add_event::<InfoToastEvent>()
             .add_systems(
                 Update,
                 handle_start_time_attack_request.before(GameMutation),
@@ -53,15 +54,15 @@ fn handle_start_time_attack_request(
     progress: Res<ProgressResource>,
     mut session: ResMut<TimeAttackResource>,
     mut new_game: EventWriter<NewGameRequestEvent>,
+    mut info_toast: EventWriter<InfoToastEvent>,
 ) {
     if !keys.just_pressed(KeyCode::KeyT) {
         return;
     }
     if progress.0.level < CHALLENGE_UNLOCK_LEVEL {
-        info!(
-            "Time Attack locked — reach level {} (currently {}).",
-            CHALLENGE_UNLOCK_LEVEL, progress.0.level
-        );
+        info_toast.send(InfoToastEvent(format!(
+            "Time Attack unlocks at level {CHALLENGE_UNLOCK_LEVEL}"
+        )));
         return;
     }
     *session = TimeAttackResource {

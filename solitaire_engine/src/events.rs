@@ -75,3 +75,8 @@ pub struct ManualSyncRequestEvent;
 /// confirmation window sends `NewGameRequestEvent`.
 #[derive(Event, Debug, Clone, Copy, Default)]
 pub struct NewGameConfirmEvent;
+
+/// Generic informational toast message. Any system can fire this to display
+/// a short string to the player, e.g. "Locked — reach level 5".
+#[derive(Event, Debug, Clone)]
+pub struct InfoToastEvent(pub String);
