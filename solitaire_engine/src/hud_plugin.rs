@@ -164,4 +164,60 @@ mod tests {
             GameState::new(42, DrawMode::DrawOne);
         app.update();
     }
+
+    fn read_hud_text<M: Component>(app: &mut App) -> String {
+        app.world_mut()
+            .query_filtered::<&Text, With<M>>()
+            .iter(app.world())
+            .next()
+            .map(|t| t.0.clone())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn score_reflects_game_state() {
+        let mut app = headless_app();
+        app.world_mut().resource_mut::<GameStateResource>().0.score = 750;
+        app.update();
+        assert_eq!(read_hud_text::<HudScore>(&mut app), "Score: 750");
+    }
+
+    #[test]
+    fn moves_reflects_game_state() {
+        let mut app = headless_app();
+        app.world_mut().resource_mut::<GameStateResource>().0.move_count = 42;
+        app.update();
+        assert_eq!(read_hud_text::<HudMoves>(&mut app), "Moves: 42");
+    }
+
+    #[test]
+    fn draw_three_mode_shows_draw_3_badge() {
+        use solitaire_core::game_state::GameMode;
+        let mut app = headless_app();
+        app.world_mut().resource_mut::<GameStateResource>().0 =
+            GameState::new_with_mode(42, DrawMode::DrawThree, GameMode::Classic);
+        app.update();
+        assert_eq!(read_hud_text::<HudMode>(&mut app), "Draw 3");
+    }
+
+    #[test]
+    fn zen_mode_hides_score() {
+        use solitaire_core::game_state::GameMode;
+        let mut app = headless_app();
+        app.world_mut().resource_mut::<GameStateResource>().0 =
+            GameState::new_with_mode(42, DrawMode::DrawOne, GameMode::Zen);
+        app.world_mut().resource_mut::<GameStateResource>().0.score = 999;
+        app.update();
+        // Zen mode spec: "No score display" → text must be empty.
+        assert_eq!(read_hud_text::<HudScore>(&mut app), "");
+    }
+
+    #[test]
+    fn time_display_uses_mm_ss_format() {
+        let mut app = headless_app();
+        app.world_mut().resource_mut::<GameStateResource>().0.elapsed_seconds = 125;
+        app.update();
+        // 125 seconds = 2 minutes 5 seconds → "2:05"
+        assert_eq!(read_hud_text::<HudTime>(&mut app), "2:05");
+    }
 }

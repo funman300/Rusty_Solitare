@@ -23,6 +23,7 @@ use solitaire_core::pile::PileType;
 use solitaire_core::rules::{can_place_on_foundation, can_place_on_tableau};
 
 use crate::card_plugin::{CardEntity, TABLEAU_FAN_FRAC};
+use solitaire_core::game_state::DrawMode;
 use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
 use crate::events::{
     DrawRequestEvent, InfoToastEvent, MoveRejectedEvent, MoveRequestEvent, NewGameConfirmEvent,
@@ -341,8 +342,15 @@ fn card_position(game: &GameState, layout: &Layout, pile: PileType, stack_index:
     if matches!(pile, PileType::Tableau(_)) {
         let fan = -layout.card_size.y * TABLEAU_FAN_FRAC;
         Vec2::new(base.x, base.y + fan * (stack_index as f32))
+    } else if matches!(pile, PileType::Waste) && game.draw_mode == DrawMode::DrawThree {
+        // In Draw-Three mode the top 3 waste cards are fanned in X to match
+        // card_plugin::card_positions(). Hit-testing must use the same offsets
+        // so clicking the visually rightmost (top) card actually registers.
+        let pile_len = game.piles.get(&pile).map_or(0, |p| p.cards.len());
+        let visible_start = pile_len.saturating_sub(3);
+        let slot = stack_index.saturating_sub(visible_start) as f32;
+        Vec2::new(base.x + slot * layout.card_size.x * 0.28, base.y)
     } else {
-        let _ = game;
         base
     }
 }
@@ -643,6 +651,31 @@ mod tests {
             "expected {expected}, got {}",
             size.y
         );
+    }
+
+    #[test]
+    fn find_draggable_draw_three_waste_top_card_hit_at_fanned_position() {
+        use solitaire_core::card::{Card, Rank, Suit};
+        use solitaire_core::game_state::{DrawMode, GameMode};
+        let mut game = GameState::new_with_mode(1, DrawMode::DrawThree, GameMode::Classic);
+        let waste = game.piles.get_mut(&PileType::Waste).unwrap();
+        waste.cards.clear();
+        // Three waste cards; top (id=202) is rightmost in the fan.
+        waste.cards.push(Card { id: 200, suit: Suit::Spades, rank: Rank::Two, face_up: true });
+        waste.cards.push(Card { id: 201, suit: Suit::Hearts, rank: Rank::Three, face_up: true });
+        waste.cards.push(Card { id: 202, suit: Suit::Clubs, rank: Rank::Four, face_up: true });
+
+        let layout = compute_layout(Vec2::new(1280.0, 800.0));
+        let waste_base = layout.pile_positions[&PileType::Waste];
+        // Top card (slot=2) is at base.x + 2 * 0.28 * card_width.
+        let top_card_x = waste_base.x + 2.0 * 0.28 * layout.card_size.x;
+        let cursor = Vec2::new(top_card_x, waste_base.y);
+
+        let result = find_draggable_at(cursor, &game, &layout);
+        assert!(result.is_some(), "top fanned waste card must be hittable at its visual X position");
+        let (pile, _start, ids) = result.unwrap();
+        assert_eq!(pile, PileType::Waste);
+        assert_eq!(ids, vec![202], "only the top card is draggable from waste");
     }
 
     #[test]
