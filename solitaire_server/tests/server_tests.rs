@@ -6,9 +6,10 @@
 //!
 //! # JWT secret
 //!
-//! Each test calls [`set_jwt_secret`] before touching any endpoint that reads
-//! `JWT_SECRET` from the environment.  This is safe because `cargo test` runs
-//! integration-test binaries single-threaded by default.
+//! [`build_test_router`] injects a fixed test secret into [`AppState`] so
+//! tests do not need to set `JWT_SECRET` in the environment.  The constant
+//! [`TEST_SECRET`] must match the value used by [`build_test_router`] so that
+//! test-side token decoding works correctly.
 
 use axum::{
     body::Body,
@@ -28,7 +29,9 @@ use tower::ServiceExt;
 // Constants
 // ---------------------------------------------------------------------------
 
-/// The JWT secret injected into the environment for all tests.
+/// JWT secret used by [`build_test_router`] and by test-side token decoding.
+///
+/// Must match the value hardcoded in [`solitaire_server::build_test_router`].
 const TEST_SECRET: &str = "test_secret_32_chars_minimum_ok!";
 
 // ---------------------------------------------------------------------------
@@ -51,15 +54,6 @@ async fn test_pool() -> SqlitePool {
         .await
         .expect("failed to run database migrations");
     pool
-}
-
-/// Inject `JWT_SECRET` into the process environment so all auth code can read it.
-///
-/// # Safety
-/// Only called from test code where tests run sequentially in a single binary.
-fn set_jwt_secret() {
-    // SAFETY: test-only; integration test binaries are single-threaded.
-    unsafe { std::env::set_var("JWT_SECRET", TEST_SECRET) };
 }
 
 /// Fake client IP injected by all test requests so `tower_governor`'s
@@ -202,7 +196,7 @@ fn make_payload(user_id_str: &str, games_played: u32) -> SyncPayload {
 /// `POST /api/auth/register` must return 200 with both tokens.
 #[tokio::test]
 async fn register_creates_account_and_returns_tokens() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let resp = post_json(
@@ -227,7 +221,7 @@ async fn register_creates_account_and_returns_tokens() {
 /// Registering the same username twice must return 409 Conflict on the second attempt.
 #[tokio::test]
 async fn register_duplicate_username_returns_conflict() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
     let creds = serde_json::json!({ "username": "bob", "password": "s3cr3t!!" });
 
@@ -247,7 +241,7 @@ async fn register_duplicate_username_returns_conflict() {
 /// Short username (< 3 chars) is rejected with 400.
 #[tokio::test]
 async fn register_rejects_short_username() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
     let resp = post_json(
         app,
@@ -261,7 +255,7 @@ async fn register_rejects_short_username() {
 /// Username with disallowed characters is rejected with 400.
 #[tokio::test]
 async fn register_rejects_invalid_username_chars() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
     let resp = post_json(
         app,
@@ -275,7 +269,7 @@ async fn register_rejects_invalid_username_chars() {
 /// Password shorter than 8 characters is rejected with 400.
 #[tokio::test]
 async fn register_rejects_short_password() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
     let resp = post_json(
         app,
@@ -289,7 +283,7 @@ async fn register_rejects_short_password() {
 /// `POST /api/auth/login` with correct credentials returns 200 with both tokens.
 #[tokio::test]
 async fn login_with_correct_credentials_returns_tokens() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     // Register first.
@@ -312,7 +306,7 @@ async fn login_with_correct_credentials_returns_tokens() {
 /// `POST /api/auth/login` with a wrong password must return 401.
 #[tokio::test]
 async fn login_with_wrong_password_returns_401() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     // Register a user.
@@ -336,7 +330,7 @@ async fn login_with_wrong_password_returns_401() {
 /// `POST /api/auth/login` for a username that does not exist must return 401.
 #[tokio::test]
 async fn login_with_unknown_username_returns_401() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let resp = post_json(
@@ -356,7 +350,7 @@ async fn login_with_unknown_username_returns_401() {
 /// `POST /api/auth/refresh` with a valid refresh token returns 200 with a new access token.
 #[tokio::test]
 async fn refresh_returns_new_access_token() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let (_access, refresh) = register_user(app.clone(), "eve", "refresh_me").await;
@@ -380,7 +374,7 @@ async fn refresh_returns_new_access_token() {
 /// the `kind` claim will be `"access"`, not `"refresh"`.
 #[tokio::test]
 async fn refresh_with_access_token_returns_401() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let (access, _refresh) = register_user(app.clone(), "frank", "bad_refresh").await;
@@ -407,7 +401,7 @@ async fn refresh_with_access_token_returns_401() {
 /// Push a payload, then pull — the pulled data must reflect the pushed values.
 #[tokio::test]
 async fn push_then_pull_returns_pushed_data() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let (access, _) = register_user(app.clone(), "grace", "sync_pass").await;
@@ -436,10 +430,127 @@ async fn push_then_pull_returns_pushed_data() {
     assert_eq!(games_played, 7, "pulled games_played must match pushed value");
 }
 
+/// Full register → login → push → pull integration roundtrip.
+///
+/// This test drives every auth and sync endpoint in sequence to verify that
+/// the complete happy-path flow works end-to-end with a fresh in-memory
+/// database:
+///   1. Register a new user — extracts the access token from the response.
+///   2. Login with the same credentials — obtains a fresh access token from
+///      the login endpoint (not reusing the registration token).
+///   3. Push a `SyncPayload` with known stats via `POST /api/sync/push`.
+///   4. Pull via `GET /api/sync/pull` and assert the pulled payload reflects
+///      the pushed values.
+#[tokio::test]
+async fn register_login_push_pull_full_roundtrip() {
+
+    let app = build_test_router(test_pool().await);
+
+    // --- Step 1: Register ---
+    let reg_resp = post_json(
+        app.clone(),
+        "/api/auth/register",
+        serde_json::json!({ "username": "roundtrip_user", "password": "roundtrip_pass" }),
+    )
+    .await;
+    assert_eq!(
+        reg_resp.status(),
+        StatusCode::OK,
+        "registration must return 200"
+    );
+    let reg_body = body_json(reg_resp).await;
+    assert!(
+        reg_body["access_token"].is_string(),
+        "register must return an access_token"
+    );
+
+    // --- Step 2: Login (explicit — do not reuse the registration token) ---
+    let login_resp = post_json(
+        app.clone(),
+        "/api/auth/login",
+        serde_json::json!({ "username": "roundtrip_user", "password": "roundtrip_pass" }),
+    )
+    .await;
+    assert_eq!(
+        login_resp.status(),
+        StatusCode::OK,
+        "login must return 200"
+    );
+    let login_body = body_json(login_resp).await;
+    let access_token = login_body["access_token"]
+        .as_str()
+        .expect("login must return access_token")
+        .to_string();
+
+    // Decode the user UUID from the login JWT so we can construct the payload.
+    let user_id = decode_sub(&access_token);
+
+    // --- Step 3: Push a payload with known values ---
+    let payload = SyncPayload {
+        user_id: uuid::Uuid::parse_str(&user_id)
+            .expect("JWT sub must be a valid UUID"),
+        stats: StatsSnapshot {
+            games_played: 42,
+            games_won: 17,
+            best_single_score: 4_200,
+            fastest_win_seconds: 95,
+            ..StatsSnapshot::default()
+        },
+        achievements: vec![],
+        progress: PlayerProgress::default(),
+        last_modified: chrono::Utc::now(),
+    };
+
+    let push_resp = post_authed(
+        app.clone(),
+        "/api/sync/push",
+        &access_token,
+        serde_json::to_value(&payload).expect("SyncPayload must serialise"),
+    )
+    .await;
+    assert_eq!(
+        push_resp.status(),
+        StatusCode::OK,
+        "push must return 200"
+    );
+
+    // --- Step 4: Pull and verify the stored data matches what was pushed ---
+    let pull_resp = get_authed(app, "/api/sync/pull", &access_token).await;
+    assert_eq!(
+        pull_resp.status(),
+        StatusCode::OK,
+        "pull must return 200"
+    );
+
+    let pull_body = body_json(pull_resp).await;
+    let merged = &pull_body["merged"];
+
+    assert_eq!(
+        merged["stats"]["games_played"].as_u64(),
+        Some(42),
+        "pulled games_played must match the pushed value"
+    );
+    assert_eq!(
+        merged["stats"]["games_won"].as_u64(),
+        Some(17),
+        "pulled games_won must match the pushed value"
+    );
+    assert_eq!(
+        merged["stats"]["best_single_score"].as_u64(),
+        Some(4_200),
+        "pulled best_single_score must match the pushed value"
+    );
+    assert_eq!(
+        merged["stats"]["fastest_win_seconds"].as_u64(),
+        Some(95),
+        "pulled fastest_win_seconds must match the pushed value"
+    );
+}
+
 /// Pushing a payload whose `user_id` does not match the JWT `sub` must return 400.
 #[tokio::test]
 async fn push_with_wrong_user_id_returns_400() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let (access, _) = register_user(app.clone(), "heidi", "sync_pass").await;
@@ -472,7 +583,7 @@ async fn push_with_wrong_user_id_returns_400() {
 /// A pull before any push returns a default empty payload (200, not 404).
 #[tokio::test]
 async fn pull_before_push_returns_default_payload() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let (access, _) = register_user(app.clone(), "ivan", "nopush!!").await;
@@ -490,7 +601,7 @@ async fn pull_before_push_returns_default_payload() {
 /// Accessing `/api/sync/pull` without a token must return 401.
 #[tokio::test]
 async fn pull_without_token_returns_401() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let req = Request::builder()
@@ -517,7 +628,7 @@ async fn pull_without_token_returns_401() {
 /// return 200.
 #[tokio::test]
 async fn delete_account_succeeds_and_data_is_gone() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let (access, _) = register_user(app.clone(), "judy", "delete_me").await;
@@ -570,7 +681,7 @@ async fn delete_account_succeeds_and_data_is_gone() {
 #[tokio::test]
 async fn health_returns_ok() {
     // No JWT needed; set it anyway for consistency.
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let req = Request::builder()
@@ -596,7 +707,7 @@ async fn health_returns_ok() {
 /// `GET /api/daily-challenge` must return 200 with today's UTC date.
 #[tokio::test]
 async fn daily_challenge_returns_goal_for_today() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let today = Utc::now().format("%Y-%m-%d").to_string();
@@ -625,7 +736,7 @@ async fn daily_challenge_returns_goal_for_today() {
 /// Calling `GET /api/daily-challenge` twice returns the same seed (deterministic).
 #[tokio::test]
 async fn daily_challenge_is_deterministic() {
-    set_jwt_secret();
+
     // Use the same pool so the second call hits the stored row.
     let pool = test_pool().await;
 
@@ -668,7 +779,7 @@ async fn daily_challenge_is_deterministic() {
 /// `GET /api/leaderboard` requires authentication — no token returns 401.
 #[tokio::test]
 async fn leaderboard_without_token_returns_401() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let req = Request::builder()
@@ -688,7 +799,7 @@ async fn leaderboard_without_token_returns_401() {
 /// Opting in and then fetching the leaderboard returns the opted-in entry.
 #[tokio::test]
 async fn opt_in_then_leaderboard_shows_entry() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let (access, _) = register_user(app.clone(), "karen", "leaderpass").await;
@@ -722,7 +833,7 @@ async fn opt_in_then_leaderboard_shows_entry() {
 /// Pushing sync data after opting in updates the leaderboard best_score.
 #[tokio::test]
 async fn push_after_opt_in_updates_leaderboard_score() {
-    set_jwt_secret();
+
     let pool = test_pool().await;
     let app = build_test_router(pool);
 
@@ -774,7 +885,7 @@ async fn push_after_opt_in_updates_leaderboard_score() {
 /// Pushing a lower score after a higher one does not overwrite the best.
 #[tokio::test]
 async fn push_lower_score_does_not_overwrite_leaderboard_best() {
-    set_jwt_secret();
+
     let pool = test_pool().await;
     let app = build_test_router(pool);
 
@@ -822,7 +933,7 @@ async fn push_lower_score_does_not_overwrite_leaderboard_best() {
 /// Opting out hides the player from the leaderboard; opting back in restores them.
 #[tokio::test]
 async fn opt_out_hides_then_opt_in_restores() {
-    set_jwt_secret();
+
     let pool = test_pool().await;
     let app = build_test_router(pool);
 
@@ -877,7 +988,7 @@ async fn opt_out_hides_then_opt_in_restores() {
 /// Opting in with an empty display name returns 400.
 #[tokio::test]
 async fn opt_in_empty_display_name_returns_400() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
     let (access, _) = register_user(app.clone(), "empty_name", "pass1234").await;
 
@@ -898,7 +1009,7 @@ async fn opt_in_empty_display_name_returns_400() {
 /// Opting in with a display name longer than 32 characters returns 400.
 #[tokio::test]
 async fn opt_in_too_long_display_name_returns_400() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
     let (access, _) = register_user(app.clone(), "long_name", "pass1234").await;
 
@@ -920,7 +1031,7 @@ async fn opt_in_too_long_display_name_returns_400() {
 /// Exactly 32 ASCII characters is accepted.
 #[tokio::test]
 async fn opt_in_exactly_32_char_display_name_succeeds() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
     let (access, _) = register_user(app.clone(), "maxname", "pass1234").await;
 
@@ -943,7 +1054,7 @@ async fn opt_in_exactly_32_char_display_name_succeeds() {
 /// accepted — the limit is character count, not byte count.
 #[tokio::test]
 async fn opt_in_32_unicode_chars_display_name_succeeds() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
     let (access, _) = register_user(app.clone(), "unicode_name", "pass1234").await;
 
@@ -967,7 +1078,7 @@ async fn opt_in_32_unicode_chars_display_name_succeeds() {
 /// A display name with 33 Unicode emoji is rejected.
 #[tokio::test]
 async fn opt_in_33_unicode_chars_display_name_returns_400() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
     let (access, _) = register_user(app.clone(), "unicode_long", "pass1234").await;
 
@@ -990,7 +1101,7 @@ async fn opt_in_33_unicode_chars_display_name_returns_400() {
 /// the server merges (max wins) rather than blindly replacing.
 #[tokio::test]
 async fn second_push_with_lower_stats_preserves_higher_stored_values() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let (access, _) = register_user(app.clone(), "merge_test", "merge_pass").await;
@@ -1033,7 +1144,7 @@ async fn second_push_with_lower_stats_preserves_higher_stored_values() {
 /// Login with leading/trailing whitespace in the username still succeeds.
 #[tokio::test]
 async fn login_trims_whitespace_from_username() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let _ = register_user(app.clone(), "trimtest", "password1!").await;
@@ -1060,7 +1171,7 @@ async fn login_trims_whitespace_from_username() {
 /// `POST /api/sync/push` with a body exceeding the 1 MB limit must return 413.
 #[tokio::test]
 async fn push_oversized_body_returns_413() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let (access, _) = register_user(app.clone(), "sizetest", "password1!").await;
@@ -1090,7 +1201,7 @@ async fn push_oversized_body_returns_413() {
 /// A JWT whose `exp` is in the past must be rejected with 401 on protected routes.
 #[tokio::test]
 async fn expired_access_token_returns_401() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     // Craft a token that expired 2 hours ago — well past jsonwebtoken's 60 s leeway.
@@ -1123,7 +1234,7 @@ async fn expired_access_token_returns_401() {
 /// A refresh token must be rejected when used as a Bearer token on protected routes.
 #[tokio::test]
 async fn refresh_token_rejected_on_protected_routes() {
-    set_jwt_secret();
+
     let app = build_test_router(test_pool().await);
 
     let (_, refresh) = register_user(app.clone(), "kindtest", "password1!").await;

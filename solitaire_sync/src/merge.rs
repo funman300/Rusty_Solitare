@@ -643,6 +643,95 @@ mod tests {
         assert_eq!(merged.progress.weekly_goal_progress.get("weekly_5_wins"), Some(&1));
     }
 
+    // -----------------------------------------------------------------------
+    // ConflictReport field population
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn conflict_report_win_streak_current_contains_correct_field_and_values() {
+        // Verify that the ConflictReport for win_streak_current carries the exact
+        // field name and the string representations of the diverging values.
+        let mut local = default_payload();
+        local.stats.win_streak_current = 7;
+        let mut remote = default_payload();
+        remote.stats.win_streak_current = 2;
+
+        let (_, conflicts) = merge(&local, &remote);
+
+        let report = conflicts
+            .iter()
+            .find(|c| c.field == "win_streak_current")
+            .expect("ConflictReport for win_streak_current must be present");
+        assert_eq!(
+            report.local_value, "7",
+            "local_value in ConflictReport must be the local streak as a string"
+        );
+        assert_eq!(
+            report.remote_value, "2",
+            "remote_value in ConflictReport must be the remote streak as a string"
+        );
+    }
+
+    #[test]
+    fn conflict_report_daily_challenge_streak_contains_correct_field_and_values() {
+        // daily_challenge_streak divergence must also produce a ConflictReport with
+        // the correct field name and human-readable values.
+        let mut local = default_payload();
+        local.progress.daily_challenge_streak = 10;
+        let mut remote = default_payload();
+        remote.progress.daily_challenge_streak = 4;
+
+        let (merged, conflicts) = merge(&local, &remote);
+
+        let report = conflicts
+            .iter()
+            .find(|c| c.field == "daily_challenge_streak")
+            .expect("ConflictReport for daily_challenge_streak must be present");
+        assert_eq!(
+            report.local_value, "10",
+            "local_value must equal the local streak string"
+        );
+        assert_eq!(
+            report.remote_value, "4",
+            "remote_value must equal the remote streak string"
+        );
+        // Best-effort resolution: the higher value is retained.
+        assert_eq!(
+            merged.progress.daily_challenge_streak, 10,
+            "merged streak must take the higher value"
+        );
+    }
+
+    #[test]
+    fn no_conflict_report_when_win_streak_current_is_equal() {
+        // Identical win_streak_current must not generate any ConflictReport.
+        let mut local = default_payload();
+        local.stats.win_streak_current = 5;
+        let mut remote = default_payload();
+        remote.stats.win_streak_current = 5;
+
+        let (_, conflicts) = merge(&local, &remote);
+        assert!(
+            !conflicts.iter().any(|c| c.field == "win_streak_current"),
+            "equal streaks must produce no conflict"
+        );
+    }
+
+    #[test]
+    fn no_conflict_report_when_daily_challenge_streak_is_equal() {
+        // Identical daily_challenge_streak must not generate any ConflictReport.
+        let mut local = default_payload();
+        local.progress.daily_challenge_streak = 3;
+        let mut remote = default_payload();
+        remote.progress.daily_challenge_streak = 3;
+
+        let (_, conflicts) = merge(&local, &remote);
+        assert!(
+            !conflicts.iter().any(|c| c.field == "daily_challenge_streak"),
+            "equal daily challenge streaks must produce no conflict"
+        );
+    }
+
     #[test]
     fn fastest_win_both_max_sentinel_stays_max() {
         // Both sides have u64::MAX (no wins recorded on either) — result must remain MAX,
