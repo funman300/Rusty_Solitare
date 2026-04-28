@@ -18,7 +18,7 @@ pub const CHALLENGE_UNLOCK_LEVEL: u32 = 5;
 
 /// Fired when the player has just completed a Challenge-mode game and the
 /// `challenge_index` cursor advances.
-#[derive(Event, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone, Copy)]
 pub struct ChallengeAdvancedEvent {
     pub previous_index: u32,
     pub new_index: u32,
@@ -28,10 +28,10 @@ pub struct ChallengePlugin;
 
 impl Plugin for ChallengePlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<ChallengeAdvancedEvent>()
-            .add_event::<GameWonEvent>()
-            .add_event::<NewGameRequestEvent>()
-            .add_event::<InfoToastEvent>()
+        app.add_message::<ChallengeAdvancedEvent>()
+            .add_message::<GameWonEvent>()
+            .add_message::<NewGameRequestEvent>()
+            .add_message::<InfoToastEvent>()
             // Run after ProgressUpdate so we don't fight ProgressPlugin's add_xp.
             .add_systems(Update, advance_on_challenge_win.after(ProgressUpdate))
             .add_systems(Update, handle_start_challenge_request.before(GameMutation));
@@ -39,12 +39,12 @@ impl Plugin for ChallengePlugin {
 }
 
 fn advance_on_challenge_win(
-    mut wins: EventReader<GameWonEvent>,
+    mut wins: MessageReader<GameWonEvent>,
     game: Res<GameStateResource>,
     mut progress: ResMut<ProgressResource>,
     path: Res<ProgressStoragePath>,
-    mut advanced: EventWriter<ChallengeAdvancedEvent>,
-    mut toast: EventWriter<InfoToastEvent>,
+    mut advanced: MessageWriter<ChallengeAdvancedEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
 ) {
     for _ in wins.read() {
         if game.0.mode != GameMode::Challenge {
@@ -70,8 +70,8 @@ fn advance_on_challenge_win(
 fn handle_start_challenge_request(
     keys: Res<ButtonInput<KeyCode>>,
     progress: Res<ProgressResource>,
-    mut new_game: EventWriter<NewGameRequestEvent>,
-    mut info_toast: EventWriter<InfoToastEvent>,
+    mut new_game: MessageWriter<NewGameRequestEvent>,
+    mut info_toast: MessageWriter<InfoToastEvent>,
 ) {
     if !keys.just_pressed(KeyCode::KeyX) {
         return;
@@ -124,7 +124,7 @@ mod tests {
         app.world_mut().resource_mut::<GameStateResource>().0 =
             GameState::new_with_mode(1, DrawMode::DrawOne, GameMode::Challenge);
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 100,
         });
@@ -145,7 +145,7 @@ mod tests {
     fn classic_win_does_not_advance_challenge_index() {
         let mut app = headless_app();
         // Default GameStateResource is Classic mode.
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 100,
         });
@@ -211,7 +211,7 @@ mod tests {
         app.world_mut().resource_mut::<GameStateResource>().0 =
             GameState::new_with_mode(1, DrawMode::DrawOne, GameMode::Challenge);
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 100,
         });
@@ -231,7 +231,7 @@ mod tests {
     fn classic_win_does_not_fire_challenge_complete_toast() {
         let mut app = headless_app();
         // Default mode is Classic.
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 100,
         });

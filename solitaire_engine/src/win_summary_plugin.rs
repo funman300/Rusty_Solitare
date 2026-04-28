@@ -159,11 +159,11 @@ impl Plugin for WinSummaryPlugin {
         app.init_resource::<WinSummaryPending>()
             .init_resource::<ScreenShakeResource>()
             .init_resource::<SessionAchievements>()
-            .add_event::<GameWonEvent>()
-            .add_event::<XpAwardedEvent>()
-            .add_event::<NewGameRequestEvent>()
-            .add_event::<InfoToastEvent>()
-            .add_event::<AchievementUnlockedEvent>()
+            .add_message::<GameWonEvent>()
+            .add_message::<XpAwardedEvent>()
+            .add_message::<NewGameRequestEvent>()
+            .add_message::<InfoToastEvent>()
+            .add_message::<AchievementUnlockedEvent>()
             // `cache_win_data` must run BEFORE `StatsUpdate` so it can compare
             // the player's old personal-best values before `StatsPlugin` overwrites them.
             .add_systems(
@@ -221,13 +221,13 @@ pub fn format_win_time(seconds: u64) -> String {
 /// This system is scheduled `.before(StatsUpdate)` so the comparison always
 /// sees the old best values.
 fn cache_win_data(
-    mut won: EventReader<GameWonEvent>,
-    mut xp: EventReader<XpAwardedEvent>,
+    mut won: MessageReader<GameWonEvent>,
+    mut xp: MessageReader<XpAwardedEvent>,
     mut pending: ResMut<WinSummaryPending>,
     stats: Res<StatsResource>,
     game: Res<GameStateResource>,
     progress: Res<ProgressResource>,
-    mut toast: EventWriter<InfoToastEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
 ) {
     for ev in won.read() {
         // Compare against old personal bests BEFORE StatsPlugin updates them.
@@ -274,8 +274,8 @@ fn cache_win_data(
 /// reader covers every implicit game-context reset in addition to the
 /// explicit N / "Play Again" new-game requests.
 fn collect_session_achievements(
-    mut unlocks: EventReader<AchievementUnlockedEvent>,
-    mut new_games: EventReader<NewGameRequestEvent>,
+    mut unlocks: MessageReader<AchievementUnlockedEvent>,
+    mut new_games: MessageReader<NewGameRequestEvent>,
     mut session: ResMut<SessionAchievements>,
 ) {
     // Reset on any new-game request (including mode switches via Z/X/C/T) so
@@ -303,8 +303,8 @@ fn collect_session_achievements(
 #[allow(clippy::too_many_arguments)]
 fn spawn_win_summary_after_delay(
     mut commands: Commands,
-    mut won: EventReader<GameWonEvent>,
-    mut xp_events: EventReader<XpAwardedEvent>,
+    mut won: MessageReader<GameWonEvent>,
+    mut xp_events: MessageReader<XpAwardedEvent>,
     mut shake: ResMut<ScreenShakeResource>,
     mut pending: ResMut<WinSummaryPending>,
     session: Res<SessionAchievements>,
@@ -352,7 +352,7 @@ fn handle_win_summary_buttons(
     interaction_query: Query<(&Interaction, &WinSummaryButton), Changed<Interaction>>,
     overlays: Query<Entity, With<WinSummaryOverlay>>,
     mut commands: Commands,
-    mut new_game: EventWriter<NewGameRequestEvent>,
+    mut new_game: MessageWriter<NewGameRequestEvent>,
 ) {
     for (interaction, button) in &interaction_query {
         if *interaction != Interaction::Pressed {
@@ -677,7 +677,7 @@ mod tests {
         use solitaire_data::AchievementRecord;
         let record = AchievementRecord::locked("first_win");
         app.world_mut()
-            .send_event(AchievementUnlockedEvent(record));
+            .write_message(AchievementUnlockedEvent(record));
         app.update();
 
         let session = app.world().resource::<SessionAchievements>();
@@ -693,7 +693,7 @@ mod tests {
         use solitaire_data::AchievementRecord;
         let record = AchievementRecord::locked("first_win");
         app.world_mut()
-            .send_event(AchievementUnlockedEvent(record));
+            .write_message(AchievementUnlockedEvent(record));
         app.update();
 
         // Confirm it was recorded.
@@ -703,7 +703,7 @@ mod tests {
         );
 
         // Fire NewGameRequestEvent — should clear the list.
-        app.world_mut().send_event(NewGameRequestEvent::default());
+        app.world_mut().write_message(NewGameRequestEvent::default());
         app.update();
 
         assert!(
@@ -727,7 +727,7 @@ mod tests {
         // Simulate an achievement unlock during the current session.
         let record = AchievementRecord::locked("first_win");
         app.world_mut()
-            .send_event(AchievementUnlockedEvent(record));
+            .write_message(AchievementUnlockedEvent(record));
         app.update();
 
         assert_eq!(
@@ -739,7 +739,7 @@ mod tests {
         // Simulate pressing Z (Zen mode switch) — fires NewGameRequestEvent
         // with mode = Some(Zen). Same event shape used by X (Challenge),
         // C (Daily Challenge), and T (Time Attack).
-        app.world_mut().send_event(NewGameRequestEvent {
+        app.world_mut().write_message(NewGameRequestEvent {
             seed: None,
             mode: Some(GameMode::Zen),
         });
@@ -756,7 +756,7 @@ mod tests {
         let mut app = make_app();
 
         app.world_mut()
-            .send_event(GameWonEvent { score: 1234, time_seconds: 90 });
+            .write_message(GameWonEvent { score: 1234, time_seconds: 90 });
         app.update();
 
         let pending = app.world().resource::<WinSummaryPending>();
@@ -771,8 +771,8 @@ mod tests {
     fn cache_win_data_sets_xp_from_xp_awarded_event() {
         let mut app = make_app();
 
-        app.world_mut().send_event(GameWonEvent { score: 0, time_seconds: 0 });
-        app.world_mut().send_event(XpAwardedEvent { amount: 75 });
+        app.world_mut().write_message(GameWonEvent { score: 0, time_seconds: 0 });
+        app.world_mut().write_message(XpAwardedEvent { amount: 75 });
         app.update();
 
         let pending = app.world().resource::<WinSummaryPending>();
@@ -784,7 +784,7 @@ mod tests {
         let mut app = make_app();
 
         app.world_mut()
-            .send_event(GameWonEvent { score: 0, time_seconds: 0 });
+            .write_message(GameWonEvent { score: 0, time_seconds: 0 });
         app.update();
 
         let shake = app.world().resource::<ScreenShakeResource>();
@@ -802,7 +802,7 @@ mod tests {
         let mut app = make_app();
 
         app.world_mut()
-            .send_event(GameWonEvent { score: 500, time_seconds: 120 });
+            .write_message(GameWonEvent { score: 500, time_seconds: 120 });
         app.update();
 
         let pending = app.world().resource::<WinSummaryPending>();
@@ -820,7 +820,7 @@ mod tests {
 
         // Score 500 beats previous best of 400.
         app.world_mut()
-            .send_event(GameWonEvent { score: 500, time_seconds: 300 });
+            .write_message(GameWonEvent { score: 500, time_seconds: 300 });
         app.update();
 
         let pending = app.world().resource::<WinSummaryPending>();
@@ -838,7 +838,7 @@ mod tests {
 
         // Score 500 does not beat 800, but time 100 < 200.
         app.world_mut()
-            .send_event(GameWonEvent { score: 500, time_seconds: 100 });
+            .write_message(GameWonEvent { score: 500, time_seconds: 100 });
         app.update();
 
         let pending = app.world().resource::<WinSummaryPending>();
@@ -856,7 +856,7 @@ mod tests {
 
         // Score 500 < 800 and time 120 > 60 — neither record broken.
         app.world_mut()
-            .send_event(GameWonEvent { score: 500, time_seconds: 120 });
+            .write_message(GameWonEvent { score: 500, time_seconds: 120 });
         app.update();
 
         let pending = app.world().resource::<WinSummaryPending>();
@@ -887,7 +887,7 @@ mod tests {
         }
 
         app.world_mut()
-            .send_event(GameWonEvent { score: 0, time_seconds: 0 });
+            .write_message(GameWonEvent { score: 0, time_seconds: 0 });
         app.update();
 
         let pending = app.world().resource::<WinSummaryPending>();
@@ -903,7 +903,7 @@ mod tests {
         let mut app = make_app();
         // Default game mode is Classic — challenge_level should stay None.
         app.world_mut()
-            .send_event(GameWonEvent { score: 0, time_seconds: 0 });
+            .write_message(GameWonEvent { score: 0, time_seconds: 0 });
         app.update();
 
         let pending = app.world().resource::<WinSummaryPending>();

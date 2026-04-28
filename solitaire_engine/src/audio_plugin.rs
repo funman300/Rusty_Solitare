@@ -130,15 +130,15 @@ impl Plugin for AudioPlugin {
             app.insert_resource(lib);
         }
 
-        app.add_event::<DrawRequestEvent>()
-            .add_event::<MoveRequestEvent>()
-            .add_event::<MoveRejectedEvent>()
-            .add_event::<NewGameRequestEvent>()
-            .add_event::<GameWonEvent>()
-            .add_event::<CardFlippedEvent>()
-            .add_event::<CardFaceRevealedEvent>()
-            .add_event::<UndoRequestEvent>()
-            .add_event::<SettingsChangedEvent>()
+        app.add_message::<DrawRequestEvent>()
+            .add_message::<MoveRequestEvent>()
+            .add_message::<MoveRejectedEvent>()
+            .add_message::<NewGameRequestEvent>()
+            .add_message::<GameWonEvent>()
+            .add_message::<CardFlippedEvent>()
+            .add_message::<CardFaceRevealedEvent>()
+            .add_message::<UndoRequestEvent>()
+            .add_message::<SettingsChangedEvent>()
             .add_systems(Startup, apply_initial_volume)
             .add_systems(
                 Update,
@@ -270,7 +270,7 @@ fn apply_initial_volume(
 }
 
 fn play_on_undo(
-    mut events: EventReader<UndoRequestEvent>,
+    mut events: MessageReader<UndoRequestEvent>,
     mut audio: NonSendMut<AudioState>,
     lib: Option<Res<SoundLibrary>>,
 ) {
@@ -281,7 +281,7 @@ fn play_on_undo(
 }
 
 fn apply_volume_on_change(
-    mut events: EventReader<SettingsChangedEvent>,
+    mut events: MessageReader<SettingsChangedEvent>,
     mut audio: NonSendMut<AudioState>,
     mute: Option<Res<MuteState>>,
 ) {
@@ -326,7 +326,7 @@ fn handle_mute_keys(
 }
 
 fn play_on_draw(
-    mut events: EventReader<DrawRequestEvent>,
+    mut events: MessageReader<DrawRequestEvent>,
     mut audio: NonSendMut<AudioState>,
     lib: Option<Res<SoundLibrary>>,
     game: Option<Res<GameStateResource>>,
@@ -361,7 +361,7 @@ fn play_on_draw(
 }
 
 fn play_on_move(
-    mut events: EventReader<MoveRequestEvent>,
+    mut events: MessageReader<MoveRequestEvent>,
     mut audio: NonSendMut<AudioState>,
     lib: Option<Res<SoundLibrary>>,
 ) {
@@ -374,7 +374,7 @@ fn play_on_move(
 }
 
 fn play_on_rejected(
-    mut events: EventReader<MoveRejectedEvent>,
+    mut events: MessageReader<MoveRejectedEvent>,
     mut audio: NonSendMut<AudioState>,
     lib: Option<Res<SoundLibrary>>,
 ) {
@@ -387,7 +387,7 @@ fn play_on_rejected(
 }
 
 fn play_on_new_game(
-    mut events: EventReader<NewGameRequestEvent>,
+    mut events: MessageReader<NewGameRequestEvent>,
     mut audio: NonSendMut<AudioState>,
     lib: Option<Res<SoundLibrary>>,
 ) {
@@ -400,7 +400,7 @@ fn play_on_new_game(
 }
 
 fn play_on_win(
-    mut events: EventReader<GameWonEvent>,
+    mut events: MessageReader<GameWonEvent>,
     mut audio: NonSendMut<AudioState>,
     lib: Option<Res<SoundLibrary>>,
 ) {
@@ -418,7 +418,7 @@ fn play_on_win(
 /// Driven by `CardFaceRevealedEvent`, which is fired by `tick_flip_anim` at
 /// the phase transition (scale.x crosses 0), not by the move event itself.
 fn play_on_face_revealed(
-    mut events: EventReader<CardFaceRevealedEvent>,
+    mut events: MessageReader<CardFaceRevealedEvent>,
     mut audio: NonSendMut<AudioState>,
     lib: Option<Res<SoundLibrary>>,
 ) {

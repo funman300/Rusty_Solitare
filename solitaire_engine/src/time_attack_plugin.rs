@@ -26,7 +26,7 @@ pub struct TimeAttackResource {
 
 /// Fired when the Time Attack timer expires. The summary toast in
 /// `AnimationPlugin` consumes this; UI/stats consumers can also subscribe.
-#[derive(Event, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone, Copy)]
 pub struct TimeAttackEndedEvent {
     pub wins: u32,
 }
@@ -36,10 +36,10 @@ pub struct TimeAttackPlugin;
 impl Plugin for TimeAttackPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TimeAttackResource>()
-            .add_event::<TimeAttackEndedEvent>()
-            .add_event::<GameWonEvent>()
-            .add_event::<NewGameRequestEvent>()
-            .add_event::<InfoToastEvent>()
+            .add_message::<TimeAttackEndedEvent>()
+            .add_message::<GameWonEvent>()
+            .add_message::<NewGameRequestEvent>()
+            .add_message::<InfoToastEvent>()
             .add_systems(
                 Update,
                 handle_start_time_attack_request.before(GameMutation),
@@ -53,8 +53,8 @@ fn handle_start_time_attack_request(
     keys: Res<ButtonInput<KeyCode>>,
     progress: Res<ProgressResource>,
     mut session: ResMut<TimeAttackResource>,
-    mut new_game: EventWriter<NewGameRequestEvent>,
-    mut info_toast: EventWriter<InfoToastEvent>,
+    mut new_game: MessageWriter<NewGameRequestEvent>,
+    mut info_toast: MessageWriter<InfoToastEvent>,
 ) {
     if !keys.just_pressed(KeyCode::KeyT) {
         return;
@@ -79,7 +79,7 @@ fn handle_start_time_attack_request(
 fn advance_time_attack(
     time: Res<Time>,
     mut session: ResMut<TimeAttackResource>,
-    mut ended: EventWriter<TimeAttackEndedEvent>,
+    mut ended: MessageWriter<TimeAttackEndedEvent>,
     paused: Option<Res<crate::pause_plugin::PausedResource>>,
 ) {
     if !session.active {
@@ -98,10 +98,10 @@ fn advance_time_attack(
 }
 
 fn auto_deal_on_time_attack_win(
-    mut wins: EventReader<GameWonEvent>,
+    mut wins: MessageReader<GameWonEvent>,
     game: Res<GameStateResource>,
     mut session: ResMut<TimeAttackResource>,
-    mut new_game: EventWriter<NewGameRequestEvent>,
+    mut new_game: MessageWriter<NewGameRequestEvent>,
 ) {
     for _ in wins.read() {
         if !session.active || game.0.mode != GameMode::TimeAttack {
@@ -213,7 +213,7 @@ mod tests {
         app.world_mut().resource_mut::<GameStateResource>().0 =
             GameState::new_with_mode(7, DrawMode::DrawOne, GameMode::TimeAttack);
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 60,
         });
@@ -237,7 +237,7 @@ mod tests {
         app.world_mut().resource_mut::<GameStateResource>().0 =
             GameState::new_with_mode(7, DrawMode::DrawOne, GameMode::TimeAttack);
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 60,
         });
@@ -256,7 +256,7 @@ mod tests {
             wins: 0,
         };
         // GameStateResource defaults to Classic mode.
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 60,
         });

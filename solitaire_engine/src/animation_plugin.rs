@@ -156,18 +156,18 @@ impl Plugin for AnimationPlugin {
         // Register the events this plugin consumes so tests that don't include
         // GamePlugin can still run AnimationPlugin in isolation. Double-registration
         // is idempotent in Bevy.
-        app.add_event::<GameWonEvent>()
-            .add_event::<AchievementUnlockedEvent>()
-            .add_event::<LevelUpEvent>()
-            .add_event::<DailyChallengeCompletedEvent>()
-            .add_event::<DailyGoalAnnouncementEvent>()
-            .add_event::<WeeklyGoalCompletedEvent>()
-            .add_event::<TimeAttackEndedEvent>()
-            .add_event::<ChallengeAdvancedEvent>()
-            .add_event::<SettingsChangedEvent>()
-            .add_event::<NewGameConfirmEvent>()
-            .add_event::<InfoToastEvent>()
-            .add_event::<XpAwardedEvent>()
+        app.add_message::<GameWonEvent>()
+            .add_message::<AchievementUnlockedEvent>()
+            .add_message::<LevelUpEvent>()
+            .add_message::<DailyChallengeCompletedEvent>()
+            .add_message::<DailyGoalAnnouncementEvent>()
+            .add_message::<WeeklyGoalCompletedEvent>()
+            .add_message::<TimeAttackEndedEvent>()
+            .add_message::<ChallengeAdvancedEvent>()
+            .add_message::<SettingsChangedEvent>()
+            .add_message::<NewGameConfirmEvent>()
+            .add_message::<InfoToastEvent>()
+            .add_message::<XpAwardedEvent>()
             .init_resource::<EffectiveSlideDuration>()
             .init_resource::<ToastQueue>()
             .init_resource::<ActiveToast>()
@@ -207,7 +207,7 @@ fn init_slide_duration(
 }
 
 fn sync_slide_duration(
-    mut events: EventReader<SettingsChangedEvent>,
+    mut events: MessageReader<SettingsChangedEvent>,
     mut dur: ResMut<EffectiveSlideDuration>,
 ) {
     for ev in events.read() {
@@ -245,7 +245,7 @@ fn advance_card_anims(
 
 fn handle_win_cascade(
     mut commands: Commands,
-    mut events: EventReader<GameWonEvent>,
+    mut events: MessageReader<GameWonEvent>,
     cards: Query<(Entity, &Transform), With<CardEntity>>,
     layout: Option<Res<LayoutResource>>,
     settings: Option<Res<SettingsResource>>,
@@ -290,7 +290,7 @@ fn handle_win_cascade(
 
 fn handle_achievement_toast(
     mut commands: Commands,
-    mut events: EventReader<AchievementUnlockedEvent>,
+    mut events: MessageReader<AchievementUnlockedEvent>,
 ) {
     for ev in events.read() {
         spawn_toast(
@@ -301,7 +301,7 @@ fn handle_achievement_toast(
     }
 }
 
-fn handle_levelup_toast(mut commands: Commands, mut events: EventReader<LevelUpEvent>) {
+fn handle_levelup_toast(mut commands: Commands, mut events: MessageReader<LevelUpEvent>) {
     for ev in events.read() {
         spawn_toast(
             &mut commands,
@@ -313,7 +313,7 @@ fn handle_levelup_toast(mut commands: Commands, mut events: EventReader<LevelUpE
 
 fn handle_daily_goal_announcement_toast(
     mut commands: Commands,
-    mut events: EventReader<DailyGoalAnnouncementEvent>,
+    mut events: MessageReader<DailyGoalAnnouncementEvent>,
 ) {
     for ev in events.read() {
         spawn_toast(&mut commands, format!("Goal: {}", ev.0), DAILY_TOAST_SECS);
@@ -322,7 +322,7 @@ fn handle_daily_goal_announcement_toast(
 
 fn handle_daily_toast(
     mut commands: Commands,
-    mut events: EventReader<DailyChallengeCompletedEvent>,
+    mut events: MessageReader<DailyChallengeCompletedEvent>,
 ) {
     for ev in events.read() {
         spawn_toast(
@@ -335,7 +335,7 @@ fn handle_daily_toast(
 
 fn handle_weekly_toast(
     mut commands: Commands,
-    mut events: EventReader<WeeklyGoalCompletedEvent>,
+    mut events: MessageReader<WeeklyGoalCompletedEvent>,
 ) {
     for ev in events.read() {
         spawn_toast(
@@ -348,7 +348,7 @@ fn handle_weekly_toast(
 
 fn handle_time_attack_toast(
     mut commands: Commands,
-    mut events: EventReader<TimeAttackEndedEvent>,
+    mut events: MessageReader<TimeAttackEndedEvent>,
 ) {
     for ev in events.read() {
         spawn_toast(
@@ -361,7 +361,7 @@ fn handle_time_attack_toast(
 
 fn handle_challenge_toast(
     mut commands: Commands,
-    mut events: EventReader<ChallengeAdvancedEvent>,
+    mut events: MessageReader<ChallengeAdvancedEvent>,
 ) {
     for ev in events.read() {
         spawn_toast(
@@ -374,7 +374,7 @@ fn handle_challenge_toast(
 
 fn handle_settings_toast(
     mut commands: Commands,
-    mut events: EventReader<SettingsChangedEvent>,
+    mut events: MessageReader<SettingsChangedEvent>,
     mut last_sfx: Local<Option<f32>>,
     mut last_music: Local<Option<f32>>,
 ) {
@@ -417,7 +417,7 @@ fn handle_auto_complete_toast(
 
 fn handle_new_game_confirm_toast(
     mut commands: Commands,
-    mut events: EventReader<NewGameConfirmEvent>,
+    mut events: MessageReader<NewGameConfirmEvent>,
 ) {
     for _ in events.read() {
         spawn_toast(&mut commands, "Press N again to start a new game".to_string(), 3.0);
@@ -430,7 +430,7 @@ fn handle_new_game_confirm_toast(
 /// decouples event production from rendering so multiple simultaneous events do
 /// not cause overlapping toast text on screen.
 fn enqueue_toasts(
-    mut events: EventReader<InfoToastEvent>,
+    mut events: MessageReader<InfoToastEvent>,
     mut queue: ResMut<ToastQueue>,
 ) {
     for ev in events.read() {
@@ -509,7 +509,7 @@ fn spawn_queued_toast(commands: &mut Commands, message: String) -> Entity {
         .id()
 }
 
-fn handle_xp_awarded_toast(mut commands: Commands, mut events: EventReader<XpAwardedEvent>) {
+fn handle_xp_awarded_toast(mut commands: Commands, mut events: MessageReader<XpAwardedEvent>) {
     for ev in events.read() {
         spawn_toast(&mut commands, format!("+{} XP", ev.amount), 3.0);
     }
@@ -709,7 +709,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).add_plugins(AnimationPlugin);
 
-        app.world_mut().send_event(InfoToastEvent("hello".to_string()));
+        app.world_mut().write_message(InfoToastEvent("hello".to_string()));
         app.update();
 
         let count = app
@@ -745,7 +745,7 @@ mod tests {
     fn toast_queue_enqueues_on_event() {
         let mut app = queue_app();
         app.world_mut()
-            .send_event(InfoToastEvent("test message".to_string()));
+            .write_message(InfoToastEvent("test message".to_string()));
         app.update();
         // After one update the message should have been consumed (shown) or is
         // still in the queue — either way we verify the system processed it by
@@ -776,7 +776,7 @@ mod tests {
         app.add_plugins(MinimalPlugins).add_plugins(AnimationPlugin);
 
         let fast_settings = Settings { animation_speed: AnimSpeed::Fast, ..Default::default() };
-        app.world_mut().send_event(SettingsChangedEvent(fast_settings));
+        app.world_mut().write_message(SettingsChangedEvent(fast_settings));
         app.update();
 
         let dur = app.world().resource::<EffectiveSlideDuration>().slide_secs;
@@ -795,7 +795,7 @@ mod tests {
         assert_eq!(before, 0, "no animations before win");
 
         app.world_mut()
-            .send_event(GameWonEvent { score: 500, time_seconds: 60 });
+            .write_message(GameWonEvent { score: 500, time_seconds: 60 });
         app.update();
 
         let after = app

@@ -77,10 +77,10 @@ impl Plugin for StatsPlugin {
         };
         app.insert_resource(StatsResource(loaded))
             .insert_resource(StatsStoragePath(self.storage_path.clone()))
-            .add_event::<GameWonEvent>()
-            .add_event::<NewGameRequestEvent>()
-            .add_event::<ForfeitEvent>()
-            .add_event::<InfoToastEvent>()
+            .add_message::<GameWonEvent>()
+            .add_message::<NewGameRequestEvent>()
+            .add_message::<ForfeitEvent>()
+            .add_message::<InfoToastEvent>()
             // record_abandoned must read `move_count` BEFORE handle_new_game
             // clobbers it with a fresh game.
             .add_systems(
@@ -111,7 +111,7 @@ fn persist(path: &StatsStoragePath, stats: &StatsSnapshot, context: &str) {
 }
 
 fn update_stats_on_win(
-    mut events: EventReader<GameWonEvent>,
+    mut events: MessageReader<GameWonEvent>,
     game: Res<GameStateResource>,
     mut stats: ResMut<StatsResource>,
     path: Res<StatsStoragePath>,
@@ -125,11 +125,11 @@ fn update_stats_on_win(
 }
 
 fn update_stats_on_new_game(
-    mut events: EventReader<NewGameRequestEvent>,
+    mut events: MessageReader<NewGameRequestEvent>,
     game: Res<GameStateResource>,
     mut stats: ResMut<StatsResource>,
     path: Res<StatsStoragePath>,
-    mut toast: EventWriter<InfoToastEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
 ) {
     for _ in events.read() {
         if game.0.move_count > 0 && !game.0.is_won {
@@ -149,12 +149,12 @@ fn update_stats_on_new_game(
 /// `AutoCompleteState` is reset here so the "AUTO" badge and chime do not bleed
 /// into the new deal (task #41).
 fn handle_forfeit(
-    mut events: EventReader<ForfeitEvent>,
+    mut events: MessageReader<ForfeitEvent>,
     game: Res<GameStateResource>,
     mut stats: ResMut<StatsResource>,
     path: Res<StatsStoragePath>,
-    mut new_game: EventWriter<NewGameRequestEvent>,
-    mut toast: EventWriter<InfoToastEvent>,
+    mut new_game: MessageWriter<NewGameRequestEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
     mut auto_complete: Option<ResMut<AutoCompleteState>>,
 ) {
     for _ in events.read() {
@@ -513,7 +513,7 @@ mod tests {
     #[test]
     fn win_event_increments_games_won() {
         let mut app = headless_app();
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 1000,
             time_seconds: 120,
         });
@@ -532,7 +532,7 @@ mod tests {
             .0
             .draw_mode = solitaire_core::game_state::DrawMode::DrawThree;
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 200,
         });
@@ -553,7 +553,7 @@ mod tests {
             .move_count = 3;
 
         app.world_mut()
-            .send_event(NewGameRequestEvent { seed: Some(999), mode: None });
+            .write_message(NewGameRequestEvent { seed: Some(999), mode: None });
         app.update();
 
         let stats = &app.world().resource::<StatsResource>().0;
@@ -566,7 +566,7 @@ mod tests {
     fn new_game_without_moves_does_not_record_abandoned() {
         let mut app = headless_app();
         app.world_mut()
-            .send_event(NewGameRequestEvent { seed: Some(42), mode: None });
+            .write_message(NewGameRequestEvent { seed: Some(42), mode: None });
         app.update();
 
         let stats = &app.world().resource::<StatsResource>().0;
@@ -781,7 +781,7 @@ mod tests {
             .0
             .move_count = 1;
 
-        app.world_mut().send_event(ForfeitEvent);
+        app.world_mut().write_message(ForfeitEvent);
         app.update();
 
         let events = app.world().resource::<Events<InfoToastEvent>>();
@@ -810,7 +810,7 @@ mod tests {
             .0
             .move_count = 1;
 
-        app.world_mut().send_event(ForfeitEvent);
+        app.world_mut().write_message(ForfeitEvent);
         app.update();
 
         let events = app.world().resource::<Events<InfoToastEvent>>();

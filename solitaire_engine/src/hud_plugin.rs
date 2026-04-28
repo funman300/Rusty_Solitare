@@ -475,7 +475,7 @@ fn update_selection_hud(
 /// to debounce so the toast only appears on the leading edge.
 fn announce_auto_complete(
     auto_complete: Option<Res<AutoCompleteState>>,
-    mut toast: EventWriter<InfoToastEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
     mut was_active: Local<bool>,
 ) {
     let now_active = auto_complete.as_ref().is_some_and(|ac| ac.active);

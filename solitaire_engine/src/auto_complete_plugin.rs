@@ -57,7 +57,7 @@ impl Plugin for AutoCompletePlugin {
 fn detect_auto_complete(
     mut state: ResMut<AutoCompleteState>,
     game: Res<GameStateResource>,
-    mut changed: EventReader<StateChangedEvent>,
+    mut changed: MessageReader<StateChangedEvent>,
 ) {
     // Only re-evaluate on state changes to avoid per-frame allocations.
     if changed.is_empty() && !game.is_changed() {
@@ -106,7 +106,7 @@ fn drive_auto_complete(
     mut state: ResMut<AutoCompleteState>,
     game: Res<GameStateResource>,
     time: Res<Time>,
-    mut moves: EventWriter<MoveRequestEvent>,
+    mut moves: MessageWriter<MoveRequestEvent>,
 ) {
     if !state.active {
         return;
@@ -176,7 +176,7 @@ mod tests {
         let mut app = headless_app();
         // Install a nearly-won state and fire StateChangedEvent.
         app.world_mut().resource_mut::<GameStateResource>().0 = nearly_won_state();
-        app.world_mut().send_event(StateChangedEvent);
+        app.world_mut().write_message(StateChangedEvent);
         app.update();
 
         assert!(app.world().resource::<AutoCompleteState>().active);
@@ -186,7 +186,7 @@ mod tests {
     fn drive_fires_move_request_when_active() {
         let mut app = headless_app();
         app.world_mut().resource_mut::<GameStateResource>().0 = nearly_won_state();
-        app.world_mut().send_event(StateChangedEvent);
+        app.world_mut().write_message(StateChangedEvent);
         app.update(); // detect runs, sets active
         app.update(); // drive fires the move
 
@@ -206,7 +206,7 @@ mod tests {
         let mut gs = nearly_won_state();
         gs.is_won = true;
         app.world_mut().resource_mut::<GameStateResource>().0 = gs;
-        app.world_mut().send_event(StateChangedEvent);
+        app.world_mut().write_message(StateChangedEvent);
         app.update();
 
         assert!(!app.world().resource::<AutoCompleteState>().active);

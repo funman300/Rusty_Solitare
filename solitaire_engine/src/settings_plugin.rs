@@ -36,7 +36,7 @@ pub struct SettingsStoragePath(pub Option<PathBuf>);
 pub struct SettingsScreen(pub bool);
 
 /// Fired whenever settings change so consumers (audio, UI) can react.
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Debug, Clone)]
 pub struct SettingsChangedEvent(pub Settings);
 
 /// Marker on the root Settings panel entity.
@@ -144,9 +144,9 @@ impl Plugin for SettingsPlugin {
             .insert_resource(SettingsStoragePath(self.storage_path.clone()))
             .init_resource::<SettingsScreen>()
             .init_resource::<SettingsScrollPos>()
-            .add_event::<SettingsChangedEvent>()
-            .add_event::<ManualSyncRequestEvent>()
-            .add_event::<bevy::input::mouse::MouseWheel>()
+            .add_message::<SettingsChangedEvent>()
+            .add_message::<ManualSyncRequestEvent>()
+            .add_message::<bevy::input::mouse::MouseWheel>()
             .add_systems(Update, (handle_volume_keys, toggle_settings_screen, scroll_settings_panel));
 
         if self.ui_enabled {
@@ -185,7 +185,7 @@ fn handle_volume_keys(
     keys: Res<ButtonInput<KeyCode>>,
     mut settings: ResMut<SettingsResource>,
     path: Res<SettingsStoragePath>,
-    mut changed: EventWriter<SettingsChangedEvent>,
+    mut changed: MessageWriter<SettingsChangedEvent>,
 ) {
     let mut delta = 0.0_f32;
     if keys.just_pressed(KeyCode::BracketLeft) {
@@ -257,7 +257,7 @@ fn sync_settings_panel_visibility(
     } else {
         // Save the current scroll offset before despawning the panel.
         if let Ok(sp) = scroll_nodes.single() {
-            scroll_pos.0 = sp.offset_y;
+            scroll_pos.0 = sp.0.y;
         }
         for entity in &panels {
             commands.entity(entity).despawn();
@@ -383,8 +383,8 @@ fn handle_settings_buttons(
     mut settings: ResMut<SettingsResource>,
     mut screen: ResMut<SettingsScreen>,
     path: Res<SettingsStoragePath>,
-    mut changed: EventWriter<SettingsChangedEvent>,
-    mut manual_sync: EventWriter<ManualSyncRequestEvent>,
+    mut changed: MessageWriter<SettingsChangedEvent>,
+    mut manual_sync: MessageWriter<ManualSyncRequestEvent>,
     mut sfx_text: Query<&mut Text, (With<SfxVolumeText>, Without<MusicVolumeText>, Without<DrawModeText>, Without<ThemeText>, Without<AnimSpeedText>, Without<ColorBlindText>)>,
     mut music_text: Query<&mut Text, (With<MusicVolumeText>, Without<SfxVolumeText>, Without<DrawModeText>, Without<ThemeText>, Without<AnimSpeedText>, Without<ColorBlindText>)>,
     mut draw_text: Query<&mut Text, (With<DrawModeText>, Without<SfxVolumeText>, Without<MusicVolumeText>, Without<ThemeText>, Without<AnimSpeedText>, Without<ColorBlindText>)>,
@@ -537,7 +537,7 @@ fn color_blind_label(enabled: bool) -> String {
 /// adds to the offset; scrolling up subtracts. Clamped to >= 0 so it never
 /// scrolls past the top.
 fn scroll_settings_panel(
-    mut scroll_evr: EventReader<MouseWheel>,
+    mut scroll_evr: MessageReader<MouseWheel>,
     screen: Res<SettingsScreen>,
     mut scrollables: Query<&mut ScrollPosition, With<SettingsPanelScrollable>>,
 ) {
@@ -556,7 +556,7 @@ fn scroll_settings_panel(
         return;
     }
     for mut sp in scrollables.iter_mut() {
-        sp.offset_y = (sp.offset_y - delta_y).max(0.0);
+        sp.0.y = (sp.0.y - delta_y).max(0.0);
     }
 }
 
@@ -595,7 +595,7 @@ fn spawn_settings_panel(
             root.spawn((
                 SettingsPanelScrollable,
                 SettingsScrollNode,
-                ScrollPosition { offset_y: scroll_offset, ..default() },
+                ScrollPosition(Vec2::new(0.0, scroll_offset)),
                 Node {
                     flex_direction: FlexDirection::Column,
                     padding: UiRect::all(Val::Px(28.0)),
@@ -1095,7 +1095,7 @@ mod tests {
             .spawn((SettingsPanelScrollable, ScrollPosition::default()))
             .id();
         // Send a downward scroll event while the panel is closed.
-        app.world_mut().send_event(MouseWheel {
+        app.world_mut().write_message(MouseWheel {
             unit: MouseScrollUnit::Line,
             x: 0.0,
             y: -3.0,
@@ -1108,7 +1108,7 @@ mod tests {
             .entity(entity)
             .get::<ScrollPosition>()
             .unwrap()
-            .offset_y;
+            .0.y;
         assert_eq!(offset, 0.0, "scroll must not move when panel is closed");
     }
 
@@ -1123,11 +1123,11 @@ mod tests {
             .world_mut()
             .spawn((
                 SettingsPanelScrollable,
-                ScrollPosition { offset_y: 100.0, ..default() },
+                ScrollPosition(Vec2::new(0.0, 100.0)),
             ))
             .id();
         // Scroll down by 2 lines (50 px/line → +100 px added to offset_y).
-        app.world_mut().send_event(MouseWheel {
+        app.world_mut().write_message(MouseWheel {
             unit: MouseScrollUnit::Line,
             x: 0.0,
             y: -2.0,
@@ -1139,7 +1139,7 @@ mod tests {
             .entity(entity)
             .get::<ScrollPosition>()
             .unwrap()
-            .offset_y;
+            .0.y;
         assert!((offset - 200.0).abs() < 1e-3, "scrolling down should increase offset_y; got {offset}");
     }
 
@@ -1153,11 +1153,11 @@ mod tests {
             .world_mut()
             .spawn((
                 SettingsPanelScrollable,
-                ScrollPosition { offset_y: 10.0, ..default() },
+                ScrollPosition(Vec2::new(0.0, 10.0)),
             ))
             .id();
         // Scroll up by 5 lines → would subtract 250 px, but must clamp to 0.
-        app.world_mut().send_event(MouseWheel {
+        app.world_mut().write_message(MouseWheel {
             unit: MouseScrollUnit::Line,
             x: 0.0,
             y: 5.0,
@@ -1169,7 +1169,7 @@ mod tests {
             .entity(entity)
             .get::<ScrollPosition>()
             .unwrap()
-            .offset_y;
+            .0.y;
         assert_eq!(offset, 0.0, "scrolling past top must clamp to 0, got {offset}");
     }
 }

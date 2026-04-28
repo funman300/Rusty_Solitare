@@ -25,7 +25,7 @@ pub struct ProgressResource(pub PlayerProgress);
 pub struct ProgressStoragePath(pub Option<PathBuf>);
 
 /// Fired when a win pushes the player to a new level.
-#[derive(Event, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone, Copy)]
 pub struct LevelUpEvent {
     pub previous_level: u32,
     pub new_level: u32,
@@ -64,9 +64,9 @@ impl Plugin for ProgressPlugin {
         };
         app.insert_resource(ProgressResource(loaded))
             .insert_resource(ProgressStoragePath(self.storage_path.clone()))
-            .add_event::<LevelUpEvent>()
-            .add_event::<XpAwardedEvent>()
-            .add_event::<GameWonEvent>()
+            .add_message::<LevelUpEvent>()
+            .add_message::<XpAwardedEvent>()
+            .add_message::<GameWonEvent>()
             .add_systems(
                 Update,
                 award_xp_on_win
@@ -77,9 +77,9 @@ impl Plugin for ProgressPlugin {
 }
 
 fn award_xp_on_win(
-    mut wins: EventReader<GameWonEvent>,
-    mut levelups: EventWriter<LevelUpEvent>,
-    mut xp_awarded: EventWriter<XpAwardedEvent>,
+    mut wins: MessageReader<GameWonEvent>,
+    mut levelups: MessageWriter<LevelUpEvent>,
+    mut xp_awarded: MessageWriter<XpAwardedEvent>,
     game: Res<GameStateResource>,
     path: Res<ProgressStoragePath>,
     mut progress: ResMut<ProgressResource>,
@@ -131,7 +131,7 @@ mod tests {
     fn win_awards_base_xp() {
         let mut app = headless_app();
         // Game starts with undo_count = 0, so the no-undo bonus applies.
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 300, // no speed bonus
         });
@@ -150,7 +150,7 @@ mod tests {
             .0
             .undo_count = 1;
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 300,
         });
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn fast_win_includes_speed_bonus() {
         let mut app = headless_app();
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 0,
         });
@@ -181,7 +181,7 @@ mod tests {
         // Pre-load 480 XP so a 75-XP win pushes us over the 500 boundary.
         app.world_mut().resource_mut::<ProgressResource>().0.total_xp = 480;
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 300,
         });
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn win_without_level_change_does_not_fire_levelup() {
         let mut app = headless_app();
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 300,
         });
@@ -213,7 +213,7 @@ mod tests {
     fn xp_awarded_event_fired_with_correct_amount() {
         let mut app = headless_app();
         // Slow win, no undo → base 50 + no_undo 25 = 75
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 300,
         });
@@ -231,7 +231,7 @@ mod tests {
         let mut app = headless_app();
         app.world_mut().resource_mut::<ProgressResource>().0.total_xp = 480;
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 300,
         });
@@ -256,7 +256,7 @@ mod tests {
             .0
             .mode = solitaire_core::game_state::GameMode::Zen;
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 0,        // Zen mode keeps score at 0
             time_seconds: 300,
         });

@@ -43,7 +43,7 @@ pub struct DailyChallengeResource {
 
 /// Fired when the player presses C to start the daily challenge.
 /// Carries the current goal description so it can be displayed as a toast.
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Debug, Clone)]
 pub struct DailyGoalAnnouncementEvent(pub String);
 
 impl DailyChallengeResource {
@@ -60,7 +60,7 @@ impl DailyChallengeResource {
 }
 
 /// Fired when the player has just completed today's daily challenge.
-#[derive(Event, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone, Copy)]
 pub struct DailyChallengeCompletedEvent {
     pub date: NaiveDate,
     pub streak: u32,
@@ -77,11 +77,11 @@ impl Plugin for DailyChallengePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(DailyChallengeResource::for_today())
             .init_resource::<DailyChallengeTask>()
-            .add_event::<DailyChallengeCompletedEvent>()
-            .add_event::<DailyGoalAnnouncementEvent>()
-            .add_event::<GameWonEvent>()
-            .add_event::<NewGameRequestEvent>()
-            .add_event::<XpAwardedEvent>()
+            .add_message::<DailyChallengeCompletedEvent>()
+            .add_message::<DailyGoalAnnouncementEvent>()
+            .add_message::<GameWonEvent>()
+            .add_message::<NewGameRequestEvent>()
+            .add_message::<XpAwardedEvent>()
             .add_systems(Startup, fetch_server_challenge)
             .add_systems(Update, poll_server_challenge)
             // record/award after the base ProgressUpdate so we don't fight
@@ -145,14 +145,14 @@ fn poll_server_challenge(
 
 #[allow(clippy::too_many_arguments)]
 fn handle_daily_completion(
-    mut wins: EventReader<GameWonEvent>,
+    mut wins: MessageReader<GameWonEvent>,
     daily: Res<DailyChallengeResource>,
     game: Res<GameStateResource>,
     mut progress: ResMut<ProgressResource>,
     path: Res<ProgressStoragePath>,
-    mut completed: EventWriter<DailyChallengeCompletedEvent>,
-    mut xp_awarded: EventWriter<XpAwardedEvent>,
-    mut toast: EventWriter<InfoToastEvent>,
+    mut completed: MessageWriter<DailyChallengeCompletedEvent>,
+    mut xp_awarded: MessageWriter<XpAwardedEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
 ) {
     for ev in wins.read() {
         if game.0.seed != daily.seed {
@@ -191,8 +191,8 @@ fn handle_daily_completion(
 fn handle_start_daily_request(
     keys: Res<ButtonInput<KeyCode>>,
     daily: Res<DailyChallengeResource>,
-    mut new_game: EventWriter<NewGameRequestEvent>,
-    mut announce: EventWriter<DailyGoalAnnouncementEvent>,
+    mut new_game: MessageWriter<NewGameRequestEvent>,
+    mut announce: MessageWriter<DailyGoalAnnouncementEvent>,
 ) {
     if keys.just_pressed(KeyCode::KeyC) {
         new_game.write(NewGameRequestEvent {
@@ -244,7 +244,7 @@ mod tests {
         app.world_mut().resource_mut::<GameStateResource>().0 =
             GameState::new(daily_seed, DrawMode::DrawOne);
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 200,
         });
@@ -270,7 +270,7 @@ mod tests {
         app.world_mut().resource_mut::<GameStateResource>().0 =
             GameState::new(daily_seed.wrapping_add(7777), DrawMode::DrawOne);
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 200,
         });
@@ -291,13 +291,13 @@ mod tests {
         app.world_mut().resource_mut::<GameStateResource>().0 =
             GameState::new(daily_seed, DrawMode::DrawOne);
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 200,
         });
         app.update();
         // Re-send win.
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 200,
         });

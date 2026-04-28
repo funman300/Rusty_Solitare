@@ -184,7 +184,7 @@ impl Plugin for FeedbackAnimPlugin {
 /// Inserts `ShakeAnim` on all card entities belonging to the destination pile
 /// when a `MoveRejectedEvent` fires.
 fn start_shake_anim(
-    mut events: EventReader<MoveRejectedEvent>,
+    mut events: MessageReader<MoveRejectedEvent>,
     game: Res<GameStateResource>,
     card_entities: Query<(Entity, &CardEntity, &Transform)>,
     mut commands: Commands,
@@ -243,7 +243,7 @@ fn tick_shake_anim(
 /// Inserts `SettleAnim` on the top card of every non-empty pile when
 /// `StateChangedEvent` fires.
 fn start_settle_anim(
-    mut events: EventReader<StateChangedEvent>,
+    mut events: MessageReader<StateChangedEvent>,
     game: Res<GameStateResource>,
     card_entities: Query<(Entity, &CardEntity)>,
     mut commands: Commands,
@@ -304,7 +304,7 @@ fn tick_settle_anim(
 /// and fires the deal animation for every card entity currently in the world.
 /// The stagger is looked up from `SettingsResource` via `deal_stagger_secs_for_speed`.
 fn start_deal_anim(
-    mut events: EventReader<NewGameRequestEvent>,
+    mut events: MessageReader<NewGameRequestEvent>,
     layout: Option<Res<LayoutResource>>,
     game: Res<GameStateResource>,
     settings: Option<Res<SettingsResource>>,

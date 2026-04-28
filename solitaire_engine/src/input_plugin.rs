@@ -58,10 +58,10 @@ pub struct InputPlugin;
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HintCycleIndex>()
-            .add_event::<NewGameConfirmEvent>()
-            .add_event::<InfoToastEvent>()
-            .add_event::<ForfeitEvent>()
-            .add_event::<HintVisualEvent>()
+            .add_message::<NewGameConfirmEvent>()
+            .add_message::<InfoToastEvent>()
+            .add_message::<ForfeitEvent>()
+            .add_message::<HintVisualEvent>()
             .add_systems(
                 Update,
                 (
@@ -89,13 +89,13 @@ const FORFEIT_CONFIRM_WINDOW: f32 = 3.0;
 /// within Bevy's 16-parameter limit.
 #[derive(SystemParam)]
 struct KeyboardEvents<'w> {
-    undo: EventWriter<'w, UndoRequestEvent>,
-    new_game: EventWriter<'w, NewGameRequestEvent>,
-    confirm_event: EventWriter<'w, NewGameConfirmEvent>,
-    info_toast: EventWriter<'w, InfoToastEvent>,
-    draw: EventWriter<'w, DrawRequestEvent>,
-    forfeit: EventWriter<'w, ForfeitEvent>,
-    hint_visual: EventWriter<'w, HintVisualEvent>,
+    undo: MessageWriter<'w, UndoRequestEvent>,
+    new_game: MessageWriter<'w, NewGameRequestEvent>,
+    confirm_event: MessageWriter<'w, NewGameConfirmEvent>,
+    info_toast: MessageWriter<'w, InfoToastEvent>,
+    draw: MessageWriter<'w, DrawRequestEvent>,
+    forfeit: MessageWriter<'w, ForfeitEvent>,
+    hint_visual: MessageWriter<'w, HintVisualEvent>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -308,8 +308,8 @@ fn handle_keyboard(
 /// game plugin fires after dealing — preventing a stale hint from the previous
 /// game being shown when H is pressed in that gap frame.
 fn reset_hint_cycle_on_state_change(
-    mut state_events: EventReader<StateChangedEvent>,
-    mut new_game_events: EventReader<NewGameRequestEvent>,
+    mut state_events: MessageReader<StateChangedEvent>,
+    mut new_game_events: MessageReader<NewGameRequestEvent>,
     mut hint_cycle: ResMut<HintCycleIndex>,
 ) {
     if state_events.read().next().is_some() || new_game_events.read().next().is_some() {
@@ -322,7 +322,7 @@ fn reset_hint_cycle_on_state_change(
 fn handle_fullscreen(
     keys: Res<ButtonInput<KeyCode>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
-    mut toast: EventWriter<InfoToastEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
 ) {
     if !keys.just_pressed(KeyCode::F11) {
         return;
@@ -347,7 +347,7 @@ fn handle_stock_click(
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     layout: Option<Res<LayoutResource>>,
-    mut draw: EventWriter<DrawRequestEvent>,
+    mut draw: MessageWriter<DrawRequestEvent>,
 ) {
     if paused.is_some_and(|p| p.0) {
         return;
@@ -467,9 +467,9 @@ fn end_drag(
     layout: Option<Res<LayoutResource>>,
     game: Res<GameStateResource>,
     mut drag: ResMut<DragState>,
-    mut moves: EventWriter<MoveRequestEvent>,
-    mut rejected: EventWriter<MoveRejectedEvent>,
-    mut changed: EventWriter<StateChangedEvent>,
+    mut moves: MessageWriter<MoveRequestEvent>,
+    mut rejected: MessageWriter<MoveRejectedEvent>,
+    mut changed: MessageWriter<StateChangedEvent>,
     mut commands: Commands,
     card_entities: Query<(Entity, &CardEntity, &Transform)>,
 ) {
@@ -809,8 +809,8 @@ fn handle_double_click(
     layout: Option<Res<LayoutResource>>,
     game: Res<GameStateResource>,
     mut last_click: Local<HashMap<u32, f32>>,
-    mut moves: EventWriter<MoveRequestEvent>,
-    mut rejected: EventWriter<MoveRejectedEvent>,
+    mut moves: MessageWriter<MoveRequestEvent>,
+    mut rejected: MessageWriter<MoveRejectedEvent>,
 ) {
     if paused.is_some_and(|p| p.0) {
         return;

@@ -15,7 +15,7 @@ use crate::progress_plugin::{LevelUpEvent, ProgressResource, ProgressStoragePath
 use crate::resources::GameStateResource;
 
 /// Fired when the player has just completed a weekly goal.
-#[derive(Event, Debug, Clone)]
+#[derive(Message, Debug, Clone)]
 pub struct WeeklyGoalCompletedEvent {
     pub goal_id: String,
     pub description: String,
@@ -25,9 +25,9 @@ pub struct WeeklyGoalsPlugin;
 
 impl Plugin for WeeklyGoalsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<WeeklyGoalCompletedEvent>()
-            .add_event::<GameWonEvent>()
-            .add_event::<XpAwardedEvent>()
+        app.add_message::<WeeklyGoalCompletedEvent>()
+            .add_message::<GameWonEvent>()
+            .add_message::<XpAwardedEvent>()
             .add_systems(Startup, roll_weekly_goals_on_startup)
             // Run after GameMutation (so GameWonEvent is available) and
             // ProgressUpdate (so we don't fight ProgressPlugin's add_xp).
@@ -57,13 +57,13 @@ fn roll_weekly_goals_on_startup(
 }
 
 fn evaluate_weekly_goals(
-    mut wins: EventReader<GameWonEvent>,
+    mut wins: MessageReader<GameWonEvent>,
     game: Res<GameStateResource>,
     mut progress: ResMut<ProgressResource>,
     path: Res<ProgressStoragePath>,
-    mut completions: EventWriter<WeeklyGoalCompletedEvent>,
-    mut levelups: EventWriter<LevelUpEvent>,
-    mut xp_awarded: EventWriter<XpAwardedEvent>,
+    mut completions: MessageWriter<WeeklyGoalCompletedEvent>,
+    mut levelups: MessageWriter<LevelUpEvent>,
+    mut xp_awarded: MessageWriter<XpAwardedEvent>,
 ) {
     let mut events: Vec<&GameWonEvent> = wins.read().collect();
     if events.is_empty() {
@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn first_win_increments_win_game_goal() {
         let mut app = headless_app();
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 200,
         });
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn fast_win_ticks_fast_goal_too() {
         let mut app = headless_app();
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 60,
         });
@@ -181,7 +181,7 @@ mod tests {
             .0
             .undo_count = 1;
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 200,
         });
@@ -214,7 +214,7 @@ mod tests {
 
         let xp_before = app.world().resource::<ProgressResource>().0.total_xp;
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 60,
         });
@@ -280,7 +280,7 @@ mod tests {
             .0
             .weekly_goal_week_iso = Some(key);
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 500,
             time_seconds: 60,
         });

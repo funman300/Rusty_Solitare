@@ -111,10 +111,10 @@ impl Plugin for CardAnimationPlugin {
     fn build(&self, app: &mut App) {
         // Register events and resources that interaction systems depend on,
         // idempotently — double-registration is safe in Bevy.
-        app.add_event::<MoveRequestEvent>()
-            .add_event::<DrawRequestEvent>()
-            .add_event::<UndoRequestEvent>()
-            .add_event::<GameWonEvent>()
+        app.add_message::<MoveRequestEvent>()
+            .add_message::<DrawRequestEvent>()
+            .add_message::<UndoRequestEvent>()
+            .add_message::<GameWonEvent>()
             .init_resource::<DragState>()
             .init_resource::<HoverState>()
             .init_resource::<InputBuffer>()
@@ -163,7 +163,7 @@ impl Plugin for WinCascadePlugin {
 /// Cards scatter to 8 off-screen positions with per-card stagger. The z-lift
 /// creates a "burst" effect as cards fly outward.
 fn trigger_expressive_win_cascade(
-    mut events: EventReader<GameWonEvent>,
+    mut events: MessageReader<GameWonEvent>,
     cards: Query<(Entity, &Transform), With<CardEntity>>,
     layout: Option<Res<LayoutResource>>,
     mut commands: Commands,

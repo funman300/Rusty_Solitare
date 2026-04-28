@@ -33,7 +33,7 @@ solitaire_sync   = { path = "solitaire_sync" }
 solitaire_data   = { path = "solitaire_data" }
 solitaire_engine = { path = "solitaire_engine" }
 
-bevy = "0.16"
+bevy = "0.17"
 kira = "0.9"
 
 axum               = "0.8"

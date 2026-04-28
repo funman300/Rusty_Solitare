@@ -162,8 +162,8 @@ fn handle_selection_keys(
     paused: Option<Res<PausedResource>>,
     game: Res<GameStateResource>,
     mut selection: ResMut<SelectionState>,
-    mut moves: EventWriter<MoveRequestEvent>,
-    mut info_toast: EventWriter<InfoToastEvent>,
+    mut moves: MessageWriter<MoveRequestEvent>,
+    mut info_toast: MessageWriter<InfoToastEvent>,
 ) {
     if paused.is_some_and(|p| p.0) {
         return;

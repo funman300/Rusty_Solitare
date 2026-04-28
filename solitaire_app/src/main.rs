@@ -21,7 +21,7 @@ fn main() {
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "Solitaire Quest".into(),
-                    resolution: (1280.0, 800.0).into(),
+                    resolution: (1280u32, 800u32).into(),
                     ..default()
                 }),
                 ..default()

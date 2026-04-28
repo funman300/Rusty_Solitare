@@ -70,9 +70,9 @@ impl Plugin for AchievementPlugin {
 
         app.insert_resource(AchievementsResource(records))
             .insert_resource(AchievementsStoragePath(self.storage_path.clone()))
-            .add_event::<AchievementUnlockedEvent>()
-            .add_event::<GameWonEvent>()
-            .add_event::<XpAwardedEvent>()
+            .add_message::<AchievementUnlockedEvent>()
+            .add_message::<GameWonEvent>()
+            .add_message::<XpAwardedEvent>()
             // Run after GameMutation (so GameWonEvent is available), after
             // StatsUpdate (so stats reflect this win), and after ProgressUpdate
             // (so daily_challenge_streak is up to date for daily_devotee).
@@ -89,10 +89,10 @@ impl Plugin for AchievementPlugin {
 
 #[allow(clippy::too_many_arguments)]
 fn evaluate_on_win(
-    mut wins: EventReader<GameWonEvent>,
-    mut unlocks: EventWriter<AchievementUnlockedEvent>,
-    mut levelups: EventWriter<LevelUpEvent>,
-    mut xp_awarded: EventWriter<XpAwardedEvent>,
+    mut wins: MessageReader<GameWonEvent>,
+    mut unlocks: MessageWriter<AchievementUnlockedEvent>,
+    mut levelups: MessageWriter<LevelUpEvent>,
+    mut xp_awarded: MessageWriter<XpAwardedEvent>,
     game: Res<GameStateResource>,
     stats: Res<StatsResource>,
     path: Res<AchievementsStoragePath>,
@@ -398,7 +398,7 @@ mod tests {
 
         // StatsPlugin runs update_stats_on_win first (after GameMutation); that
         // bumps games_won to 1 before evaluate_on_win reads StatsResource.
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 1000,
             time_seconds: 300,
         });
@@ -425,7 +425,7 @@ mod tests {
     fn repeated_win_does_not_refire_already_unlocked_achievement() {
         let mut app = headless_app();
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 1000,
             time_seconds: 300,
         });
@@ -436,7 +436,7 @@ mod tests {
             .resource_mut::<Events<AchievementUnlockedEvent>>()
             .clear();
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 1000,
             time_seconds: 300,
         });
@@ -462,7 +462,7 @@ mod tests {
         let mut app = headless_app();
         // "no_undo" achievement awards BonusXp(25). Trigger it by sending a
         // GameWonEvent with undo_count == 0 (default) and enough stats to match.
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 1000,
             time_seconds: 300,
         });
@@ -487,7 +487,7 @@ mod tests {
             .0
             .undo_count = 1;
 
-        app.world_mut().send_event(GameWonEvent {
+        app.world_mut().write_message(GameWonEvent {
             score: 1000,
             time_seconds: 300,
         });

@@ -227,9 +227,9 @@ pub(crate) fn apply_drag_visual(
 pub(crate) fn drain_input_buffer(
     mut buffer: ResMut<InputBuffer>,
     anims: Query<&CardAnimation>,
-    mut move_events: EventWriter<MoveRequestEvent>,
-    mut draw_events: EventWriter<DrawRequestEvent>,
-    mut undo_events: EventWriter<UndoRequestEvent>,
+    mut move_events: MessageWriter<MoveRequestEvent>,
+    mut draw_events: MessageWriter<DrawRequestEvent>,
+    mut undo_events: MessageWriter<UndoRequestEvent>,
 ) {
     if !anims.is_empty() {
         return;

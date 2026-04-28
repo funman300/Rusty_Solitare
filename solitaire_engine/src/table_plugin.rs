@@ -47,9 +47,9 @@ impl Plugin for TablePlugin {
         // Register WindowResized so the plugin works under MinimalPlugins in
         // tests. Under DefaultPlugins, bevy_window has already registered it
         // and this call is a no-op.
-        app.add_event::<WindowResized>()
-            .add_event::<SettingsChangedEvent>()
-            .add_event::<HintVisualEvent>()
+        app.add_message::<WindowResized>()
+            .add_message::<SettingsChangedEvent>()
+            .add_message::<HintVisualEvent>()
             .add_systems(Startup, setup_table)
             .add_systems(
                 Update,
@@ -133,7 +133,7 @@ fn spawn_background(commands: &mut Commands, window_size: Vec2, color: Color) {
 }
 
 fn apply_theme_on_settings_change(
-    mut events: EventReader<SettingsChangedEvent>,
+    mut events: MessageReader<SettingsChangedEvent>,
     mut backgrounds: Query<&mut Sprite, With<TableBackground>>,
 ) {
     let Some(ev) = events.read().last() else {
@@ -213,7 +213,7 @@ fn spawn_pile_markers(commands: &mut Commands, layout: &Layout) {
 
 #[allow(clippy::type_complexity)]
 fn on_window_resized(
-    mut events: EventReader<WindowResized>,
+    mut events: MessageReader<WindowResized>,
     mut layout_res: Option<ResMut<LayoutResource>>,
     mut backgrounds: Query<
         (&mut Sprite, &mut Transform),
@@ -261,7 +261,7 @@ const HINT_PILE_HIGHLIGHT_COLOUR: Color = Color::srgb(1.0, 0.85, 0.1);
 /// If the pile marker already has a `HintPileHighlight` from a previous hint
 /// press, the timer is reset to 2 s without changing `original_color`.
 fn apply_hint_pile_highlight(
-    mut events: EventReader<HintVisualEvent>,
+    mut events: MessageReader<HintVisualEvent>,
     mut commands: Commands,
     mut pile_markers: Query<(Entity, &PileMarker, &mut Sprite, Option<&HintPileHighlight>)>,
 ) {

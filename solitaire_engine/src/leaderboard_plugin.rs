@@ -218,7 +218,7 @@ fn handle_opt_in_button(
 /// Polls the opt-in task; fires an `InfoToastEvent` on completion or failure.
 fn poll_opt_in_task(
     mut task_res: ResMut<OptInTask>,
-    mut toast: EventWriter<InfoToastEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
 ) {
     let Some(task) = task_res.0.as_mut() else { return };
     let Some(result) = future::block_on(future::poll_once(task)) else { return };
@@ -258,7 +258,7 @@ fn handle_opt_out_button(
 /// Polls the opt-out task; fires an `InfoToastEvent` on completion or failure.
 fn poll_opt_out_task(
     mut task_res: ResMut<OptOutTask>,
-    mut toast: EventWriter<InfoToastEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
 ) {
     let Some(task) = task_res.0.as_mut() else { return };
     let Some(result) = future::block_on(future::poll_once(task)) else { return };

@@ -12,8 +12,7 @@
 //!   The tint is cleared to default the frame the drag ends.
 
 use bevy::prelude::*;
-use bevy::window::{PrimaryWindow, SystemCursorIcon};
-use bevy::winit::cursor::CursorIcon;
+use bevy::window::{CursorIcon, PrimaryWindow, SystemCursorIcon};
 use solitaire_core::card::Suit;
 use solitaire_core::game_state::{DrawMode, GameState};
 use solitaire_core::pile::PileType;

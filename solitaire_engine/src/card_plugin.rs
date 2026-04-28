@@ -157,9 +157,9 @@ impl Plugin for CardPlugin {
         // `MinimalPlugins` (tests) this resource is absent by default, so we
         // ensure it exists here. Under `DefaultPlugins` the call is a no-op.
         app.init_resource::<ButtonInput<MouseButton>>()
-            .add_event::<SettingsChangedEvent>()
-            .add_event::<CardFlippedEvent>()
-            .add_event::<CardFaceRevealedEvent>()
+            .add_message::<SettingsChangedEvent>()
+            .add_message::<CardFlippedEvent>()
+            .add_message::<CardFaceRevealedEvent>()
             .add_systems(PostStartup, (sync_cards_startup, update_stock_empty_indicator_startup))
             .add_systems(
                 Update,
@@ -183,8 +183,8 @@ impl Plugin for CardPlugin {
 /// When card-back selection changes in Settings, re-render all cards so the
 /// new back colour is applied immediately (without waiting for a state change).
 fn resync_cards_on_settings_change(
-    mut setting_events: EventReader<SettingsChangedEvent>,
-    mut state_events: EventWriter<StateChangedEvent>,
+    mut setting_events: MessageReader<SettingsChangedEvent>,
+    mut state_events: MessageWriter<StateChangedEvent>,
 ) {
     if setting_events.read().next().is_some() {
         state_events.write(StateChangedEvent);
@@ -213,7 +213,7 @@ fn sync_cards_startup(
 }
 
 fn sync_cards_on_change(
-    mut events: EventReader<StateChangedEvent>,
+    mut events: MessageReader<StateChangedEvent>,
     commands: Commands,
     game: Res<GameStateResource>,
     layout: Option<Res<LayoutResource>>,
@@ -508,7 +508,7 @@ fn label_visibility(card: &Card) -> Visibility {
 ///
 /// Skipped when `EffectiveSlideDuration::slide_secs == 0.0` (Instant speed).
 fn start_flip_anim(
-    mut events: EventReader<CardFlippedEvent>,
+    mut events: MessageReader<CardFlippedEvent>,
     slide_dur: Option<Res<EffectiveSlideDuration>>,
     mut commands: Commands,
     card_entities: Query<(Entity, &CardEntity)>,
@@ -543,7 +543,7 @@ fn tick_flip_anim(
     mut commands: Commands,
     time: Res<Time>,
     mut anims: Query<(Entity, &CardEntity, &mut Transform, &mut CardFlipAnim)>,
-    mut reveal_events: EventWriter<CardFaceRevealedEvent>,
+    mut reveal_events: MessageWriter<CardFaceRevealedEvent>,
 ) {
     let dt = time.delta_secs();
     for (entity, card_entity, mut transform, mut anim) in &mut anims {
@@ -742,7 +742,7 @@ fn clear_right_click_highlights(
 ///
 /// This ensures stale highlights do not linger after a card is moved.
 fn clear_right_click_highlights_on_state_change(
-    mut events: EventReader<StateChangedEvent>,
+    mut events: MessageReader<StateChangedEvent>,
     mut commands: Commands,
     highlighted: Query<Entity, With<RightClickHighlight>>,
     mut pile_markers: Query<(Entity, &PileMarker, &mut Sprite)>,
@@ -980,7 +980,7 @@ fn update_stock_empty_indicator_startup(
 /// Runs each `Update` tick when a `StateChangedEvent` arrives, keeping the
 /// stock pile marker dim state and "↺" label in sync with the current stock.
 fn update_stock_empty_indicator(
-    mut events: EventReader<StateChangedEvent>,
+    mut events: MessageReader<StateChangedEvent>,
     mut commands: Commands,
     game: Res<GameStateResource>,
     layout: Option<Res<LayoutResource>>,
@@ -1106,7 +1106,7 @@ mod tests {
         let mut app = app();
         // Trigger a draw, which moves a card from stock to waste and should
         // flip it face-up. Count visible labels after.
-        app.world_mut().send_event(crate::events::DrawRequestEvent);
+        app.world_mut().write_message(crate::events::DrawRequestEvent);
         app.update();
         // Now 1 card in waste (face-up), 23 in stock (face-down). So 24
         // hidden labels total in stock, plus 21 in tableau = 44.

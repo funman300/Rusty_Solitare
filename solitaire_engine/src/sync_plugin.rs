@@ -93,7 +93,7 @@ impl Plugin for SyncPlugin {
             .init_resource::<SyncStatusResource>()
             .init_resource::<PullTaskResult>()
             .init_resource::<PullTask>()
-            .add_event::<ManualSyncRequestEvent>()
+            .add_message::<ManualSyncRequestEvent>()
             .add_systems(Startup, start_pull)
             .add_systems(Update, (poll_pull_result, handle_manual_sync_request))
             .add_systems(Last, push_on_exit);
@@ -121,7 +121,7 @@ fn start_pull(
 /// Update system: starts a new pull task when `ManualSyncRequestEvent` is
 /// received, but only if no pull is already in flight.
 fn handle_manual_sync_request(
-    mut events: EventReader<ManualSyncRequestEvent>,
+    mut events: MessageReader<ManualSyncRequestEvent>,
     provider: Res<SyncProviderResource>,
     mut task_res: ResMut<PullTask>,
     mut status: ResMut<SyncStatusResource>,
@@ -217,7 +217,7 @@ fn poll_pull_result(
 /// that blocking on exit is permitted because the game loop is already
 /// shutting down.
 fn push_on_exit(
-    mut exit_events: EventReader<AppExit>,
+    mut exit_events: MessageReader<AppExit>,
     provider: Res<SyncProviderResource>,
     stats: Res<StatsResource>,
     achievements: Res<AchievementsResource>,

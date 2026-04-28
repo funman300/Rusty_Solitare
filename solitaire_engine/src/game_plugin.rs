@@ -71,16 +71,16 @@ impl Plugin for GamePlugin {
             .insert_resource(GameStatePath(path))
             .init_resource::<DragState>()
             .init_resource::<SyncStatusResource>()
-            .add_event::<MoveRequestEvent>()
-            .add_event::<DrawRequestEvent>()
-            .add_event::<UndoRequestEvent>()
-            .add_event::<NewGameRequestEvent>()
-            .add_event::<StateChangedEvent>()
-            .add_event::<crate::events::MoveRejectedEvent>()
-            .add_event::<GameWonEvent>()
-            .add_event::<crate::events::CardFlippedEvent>()
-            .add_event::<crate::events::AchievementUnlockedEvent>()
-            .add_event::<InfoToastEvent>()
+            .add_message::<MoveRequestEvent>()
+            .add_message::<DrawRequestEvent>()
+            .add_message::<UndoRequestEvent>()
+            .add_message::<NewGameRequestEvent>()
+            .add_message::<StateChangedEvent>()
+            .add_message::<crate::events::MoveRejectedEvent>()
+            .add_message::<GameWonEvent>()
+            .add_message::<crate::events::CardFlippedEvent>()
+            .add_message::<crate::events::AchievementUnlockedEvent>()
+            .add_message::<InfoToastEvent>()
             .add_systems(
                 Update,
                 (
@@ -152,9 +152,9 @@ fn seed_from_system_time() -> u64 {
 #[allow(clippy::too_many_arguments)]
 fn handle_new_game(
     mut commands: Commands,
-    mut new_game: EventReader<NewGameRequestEvent>,
+    mut new_game: MessageReader<NewGameRequestEvent>,
     mut game: ResMut<GameStateResource>,
-    mut changed: EventWriter<StateChangedEvent>,
+    mut changed: MessageWriter<StateChangedEvent>,
     settings: Option<Res<crate::settings_plugin::SettingsResource>>,
     path: Option<Res<GameStatePath>>,
     confirm_screens: Query<Entity, With<ConfirmNewGameScreen>>,
@@ -287,7 +287,7 @@ fn handle_confirm_input(
     mut commands: Commands,
     keys: Option<Res<ButtonInput<KeyCode>>>,
     screens: Query<(Entity, &OriginalNewGameRequest), With<ConfirmNewGameScreen>>,
-    mut new_game: EventWriter<NewGameRequestEvent>,
+    mut new_game: MessageWriter<NewGameRequestEvent>,
 ) {
     let Ok((entity, original)) = screens.single() else {
         return;
@@ -314,10 +314,10 @@ fn handle_confirm_input(
 }
 
 fn handle_draw(
-    mut draws: EventReader<DrawRequestEvent>,
+    mut draws: MessageReader<DrawRequestEvent>,
     mut game: ResMut<GameStateResource>,
-    mut changed: EventWriter<StateChangedEvent>,
-    mut flipped: EventWriter<CardFlippedEvent>,
+    mut changed: MessageWriter<StateChangedEvent>,
+    mut flipped: MessageWriter<CardFlippedEvent>,
 ) {
     use solitaire_core::pile::PileType;
 
@@ -357,11 +357,11 @@ fn handle_draw(
 }
 
 fn handle_move(
-    mut moves: EventReader<MoveRequestEvent>,
+    mut moves: MessageReader<MoveRequestEvent>,
     mut game: ResMut<GameStateResource>,
-    mut changed: EventWriter<StateChangedEvent>,
-    mut won: EventWriter<GameWonEvent>,
-    mut flipped: EventWriter<crate::events::CardFlippedEvent>,
+    mut changed: MessageWriter<StateChangedEvent>,
+    mut won: MessageWriter<GameWonEvent>,
+    mut flipped: MessageWriter<crate::events::CardFlippedEvent>,
     path: Option<Res<GameStatePath>>,
 ) {
     for ev in moves.read() {
@@ -408,10 +408,10 @@ fn handle_move(
 }
 
 fn handle_undo(
-    mut undos: EventReader<UndoRequestEvent>,
+    mut undos: MessageReader<UndoRequestEvent>,
     mut game: ResMut<GameStateResource>,
-    mut changed: EventWriter<StateChangedEvent>,
-    mut toast: EventWriter<InfoToastEvent>,
+    mut changed: MessageWriter<StateChangedEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
 ) {
     use solitaire_core::error::MoveError;
 
@@ -500,9 +500,9 @@ pub fn has_legal_moves(game: &GameState) -> bool {
 /// game is won.
 fn check_no_moves(
     mut commands: Commands,
-    mut events: EventReader<StateChangedEvent>,
+    mut events: MessageReader<StateChangedEvent>,
     game: Res<GameStateResource>,
-    mut toast: EventWriter<InfoToastEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
     mut already_fired: Local<bool>,
     game_over_screens: Query<Entity, With<GameOverScreen>>,
 ) {
@@ -628,8 +628,8 @@ fn handle_game_over_input(
     mut commands: Commands,
     keys: Option<Res<ButtonInput<KeyCode>>>,
     screens: Query<Entity, With<GameOverScreen>>,
-    mut new_game: EventWriter<NewGameRequestEvent>,
-    mut undo: EventWriter<UndoRequestEvent>,
+    mut new_game: MessageWriter<NewGameRequestEvent>,
+    mut undo: MessageWriter<UndoRequestEvent>,
 ) {
     if screens.is_empty() {
         return;
@@ -685,7 +685,7 @@ fn auto_save_game_state(
 /// `save_game_state_to` helper skips them). Blocking on exit is acceptable
 /// because the game loop is already shutting down.
 fn save_game_state_on_exit(
-    mut exit_events: EventReader<AppExit>,
+    mut exit_events: MessageReader<AppExit>,
     game: Res<GameStateResource>,
     path: Res<GameStatePath>,
 ) {
@@ -739,7 +739,7 @@ mod tests {
             .cards
             .len();
 
-        app.world_mut().send_event(DrawRequestEvent);
+        app.world_mut().write_message(DrawRequestEvent);
         app.update();
 
         let stock_after = app
@@ -763,7 +763,7 @@ mod tests {
     #[test]
     fn draw_request_fires_state_changed_event() {
         let mut app = test_app(42);
-        app.world_mut().send_event(DrawRequestEvent);
+        app.world_mut().write_message(DrawRequestEvent);
         app.update();
         let events = app.world().resource::<Events<StateChangedEvent>>();
         let mut reader = events.get_cursor();
@@ -773,9 +773,9 @@ mod tests {
     #[test]
     fn undo_after_draw_restores_state() {
         let mut app = test_app(42);
-        app.world_mut().send_event(DrawRequestEvent);
+        app.world_mut().write_message(DrawRequestEvent);
         app.update();
-        app.world_mut().send_event(UndoRequestEvent);
+        app.world_mut().write_message(UndoRequestEvent);
         app.update();
         let g = &app.world().resource::<GameStateResource>().0;
         assert_eq!(g.piles[&PileType::Stock].cards.len(), 24);
@@ -795,7 +795,7 @@ mod tests {
             .map(|c| c.id)
             .collect();
 
-        app.world_mut().send_event(NewGameRequestEvent { seed: Some(999), mode: None });
+        app.world_mut().write_message(NewGameRequestEvent { seed: Some(999), mode: None });
         app.update();
 
         let after: Vec<u32> = app
@@ -858,7 +858,7 @@ mod tests {
     fn invalid_move_does_not_fire_state_changed() {
         let mut app = test_app(42);
         // Stock -> Waste is InvalidDestination; no state change expected.
-        app.world_mut().send_event(MoveRequestEvent {
+        app.world_mut().write_message(MoveRequestEvent {
             from: PileType::Stock,
             to: PileType::Waste,
             count: 1,
@@ -892,7 +892,7 @@ mod tests {
         app.world_mut().resource_mut::<GameStateResource>().0 =
             GameState::new(7654, DrawMode::DrawOne);
 
-        app.world_mut().send_event(AppExit::Success);
+        app.world_mut().write_message(AppExit::Success);
         app.update();
 
         let loaded = load_game_state_from(&path).expect("file should exist after exit");
@@ -913,7 +913,7 @@ mod tests {
 
         let mut app = test_app(1);
         app.insert_resource(GameStatePath(Some(path.clone())));
-        app.world_mut().send_event(NewGameRequestEvent { seed: Some(2), mode: None });
+        app.world_mut().write_message(NewGameRequestEvent { seed: Some(2), mode: None });
         app.update();
 
         assert!(!path.exists(), "saved file should be deleted after new game");
@@ -949,7 +949,7 @@ mod tests {
             t.cards.push(Card { id: 902, suit: Suit::Clubs, rank: Rank::King, face_up: true });
         }
 
-        app.world_mut().send_event(MoveRequestEvent {
+        app.world_mut().write_message(MoveRequestEvent {
             from: PileType::Tableau(0),
             to: PileType::Tableau(1),
             count: 1,
@@ -1035,7 +1035,7 @@ mod tests {
                 .push(Card { id: 912, suit: Suit::Spades, rank: Rank::King, face_up: true });
         }
 
-        app.world_mut().send_event(MoveRequestEvent {
+        app.world_mut().write_message(MoveRequestEvent {
             from: PileType::Tableau(0),
             to: PileType::Tableau(1),
             count: 1,
@@ -1125,7 +1125,7 @@ mod tests {
         // Simulate an active game with moves made.
         app.world_mut().resource_mut::<GameStateResource>().0.move_count = 5;
         app.world_mut()
-            .send_event(NewGameRequestEvent { seed: None, mode: None });
+            .write_message(NewGameRequestEvent { seed: None, mode: None });
         app.update();
 
         let count = app
@@ -1146,7 +1146,7 @@ mod tests {
             "test assumes a fresh game with no moves"
         );
         app.world_mut()
-            .send_event(NewGameRequestEvent { seed: None, mode: None });
+            .write_message(NewGameRequestEvent { seed: None, mode: None });
         app.update();
 
         let count = app
@@ -1165,7 +1165,7 @@ mod tests {
     fn game_over_screen_absent_when_moves_available() {
         // A fresh game always has moves (stock is non-empty).
         let mut app = test_app_with_input(42);
-        app.world_mut().send_event(StateChangedEvent);
+        app.world_mut().write_message(StateChangedEvent);
         app.update();
 
         let count = app
@@ -1201,7 +1201,7 @@ mod tests {
             });
         }
 
-        app.world_mut().send_event(StateChangedEvent);
+        app.world_mut().write_message(StateChangedEvent);
         app.update();
 
         let count = app
@@ -1240,7 +1240,7 @@ mod tests {
             });
         }
 
-        app.world_mut().send_event(StateChangedEvent);
+        app.world_mut().write_message(StateChangedEvent);
         app.update();
 
         // Collect all Text values that are children of the GameOverScreen entity tree.
@@ -1295,7 +1295,7 @@ mod tests {
                 face_up: true,
             });
         }
-        app.world_mut().send_event(StateChangedEvent);
+        app.world_mut().write_message(StateChangedEvent);
         app.update();
 
         // Confirm the overlay is present.
@@ -1338,7 +1338,7 @@ mod tests {
     fn undo_on_empty_stack_fires_info_toast() {
         let mut app = test_app(42);
         // Fresh game — undo stack is empty, so undo() returns UndoStackEmpty.
-        app.world_mut().send_event(UndoRequestEvent);
+        app.world_mut().write_message(UndoRequestEvent);
         app.update();
 
         let events = app.world().resource::<Events<InfoToastEvent>>();
@@ -1357,12 +1357,12 @@ mod tests {
     fn undo_after_draw_does_not_fire_info_toast() {
         let mut app = test_app(42);
         // Make a move so the undo stack is non-empty.
-        app.world_mut().send_event(DrawRequestEvent);
+        app.world_mut().write_message(DrawRequestEvent);
         app.update();
         // Clear events from the draw so we start with a clean slate.
         app.world_mut().resource_mut::<Events<InfoToastEvent>>().clear();
 
-        app.world_mut().send_event(UndoRequestEvent);
+        app.world_mut().write_message(UndoRequestEvent);
         app.update();
 
         let events = app.world().resource::<Events<InfoToastEvent>>();

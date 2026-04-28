@@ -54,8 +54,8 @@ impl Plugin for PausePlugin {
     fn build(&self, app: &mut App) {
         // Both add_event calls are idempotent — other plugins may register these
         // events first, but calling add_event again is always safe.
-        app.add_event::<SettingsChangedEvent>()
-            .add_event::<StateChangedEvent>()
+        app.add_message::<SettingsChangedEvent>()
+            .add_message::<StateChangedEvent>()
             .init_resource::<PausedResource>()
             .add_systems(Update, (toggle_pause, handle_pause_draw_toggle));
     }
@@ -74,7 +74,7 @@ fn toggle_pause(
     stats: Option<Res<StatsResource>>,
     settings: Option<Res<SettingsResource>>,
     mut drag: Option<ResMut<DragState>>,
-    mut changed: EventWriter<StateChangedEvent>,
+    mut changed: MessageWriter<StateChangedEvent>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
@@ -125,7 +125,7 @@ fn handle_pause_draw_toggle(
     paused: Res<PausedResource>,
     settings: Option<ResMut<SettingsResource>>,
     path: Option<Res<SettingsStoragePath>>,
-    mut changed: EventWriter<SettingsChangedEvent>,
+    mut changed: MessageWriter<SettingsChangedEvent>,
 ) {
     if !paused.0 {
         return;
