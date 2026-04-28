@@ -5,12 +5,12 @@ use bcrypt::{hash, verify};
 use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::{
     error::AppError,
     middleware::{validate_refresh_token, AuthenticatedUser, Claims},
+    AppState,
 };
 
 // ---------------------------------------------------------------------------
@@ -59,7 +59,7 @@ struct UserRow {
 // bcrypt cost used for password hashing
 // ---------------------------------------------------------------------------
 
-/// bcrypt cost factor. Per ARCHITECTURE.md §19 this must be 12.
+/// bcrypt work factor. Cost 12 ≈ 300 ms on modern hardware — balances security against registration latency.
 const BCRYPT_COST: u32 = 12;
 
 // ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ fn username_chars_ok(s: &str) -> bool {
 }
 
 pub async fn register(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
     Json(body): Json<AuthRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
     // Validate username: 3–32 characters, alphanumeric + underscores only.
@@ -137,11 +137,12 @@ pub async fn register(
         "SELECT id FROM users WHERE username = ?",
         username
     )
-    .fetch_optional(&pool)
+    .fetch_optional(&state.pool)
     .await?
     .flatten();
 
     if existing.is_some() {
+        tracing::warn!(username = %username, "register: username already taken");
         return Err(AppError::UsernameTaken);
     }
 
@@ -156,21 +157,18 @@ pub async fn register(
         password_hash,
         now
     )
-    .execute(&pool)
+    .execute(&state.pool)
     .await?;
 
-    let secret = std::env::var("JWT_SECRET")
-        .map_err(|_| AppError::Internal("JWT_SECRET not set".into()))?;
-
     Ok(Json(AuthResponse {
-        access_token: make_access_token(&user_id, &secret)?,
-        refresh_token: make_refresh_token(&user_id, &secret)?,
+        access_token: make_access_token(&user_id, &state.jwt_secret)?,
+        refresh_token: make_refresh_token(&user_id, &state.jwt_secret)?,
     }))
 }
 
 /// `POST /api/auth/login` — verify credentials and return tokens.
 pub async fn login(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
     Json(body): Json<AuthRequest>,
 ) -> Result<Json<AuthResponse>, AppError> {
     let username = body.username.trim().to_string();
@@ -179,7 +177,7 @@ pub async fn login(
         "SELECT id, password_hash FROM users WHERE username = ?",
         username
     )
-    .fetch_optional(&pool)
+    .fetch_optional(&state.pool)
     .await?;
 
     let row = row.ok_or(AppError::InvalidCredentials)?;
@@ -188,29 +186,25 @@ pub async fn login(
 
     let valid = verify(&body.password, &row_hash)?;
     if !valid {
+        tracing::warn!(username = %username, "login: invalid password");
         return Err(AppError::InvalidCredentials);
     }
 
-    let secret = std::env::var("JWT_SECRET")
-        .map_err(|_| AppError::Internal("JWT_SECRET not set".into()))?;
-
     Ok(Json(AuthResponse {
-        access_token: make_access_token(&row_id, &secret)?,
-        refresh_token: make_refresh_token(&row_id, &secret)?,
+        access_token: make_access_token(&row_id, &state.jwt_secret)?,
+        refresh_token: make_refresh_token(&row_id, &state.jwt_secret)?,
     }))
 }
 
 /// `POST /api/auth/refresh` — exchange a refresh token for a new access token.
 pub async fn refresh(
+    State(state): State<AppState>,
     Json(body): Json<RefreshRequest>,
 ) -> Result<Json<RefreshResponse>, AppError> {
-    let secret = std::env::var("JWT_SECRET")
-        .map_err(|_| AppError::Internal("JWT_SECRET not set".into()))?;
-
-    let claims = validate_refresh_token(&body.refresh_token, &secret)?;
+    let claims = validate_refresh_token(&body.refresh_token, &state.jwt_secret)?;
 
     Ok(Json(RefreshResponse {
-        access_token: make_access_token(&claims.sub, &secret)?,
+        access_token: make_access_token(&claims.sub, &state.jwt_secret)?,
     }))
 }
 
@@ -218,11 +212,11 @@ pub async fn refresh(
 ///
 /// All related rows are removed via `ON DELETE CASCADE` in the schema.
 pub async fn delete_account(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
     user: AuthenticatedUser,
 ) -> Result<Json<serde_json::Value>, AppError> {
     sqlx::query!("DELETE FROM users WHERE id = ?", user.user_id)
-        .execute(&pool)
+        .execute(&state.pool)
         .await?;
 
     Ok(Json(serde_json::json!({ "ok": true })))

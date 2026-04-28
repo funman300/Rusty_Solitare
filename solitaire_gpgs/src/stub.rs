@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use solitaire_data::{SyncError, SyncProvider};
-use solitaire_sync::{SyncPayload, SyncResponse};
+use solitaire_sync::{ChallengeGoal, LeaderboardEntry, SyncPayload, SyncResponse};
 
 /// Google Play Games Services sync client — desktop/iOS stub.
 ///
@@ -37,5 +37,35 @@ impl SyncProvider for GpgsClient {
 
     fn is_authenticated(&self) -> bool {
         false
+    }
+
+    /// No-op stub — returns UnsupportedPlatform on non-Android targets.
+    async fn mirror_achievement(&self, _id: &str) -> Result<(), SyncError> {
+        Err(SyncError::UnsupportedPlatform)
+    }
+
+    /// No-op stub — returns UnsupportedPlatform on non-Android targets.
+    async fn fetch_leaderboard(&self) -> Result<Vec<LeaderboardEntry>, SyncError> {
+        Err(SyncError::UnsupportedPlatform)
+    }
+
+    /// No-op stub — returns UnsupportedPlatform on non-Android targets.
+    async fn fetch_daily_challenge(&self) -> Result<Option<ChallengeGoal>, SyncError> {
+        Err(SyncError::UnsupportedPlatform)
+    }
+
+    /// No-op stub — returns UnsupportedPlatform on non-Android targets.
+    async fn opt_in_leaderboard(&self, _display_name: &str) -> Result<(), SyncError> {
+        Err(SyncError::UnsupportedPlatform)
+    }
+
+    /// No-op stub — returns UnsupportedPlatform on non-Android targets.
+    async fn opt_out_leaderboard(&self) -> Result<(), SyncError> {
+        Err(SyncError::UnsupportedPlatform)
+    }
+
+    /// No-op stub — returns UnsupportedPlatform on non-Android targets.
+    async fn delete_account(&self) -> Result<(), SyncError> {
+        Err(SyncError::UnsupportedPlatform)
     }
 }

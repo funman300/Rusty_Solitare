@@ -30,7 +30,9 @@ mod pile_map_serde {
 /// Whether cards are drawn one at a time or three at a time from the stock.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DrawMode {
+    /// Draw one card from stock per turn.
     DrawOne,
+    /// Draw three cards from stock per turn; only the top is playable.
     DrawThree,
 }
 
@@ -46,9 +48,13 @@ pub enum DrawMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum GameMode {
     #[default]
+    /// Standard Klondike rules with score and timer.
     Classic,
+    /// No timer, no score display, ambient audio only.
     Zen,
+    /// Fixed hard seeds, no undo, must win to advance.
     Challenge,
+    /// Play as many games as possible within 10 minutes.
     TimeAttack,
 }
 
@@ -983,6 +989,24 @@ mod tests {
         let mut g = new_game();
         g.elapsed_seconds = 100;
         assert_eq!(g.compute_time_bonus(), 7000);
+    }
+
+    // --- EmptySource error path ---
+
+    #[test]
+    fn move_from_empty_pile_returns_empty_source() {
+        // Build a game state, clear a tableau pile entirely, then attempt to
+        // move from it. The source pile exists in `piles` (key is present) but
+        // contains no cards — exactly the code path that returns EmptySource.
+        let mut g = new_game();
+        // Tableau(0) starts with exactly 1 card; clear it to make the pile empty.
+        g.piles.get_mut(&PileType::Tableau(0)).unwrap().cards.clear();
+        let result = g.move_cards(PileType::Tableau(0), PileType::Tableau(1), 1);
+        assert_eq!(
+            result,
+            Err(MoveError::EmptySource),
+            "moving from an empty pile must return EmptySource"
+        );
     }
 
     // --- next_auto_complete_move ---

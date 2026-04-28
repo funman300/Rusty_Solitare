@@ -6,11 +6,10 @@
 use axum::{extract::State, Json};
 use chrono::Utc;
 use serde::Deserialize;
-use sqlx::SqlitePool;
 
 use solitaire_sync::LeaderboardEntry;
 
-use crate::{error::AppError, middleware::AuthenticatedUser};
+use crate::{error::AppError, middleware::AuthenticatedUser, AppState};
 
 // ---------------------------------------------------------------------------
 // Request shapes
@@ -42,7 +41,7 @@ struct LeaderboardRow {
 ///
 /// Returns entries sorted by `best_score` descending (nulls last).
 pub async fn get_leaderboard(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
     _user: AuthenticatedUser,
 ) -> Result<Json<Vec<LeaderboardEntry>>, AppError> {
     let rows = sqlx::query_as!(
@@ -57,7 +56,7 @@ pub async fn get_leaderboard(
                CASE WHEN l.best_time_secs IS NULL THEN 1 ELSE 0 END ASC,
                l.best_time_secs ASC"#
     )
-    .fetch_all(&pool)
+    .fetch_all(&state.pool)
     .await?;
 
     let entries: Result<Vec<LeaderboardEntry>, AppError> = rows
@@ -90,28 +89,29 @@ pub async fn get_leaderboard(
 /// appears in `GET /api/leaderboard`. The leaderboard row itself is kept
 /// so scores are preserved if the player opts back in later.
 pub async fn opt_out(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
     user: AuthenticatedUser,
 ) -> Result<Json<serde_json::Value>, AppError> {
     sqlx::query!(
         "UPDATE users SET leaderboard_opt_in = 0 WHERE id = ?",
         user.user_id
     )
-    .execute(&pool)
+    .execute(&state.pool)
     .await?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+/// Maximum allowed character count for a leaderboard display name (32 chars).
+/// Keeps names readable in the leaderboard UI while allowing reasonable creativity.
+const DISPLAY_NAME_MAX: usize = 32;
+
 /// `POST /api/leaderboard/opt-in` — opt in and upsert the player's entry.
 ///
 /// Sets `leaderboard_opt_in = 1` on the user row and creates/updates the
 /// leaderboard entry with the supplied display name.
-/// Maximum allowed length for a leaderboard display name.
-const DISPLAY_NAME_MAX: usize = 32;
-
 pub async fn opt_in(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
     user: AuthenticatedUser,
     Json(body): Json<OptInRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
@@ -131,7 +131,7 @@ pub async fn opt_in(
         "UPDATE users SET leaderboard_opt_in = 1 WHERE id = ?",
         user.user_id
     )
-    .execute(&pool)
+    .execute(&state.pool)
     .await?;
 
     let now = Utc::now().to_rfc3339();
@@ -147,7 +147,7 @@ pub async fn opt_in(
         display_name,
         now
     )
-    .execute(&pool)
+    .execute(&state.pool)
     .await?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
