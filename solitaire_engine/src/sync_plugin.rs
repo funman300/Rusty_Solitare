@@ -198,13 +198,17 @@ fn poll_pull_result(
             progress.0 = merged.progress;
             status.0 = SyncStatus::LastSynced(Utc::now());
         }
+        Err(SyncError::UnsupportedPlatform) => {
+            // No backend configured — not an error, just leave status as Idle.
+            status.0 = SyncStatus::Idle;
+        }
         Err(e) => {
             warn!("sync pull failed: {e}");
             let msg = match &e {
                 SyncError::Network(_) => "Can't reach server — check your connection".to_string(),
                 SyncError::Auth(_) => "Login expired — tap Sync Now after re-logging in".to_string(),
                 SyncError::Serialization(_) => format!("Unexpected server response: {e}"),
-                SyncError::UnsupportedPlatform => "Sync not configured".to_string(),
+                SyncError::UnsupportedPlatform => unreachable!("handled above"),
             };
             status.0 = SyncStatus::Error(msg);
         }
@@ -233,13 +237,14 @@ fn push_on_exit(
 
     // Prefer an existing tokio runtime; fall back to futures_lite block_on
     // for environments (e.g. tests) that don't have one.
-    match tokio::runtime::Handle::try_current() {
-        Ok(handle) => {
-            let _ = handle.block_on(provider.push(&payload));
-        }
-        Err(_) => {
-            let _ = future::block_on(provider.push(&payload));
-        }
+    let result = match tokio::runtime::Handle::try_current() {
+        Ok(handle) => handle.block_on(provider.push(&payload)),
+        Err(_) => future::block_on(provider.push(&payload)),
+    };
+    if let Err(e) = result {
+        // Log push failures on exit so they appear in crash/log reports.
+        // We cannot surface them to the UI at this point (game loop is done).
+        warn!("sync push on exit failed: {e}");
     }
 }
 

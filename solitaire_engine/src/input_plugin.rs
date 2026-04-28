@@ -531,7 +531,7 @@ fn start_drag(
         return;
     };
 
-    let bottom_pos = card_position(&game.0, &layout.0, pile.clone(), stack_index);
+    let bottom_pos = card_position(&game.0, &layout.0, &pile, stack_index);
 
     // Store as a pending drag. We do NOT elevate the cards yet — the visual
     // lift happens in follow_drag once the threshold is crossed.
@@ -760,7 +760,7 @@ fn touch_start_drag(
             continue;
         };
 
-        let bottom_pos = card_position(&game.0, &layout.0, pile.clone(), stack_index);
+        let bottom_pos = card_position(&game.0, &layout.0, &pile, stack_index);
 
         drag.cards = card_ids;
         drag.origin_pile = Some(pile);
@@ -971,8 +971,8 @@ fn point_in_rect(point: Vec2, center: Vec2, size: Vec2) -> bool {
 }
 
 /// Where a card at `stack_index` in pile `pile` would be rendered.
-fn card_position(game: &GameState, layout: &Layout, pile: PileType, stack_index: usize) -> Vec2 {
-    let base = layout.pile_positions[&pile];
+fn card_position(game: &GameState, layout: &Layout, pile: &PileType, stack_index: usize) -> Vec2 {
+    let base = layout.pile_positions[pile];
     if matches!(pile, PileType::Tableau(_)) {
         let fan = -layout.card_size.y * TABLEAU_FAN_FRAC;
         Vec2::new(base.x, base.y + fan * (stack_index as f32))
@@ -980,7 +980,7 @@ fn card_position(game: &GameState, layout: &Layout, pile: PileType, stack_index:
         // In Draw-Three mode the top 3 waste cards are fanned in X to match
         // card_plugin::card_positions(). Hit-testing must use the same offsets
         // so clicking the visually rightmost (top) card actually registers.
-        let pile_len = game.piles.get(&pile).map_or(0, |p| p.cards.len());
+        let pile_len = game.piles.get(pile).map_or(0, |p| p.cards.len());
         let visible_start = pile_len.saturating_sub(3);
         let slot = stack_index.saturating_sub(visible_start) as f32;
         Vec2::new(base.x + slot * layout.card_size.x * 0.28, base.y)
@@ -1039,7 +1039,7 @@ fn find_draggable_at(
             if !card.face_up {
                 continue;
             }
-            let pos = card_position(game, layout, pile.clone(), i);
+            let pos = card_position(game, layout, &pile, i);
             if !point_in_rect(cursor, pos, layout.card_size) {
                 continue;
             }
@@ -1423,7 +1423,7 @@ mod tests {
 
         // In tableau 6, the visually topmost card is the last (face-up) one.
         // Its position: base.y + fan * 6.
-        let top_pos = card_position(&game, &layout, PileType::Tableau(6), 6);
+        let top_pos = card_position(&game, &layout, &PileType::Tableau(6), 6);
         let result = find_draggable_at(top_pos, &game, &layout).expect("hit");
         assert_eq!(result.0, PileType::Tableau(6));
         assert_eq!(result.1, 6);
@@ -1439,7 +1439,7 @@ mod tests {
         // position of the bottom face-down card (index 0) should miss —
         // that card is face-down and the topmost face-up card overlaps at
         // a different fanned position.
-        let bottom_pos = card_position(&game, &layout, PileType::Tableau(6), 0);
+        let bottom_pos = card_position(&game, &layout, &PileType::Tableau(6), 0);
         // Shift to avoid accidental overlap with the face-up card above it.
         let below_bottom = bottom_pos - Vec2::new(0.0, layout.card_size.y * 0.4);
         let result = find_draggable_at(below_bottom, &game, &layout);
@@ -1477,7 +1477,7 @@ mod tests {
         // (Jack fans 0.5h below base; its box spans [base-h, base]).  To hit the
         // Queen we click in her visible strip: the 0.25h band above the Jack's top
         // edge (base.y to base.y+0.25h).  Midpoint = queen_center + 0.375*card_h.
-        let queen_center = card_position(&game, &layout, PileType::Tableau(0), 1);
+        let queen_center = card_position(&game, &layout, &PileType::Tableau(0), 1);
         let pos = queen_center + Vec2::new(0.0, layout.card_size.y * 0.375);
         let (pile, start, ids) = find_draggable_at(pos, &game, &layout).expect("hit");
         assert_eq!(pile, PileType::Tableau(0));
@@ -1507,7 +1507,7 @@ mod tests {
         let layout = compute_layout(Vec2::new(1280.0, 800.0));
         // Both cards in waste sit at the same (x, y). Clicking should pick
         // the visually top card (id 201), with count = 1.
-        let pos = card_position(&game, &layout, PileType::Waste, 0);
+        let pos = card_position(&game, &layout, &PileType::Waste, 0);
         let (pile, start, ids) = find_draggable_at(pos, &game, &layout).expect("hit");
         assert_eq!(pile, PileType::Waste);
         assert_eq!(start, 1);

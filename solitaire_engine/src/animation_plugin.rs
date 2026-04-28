@@ -274,9 +274,8 @@ fn handle_win_cascade(
     let win_msg = format!("You Win!  Score: {}  Time: {m}:{s:02}", ev.score);
     spawn_toast(&mut commands, win_msg, WIN_TOAST_SECS);
 
-    let speed = settings.as_ref().map(|s| s.0.animation_speed.clone());
-    let step = speed.clone().map(cascade_step_secs).unwrap_or(CASCADE_STAGGER_NORMAL);
-    let duration = speed.map(cascade_duration_secs).unwrap_or(CASCADE_DURATION_NORMAL);
+    let step = settings.as_ref().map_or(CASCADE_STAGGER_NORMAL, |s| cascade_step_secs(s.0.animation_speed.clone()));
+    let duration = settings.as_ref().map_or(CASCADE_DURATION_NORMAL, |s| cascade_duration_secs(s.0.animation_speed.clone()));
 
     for (i, (entity, transform)) in cards.iter().enumerate() {
         commands.entity(entity).insert(CardAnim {

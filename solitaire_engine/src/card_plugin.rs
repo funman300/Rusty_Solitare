@@ -265,18 +265,18 @@ fn sync_cards(
         match existing.get(&card.id) {
             Some(&(entity, cur)) => {
                 update_card_entity(
-                    &mut commands, entity, &card, position, z, layout,
+                    &mut commands, entity, card, position, z, layout,
                     slide_secs, back_colour, color_blind, cur,
                 )
             }
-            None => spawn_card_entity(&mut commands, &card, position, z, layout, back_colour, color_blind),
+            None => spawn_card_entity(&mut commands, card, position, z, layout, back_colour, color_blind),
         }
     }
 }
 
 /// Returns an ordered vec of (card, position, z) for every card in the game.
-fn card_positions(game: &GameState, layout: &Layout) -> Vec<(Card, Vec2, f32)> {
-    let mut out: Vec<(Card, Vec2, f32)> = Vec::with_capacity(52);
+fn card_positions<'a>(game: &'a GameState, layout: &Layout) -> Vec<(&'a Card, Vec2, f32)> {
+    let mut out: Vec<(&'a Card, Vec2, f32)> = Vec::with_capacity(52);
     let piles = [
         PileType::Stock,
         PileType::Waste,
@@ -331,7 +331,7 @@ fn card_positions(game: &GameState, layout: &Layout) -> Vec<(Card, Vec2, f32)> {
             };
             let pos = Vec2::new(base.x + x_offset, base.y + y_offset);
             let z = 1.0 + (slot as f32) * STACK_FAN_FRAC;
-            out.push((card.clone(), pos, z));
+            out.push((card, pos, z));
             if is_tableau {
                 let step = if card.face_up {
                     TABLEAU_FAN_FRAC

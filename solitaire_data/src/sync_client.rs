@@ -364,6 +364,10 @@ impl SyncProvider for SolitaireServerClient {
 
 /// Deserialize a pull response body as [`SyncResponse`] and return its
 /// `merged` field, or map non-200 statuses to the appropriate [`SyncError`].
+///
+/// Only HTTP 401 (Unauthorized) and 403 (Forbidden) are treated as
+/// authentication errors. All other non-2xx statuses (5xx, 429, etc.) are
+/// classified as network/transport errors so the UI shows the right message.
 async fn extract_pull_body(resp: reqwest::Response) -> Result<SyncPayload, SyncError> {
     let status = resp.status();
     if status.is_success() {
@@ -372,8 +376,12 @@ async fn extract_pull_body(resp: reqwest::Response) -> Result<SyncPayload, SyncE
             .await
             .map_err(|e| SyncError::Serialization(e.to_string()))?;
         Ok(sync_resp.merged)
-    } else {
+    } else if status == reqwest::StatusCode::UNAUTHORIZED
+        || status == reqwest::StatusCode::FORBIDDEN
+    {
         Err(SyncError::Auth(format!("server returned {status}")))
+    } else {
+        Err(SyncError::Network(format!("server returned {status}")))
     }
 }
 
@@ -391,14 +399,22 @@ async fn extract_leaderboard_body(resp: reqwest::Response) -> Result<Vec<Leaderb
 
 /// Deserialize a push response body as [`SyncResponse`], or map non-200
 /// statuses to the appropriate [`SyncError`].
+///
+/// Only HTTP 401 (Unauthorized) and 403 (Forbidden) are treated as
+/// authentication errors. All other non-2xx statuses (5xx, 429, etc.) are
+/// classified as network/transport errors so the UI shows the right message.
 async fn extract_push_body(resp: reqwest::Response) -> Result<SyncResponse, SyncError> {
     let status = resp.status();
     if status.is_success() {
         resp.json()
             .await
             .map_err(|e| SyncError::Serialization(e.to_string()))
-    } else {
+    } else if status == reqwest::StatusCode::UNAUTHORIZED
+        || status == reqwest::StatusCode::FORBIDDEN
+    {
         Err(SyncError::Auth(format!("server returned {status}")))
+    } else {
+        Err(SyncError::Network(format!("server returned {status}")))
     }
 }
 

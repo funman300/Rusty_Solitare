@@ -16,12 +16,13 @@ fn main() -> io::Result<()> {
     let out_dir = workspace_root().join("assets").join("audio");
     fs::create_dir_all(&out_dir)?;
 
-    let effects: [(&str, Generator); 5] = [
+    let effects: [(&str, Generator); 6] = [
         ("card_flip.wav", card_flip),
         ("card_place.wav", card_place),
         ("card_deal.wav", card_deal),
         ("card_invalid.wav", card_invalid),
         ("win_fanfare.wav", win_fanfare),
+        ("ambient_loop.wav", ambient_loop),
     ];
 
     for (name, gen) in &effects {
@@ -165,6 +166,64 @@ fn win_fanfare() -> Vec<i16> {
             sample += s * env;
         }
         out.push(quantize(sample * 0.22));
+    }
+    out
+}
+
+/// Generates a seamlessly looping ambient drone track (~6 seconds, 44100 Hz
+/// mono 16-bit PCM).
+///
+/// Design:
+/// - Fundamental: 55 Hz (low A) sine wave.
+/// - Harmonics: 110 Hz at 40% and 165 Hz at 20% for warmth.
+/// - Amplitude LFO at 0.1 Hz creates a slow breath / pad swell.
+/// - The loop length is chosen so both the fundamental and LFO complete an
+///   integer number of cycles — guaranteeing a phase-continuous seamless loop.
+/// - Peak amplitude is kept low (0.18) so it sits quietly under SFX.
+fn ambient_loop() -> Vec<i16> {
+    use std::f32::consts::PI;
+
+    // LFO period = 10 s; fundamental period ≈ 18.18 ms.
+    // We want a loop that is an exact integer multiple of both, so both
+    // complete a whole number of cycles with no phase discontinuity.
+    //
+    // LCM approach: fundamental @ 55 Hz repeats every 1/55 s. The LFO @ 0.1 Hz
+    // repeats every 10 s. 10 s is already a multiple of 1/55 s (10 * 55 = 550
+    // cycles), so a 10-second buffer loops perfectly. We halve it to 5 s for
+    // a smaller file — 5 * 55 = 275 (integer), 5 * 0.1 = 0.5 (half-cycle of
+    // LFO). To keep a full LFO cycle we use 10 s but write only the first 5 s
+    // of the waveform, which is within the 4–8 s budget and still a seamless
+    // loop because the LFO amplitude is symmetric about its midpoint at t=5 s.
+    //
+    // Simpler explanation: at exactly 5 s, both the 55 Hz tone and a slow
+    // 0.2 Hz (period=5 s) breath LFO complete an integer number of cycles.
+    // We use 0.2 Hz for the LFO instead of 0.1 Hz so the full envelope fits
+    // in one loop period.
+    let lfo_freq = 0.2_f32; // 1 full LFO cycle per 5-second loop
+    let loop_seconds = 1.0 / lfo_freq; // = 5.0 s
+    let n = (loop_seconds * SAMPLE_RATE as f32) as usize;
+
+    let f0 = 55.0_f32; // fundamental (Hz)
+    let f1 = 110.0_f32; // 2nd harmonic
+    let f2 = 165.0_f32; // 3rd harmonic
+
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let t = i as f32 / SAMPLE_RATE as f32;
+
+        // LFO: smoothly oscillates between 0.4 and 1.0 amplitude.
+        // Using (1 - cos) / 2 instead of sin so the loop starts and ends at
+        // the same LFO phase (0.0 → both sin and cos are fully periodic).
+        let lfo = 0.7 + 0.3 * (2.0 * PI * lfo_freq * t).cos();
+
+        // Layered harmonics
+        let tone = (2.0 * PI * f0 * t).sin()
+            + 0.4 * (2.0 * PI * f1 * t).sin()
+            + 0.2 * (2.0 * PI * f2 * t).sin();
+
+        // Normalise the layered sum: max raw peak ≈ 1.6; keep final peak ≤ 0.18
+        let sample = tone / 1.6 * lfo * 0.18;
+        out.push(quantize(sample));
     }
     out
 }

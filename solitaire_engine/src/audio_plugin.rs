@@ -11,9 +11,8 @@
 //! | `NewGameRequestEvent` | `card_deal.wav` |
 //! | `GameWonEvent` | `win_fanfare.wav` |
 //!
-//! An ambient loop is started at plugin startup using `card_flip.wav` at very
-//! low volume (0.05 amplitude) routed through `music_track` as a placeholder
-//! until a dedicated ambient track is available.
+//! An ambient loop (`ambient_loop.wav`) is started at plugin startup at very
+//! low volume (0.05 amplitude) routed through `music_track`.
 //!
 //! If the audio device cannot be opened (e.g. a headless CI machine or a
 //! Linux box without a running PulseAudio/Pipewire session), the plugin
@@ -121,8 +120,8 @@ impl Plugin for AudioPlugin {
             None => (None, None),
         };
 
-        // Start the ambient loop placeholder (card_flip.wav looped at very low
-        // volume through music_track).
+        // Start the ambient loop (ambient_loop.wav looped at very low volume
+        // through music_track).
         let ambient_handle =
             start_ambient_loop(manager.as_mut(), library.as_ref(), &mut music_track);
 
@@ -190,20 +189,27 @@ fn decode(bytes: &'static [u8]) -> Option<StaticSoundData> {
     }
 }
 
-/// Starts the ambient music loop placeholder (`card_flip.wav` looped at very
-/// low volume) routed through `music_track`. Returns the handle so it can be
-/// stored in `AudioState` for future pause/stop control.
+/// Decodes the embedded `ambient_loop.wav` and starts it as a seamlessly
+/// looping ambient track routed through `music_track`.  Returns the handle so
+/// it can be stored in `AudioState` for future pause/stop control.
 ///
-/// Returns `None` when audio is unavailable or the library failed to load.
+/// Returns `None` when audio is unavailable or the WAV fails to decode.
 fn start_ambient_loop(
     manager: Option<&mut AudioManager<DefaultBackend>>,
-    library: Option<&SoundLibrary>,
+    _library: Option<&SoundLibrary>,
     music_track: &mut Option<TrackHandle>,
 ) -> Option<StaticSoundHandle> {
     let manager = manager?;
-    let lib = library?;
 
-    let mut data = lib.flip.clone();
+    let ambient_bytes: &'static [u8] =
+        include_bytes!("../../assets/audio/ambient_loop.wav");
+    let mut data = match StaticSoundData::from_cursor(Cursor::new(ambient_bytes.to_vec())) {
+        Ok(d) => d,
+        Err(e) => {
+            warn!("failed to decode ambient_loop.wav: {e}");
+            return None;
+        }
+    };
     data.settings.loop_region = Some(Region::default());
     data.settings.volume = Value::Fixed(amplitude_to_decibels(AMBIENT_VOLUME as f32));
 
