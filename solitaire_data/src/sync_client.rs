@@ -412,18 +412,11 @@ async fn extract_push_body(resp: reqwest::Response) -> Result<SyncResponse, Sync
 /// This is the **one** place in the codebase that matches on [`SyncBackend`]
 /// variants. All other code receives a `Box<dyn SyncProvider + Send + Sync>`
 /// and remains backend-agnostic.
-///
-/// `GooglePlayGames` is Android-only; on desktop it silently falls back to
-/// [`LocalOnlyProvider`].
 pub fn provider_for_backend(backend: &SyncBackend) -> Box<dyn SyncProvider + Send + Sync> {
     match backend {
         SyncBackend::Local => Box::new(LocalOnlyProvider),
         SyncBackend::SolitaireServer { url, username } => {
             Box::new(SolitaireServerClient::new(url.clone(), username.clone()))
-        }
-        SyncBackend::GooglePlayGames => {
-            // GPGS is Android-only; fall back to no-op on desktop.
-            Box::new(LocalOnlyProvider)
         }
     }
 }
@@ -467,12 +460,6 @@ mod tests {
     #[test]
     fn factory_local_returns_local_provider() {
         let provider = provider_for_backend(&SyncBackend::Local);
-        assert_eq!(provider.backend_name(), "local");
-    }
-
-    #[test]
-    fn factory_gpgs_falls_back_to_local() {
-        let provider = provider_for_backend(&SyncBackend::GooglePlayGames);
         assert_eq!(provider.backend_name(), "local");
     }
 

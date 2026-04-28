@@ -260,7 +260,6 @@ fn sync_info(backend: &SyncBackend) -> (&'static str, String) {
         SyncBackend::SolitaireServer { username, .. } => {
             ("Solitaire Server", username.clone())
         }
-        SyncBackend::GooglePlayGames => ("Google Play Games", "—".to_string()),
     }
 }
 

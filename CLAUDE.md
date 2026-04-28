@@ -12,7 +12,6 @@ solitaire_sync/    # Shared API types — NO Bevy, serde/uuid/chrono only
 solitaire_data/    # Persistence + SyncProvider trait + server client
 solitaire_engine/  # Bevy ECS systems, components, plugins
 solitaire_server/  # Axum sync server binary
-solitaire_gpgs/    # Google Play Games bridge — STUB ONLY until Android phase
 solitaire_app/     # Thin binary entry point
 assets/            # Source assets — embedded at compile time via include_bytes!()
 ```
@@ -53,7 +52,6 @@ cargo clippy -p solitaire_core -- -D warnings
 - Passwords and tokens are stored in the OS keychain via the `keyring` crate — never in plaintext files or logs.
 - Sync runs on `AsyncComputeTaskPool` — never block the Bevy main thread.
 - All sync backends implement the `SyncProvider` trait. The `SyncPlugin` is backend-agnostic — never `match` on `SyncBackend` inside a Bevy system.
-- `solitaire_gpgs` is a stub until Android work begins. Do not write JNI bindings yet; keep the compile-time stub so the trait contract is enforced from day one.
 - `cargo clippy --workspace -- -D warnings` must pass clean after every change.
 - `cargo test --workspace` must pass after every change.
 

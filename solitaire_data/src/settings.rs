@@ -40,7 +40,8 @@ pub enum Theme {
 
 /// Which sync backend the player has configured.
 ///
-/// JWT tokens for `SolitaireServer` are stored in the OS keychain via
+/// `Local` keeps all progress on-device. `SolitaireServer` syncs via the
+/// self-hosted server. JWT tokens are stored in the OS keychain via
 /// `solitaire_data::auth_tokens` — **never** in this struct.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum SyncBackend {
@@ -57,10 +58,7 @@ pub enum SyncBackend {
         username: String,
         // JWT tokens are stored in the OS keychain — not here.
     },
-    /// Google Play Games Services (Android only). Selecting this on non-Android
-    /// platforms silently falls back to `Local` at runtime.
-    #[serde(rename = "google_play_games")]
-    GooglePlayGames,
+
 }
 
 /// Persistent user settings.

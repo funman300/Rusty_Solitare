@@ -16,28 +16,25 @@
 5. [Game Engine Architecture](#5-game-engine-architecture)
 6. [Persistence & Sync Architecture](#6-persistence--sync-architecture)
 7. [Sync Server Architecture](#7-sync-server-architecture)
-8. [Google Play Games Services (Android Future)](#8-google-play-games-services-android-future)
-9. [Data Models](#9-data-models)
-10. [API Reference](#10-api-reference)
-11. [Merge Strategy](#11-merge-strategy)
-12. [Achievement System](#12-achievement-system)
-13. [Progression System](#13-progression-system)
-14. [Audio System](#14-audio-system)
-15. [Asset Pipeline](#15-asset-pipeline)
-16. [Platform Targets](#16-platform-targets)
-17. [Build & Development Guide](#17-build--development-guide)
-18. [Deployment Guide](#18-deployment-guide)
-19. [Security Model](#19-security-model)
-20. [Testing Strategy](#20-testing-strategy)
-21. [Decision Log](#21-decision-log)
+8. [Data Models](#8-data-models)
+9. [API Reference](#9-api-reference)
+10. [Merge Strategy](#10-merge-strategy)
+11. [Achievement System](#11-achievement-system)
+12. [Progression System](#12-progression-system)
+13. [Audio System](#13-audio-system)
+14. [Asset Pipeline](#14-asset-pipeline)
+15. [Platform Targets](#15-platform-targets)
+16. [Build & Development Guide](#16-build--development-guide)
+17. [Deployment Guide](#17-deployment-guide)
+18. [Security Model](#18-security-model)
+19. [Testing Strategy](#19-testing-strategy)
+20. [Decision Log](#20-decision-log)
 
 ---
 
 ## 1. Project Overview
 
-Solitaire Quest is a cross-platform Klondike Solitaire game written in Rust, targeting macOS, Windows, and Linux desktops (iOS/Android as a stretch goal). It features a full progression system with XP, levels, achievements, daily challenges, and an optional self-hosted sync server so statistics and progress are available across all of a player's devices.
-
-On Android (stretch goal), sync is enhanced with Google Play Games Services (GPGS) for native achievement popups, leaderboards, and cloud saves — sitting on top of the same underlying sync payload so data stays consistent regardless of which backend was used last.
+Solitaire Quest is a cross-platform Klondike Solitaire game written in Rust, targeting macOS, Windows, and Linux desktops. It features a full progression system with XP, levels, achievements, daily challenges, and an optional self-hosted sync server so statistics and progress are available across all of a player's devices.
 
 ### Sync Backend by Platform
 
@@ -46,8 +43,6 @@ On Android (stretch goal), sync is enhanced with Google Play Games Services (GPG
 | macOS | Self-hosted server | Full feature set |
 | Windows | Self-hosted server | Full feature set |
 | Linux | Self-hosted server | Full feature set |
-| Android (stretch) | Google Play Games Services | + server as fallback |
-| iOS (stretch) | Self-hosted server | GPGS not supported on iOS |
 
 ### Design Principles
 
@@ -91,7 +86,6 @@ solitaire_quest/
 ├── solitaire_data/             # Persistence, sync client, settings
 ├── solitaire_engine/           # Bevy ECS systems, components, plugins
 ├── solitaire_server/           # Self-hosted sync server (Axum + SQLite)
-├── solitaire_gpgs/             # Google Play Games Services bridge (Android only, stub until stretch goal)
 └── solitaire_app/              # Main binary entry point
 ```
 
@@ -135,22 +129,7 @@ Owns:
 - `SyncBackend` enum and backend selection
 - Solitaire Server sync client (JWT auth, auto-refresh)
 - OS keychain integration (`keyring`)
-- `SyncProvider` trait — implemented by both `SolitaireServerClient` and `GpgsClient` (Android)
-
-### `solitaire_gpgs` *(stub — implement when targeting Android)*
-**Dependencies:** `solitaire_sync`, `jni` (Android only), `solitaire_data` trait impls.
-
-Android-only crate, compiled only when `target_os = "android"`. Bridges the Google Play Games Services Java SDK via JNI.
-
-Owns:
-- `GpgsClient` implementing the `SyncProvider` trait from `solitaire_data`
-- GPGS Saved Games API calls (load/save cloud save slot)
-- GPGS Achievements API calls (unlock, reveal, increment)
-- GPGS Leaderboards API calls (submit score, load scores)
-- Google Sign-In token management (via JNI into Android SDK)
-- Conversion between GPGS cloud save blob ↔ `SyncPayload`
-
-> **Note:** This crate contains only a trait stub and compile-time stub implementations until Android support is actively developed. Do not implement JNI bindings until Phase: Android.
+- `SyncProvider` trait — implemented by `SolitaireServerClient`
 
 ### `solitaire_engine`
 **Dependencies:** `bevy`, `bevy_kira_audio`, `solitaire_core`, `solitaire_data`.
@@ -223,8 +202,7 @@ SyncPlugin::on_startup()
     │  spawns AsyncComputeTask
     ▼
 solitaire_data::sync_pull()          ← dispatches to active SyncProvider
-    │                                    SolitaireServerClient  (desktop / iOS)
-    │                                    GpgsClient             (Android, future)
+    │                                    SolitaireServerClient
     ▼
 solitaire_sync::merge(local, remote)
     │
@@ -245,7 +223,7 @@ SyncPlugin::on_exit()
     │  blocking push (acceptable on exit, not on main loop)
     ▼
 active SyncProvider::push(local)
-    │  POST to server  — or —  GPGS Saved Games PUT (Android)
+    │  POST to server
     ▼
 Done
 ```
@@ -382,7 +360,6 @@ Implementations:
 |---|---|---|
 | `LocalOnlyProvider` | No-op (default) | All |
 | `SolitaireServerClient` | Self-hosted server | All |
-| `GpgsClient` *(future)* | Google Play Games Services | Android only |
 
 Sync always runs on `bevy::tasks::AsyncComputeTaskPool` — the game thread is never blocked.
 
@@ -397,9 +374,6 @@ pub enum SyncBackend {
         // JWT access + refresh tokens stored in OS keychain
         // key: "solitaire_quest_server_{username}"
     },
-    GooglePlayGames,
-    // No credentials stored locally — auth managed by Google Sign-In SDK via JNI
-    // Android only; selecting this on non-Android falls back to Local silently
 }
 ```
 
@@ -410,10 +384,6 @@ On exit: `POST /api/sync/push` with payload
 
 On 401: automatically attempt `POST /api/auth/refresh`, retry once, then surface error to user.
 Credentials stored in OS keychain via `keyring` — never in plaintext on disk.
-
-### Google Play Games Sync *(Android — future, see Section 8)*
-
-Implemented in `solitaire_gpgs` crate. Uses the GPGS Saved Games API with named slot `"solitaire_quest_sync"`. The `GpgsClient` struct implements `SyncProvider` — the `SyncPlugin` treats it identically to `SolitaireServerClient`. The same `solitaire_sync::merge()` function applies regardless of which provider returned the remote data.
 
 ---
 
@@ -501,89 +471,7 @@ This ensures all players worldwide get the same challenge for a given date, rega
 
 ---
 
-## 8. Google Play Games Services (Android Future)
-
-> **Status: Stub only.** Do not implement JNI bindings until Android is actively targeted. The `solitaire_gpgs` crate exists in the workspace with a trait stub so the compiler enforces the interface contract from day one.
-
-### Why GPGS on Android
-
-Google Play Games Services provides first-class Android features that would otherwise require significant backend work:
-
-| Feature | GPGS Provides | Our Alternative |
-|---|---|---|
-| Cloud saves | Saved Games API | Self-hosted server |
-| Achievements | Native popups + Play profile | In-game toasts only |
-| Leaderboards | Hosted by Google, visible in Play app | Server leaderboard |
-| Auth | Google Sign-In, no registration | Username + password |
-
-On Android, GPGS is the **primary** sync provider. The self-hosted server is the **fallback** if the player is not signed in or has no server configured. Both can be active simultaneously — a win pushes to both, pull merges from whichever responded last.
-
-### Compatibility Reality
-
-| Platform | GPGS Support |
-|---|---|
-| Android | ✅ Full |
-| Windows | ✅ GPGS for PC (optional, separate SDK) |
-| macOS | ❌ Not supported |
-| Linux | ❌ Not supported |
-| iOS | ❌ Not supported |
-
-macOS, Linux, and iOS users always use the self-hosted server. This is why the server is the primary design and GPGS is an enhancement layer.
-
-### `solitaire_gpgs` Crate Design
-
-The crate is compiled only on Android (`#[cfg(target_os = "android")]`). On all other platforms the crate exports only the stub.
-
-```rust
-// solitaire_gpgs/src/lib.rs
-
-#[cfg(target_os = "android")]
-mod android;
-
-#[cfg(not(target_os = "android"))]
-mod stub;
-
-pub use stub::GpgsClient;   // stub on desktop
-#[cfg(target_os = "android")]
-pub use android::GpgsClient; // real impl on Android
-```
-
-### JNI Bridge (Android implementation — future)
-
-The real `GpgsClient` uses the `jni` crate to call into the GPGS Android SDK:
-
-```
-Rust GpgsClient
-    │  jni::JNIEnv
-    ▼
-Java: com.google.android.gms.games.PlayGames
-    ├── getSnapshotsClient()   → Saved Games (sync payload)
-    ├── getAchievementsClient() → unlock / reveal
-    └── getLeaderboardsClient() → submit score
-```
-
-Steps required when Android work begins:
-1. Add `cargo-mobile2` to the build toolchain
-2. Implement `GpgsClient` with `jni` bindings in `solitaire_gpgs/src/android.rs`
-3. Add `GpgsClient: SyncProvider` impl — pull/push map to Saved Games load/save
-4. Mirror achievement unlocks: on `AchievementUnlockedEvent`, call GPGS unlock API alongside in-game toast
-5. Submit scores to GPGS leaderboard on `GameWonEvent`
-6. Add Google Sign-In button to the Settings screen (Android build only, `#[cfg]` gated)
-
-### Dual-Sync on Android
-
-When both GPGS and the self-hosted server are configured, the `SyncPlugin` runs both providers concurrently and merges all three payloads (local + GPGS + server) using the same `solitaire_sync::merge()` function applied twice:
-
-```
-local ──────┐
-             ├── merge() ──► intermediate ──┐
-gpgs ────────┘                               ├── merge() ──► final
-                                server ──────┘
-```
-
----
-
-## 9. Data Models
+## 8. Data Models
 
 ### Core Game Models (`solitaire_core`)
 
@@ -677,14 +565,14 @@ pub struct Settings {
     pub music_volume: f32,
     pub animation_speed: AnimSpeed,
     pub theme: Theme,
-    pub sync_backend: SyncBackend, // Local | SolitaireServer | GooglePlayGames
+    pub sync_backend: SyncBackend, // Local | SolitaireServer
     pub first_run_complete: bool,
 }
 ```
 
 ---
 
-## 10. API Reference
+## 9. API Reference
 
 All endpoints are under the base URL configured by the user (e.g., `https://solitaire.example.com`).
 
@@ -727,9 +615,9 @@ All endpoints are under the base URL configured by the user (e.g., `https://soli
 
 ---
 
-## 11. Merge Strategy
+## 10. Merge Strategy
 
-Used identically by the `SolitaireServerClient`, `GpgsClient`, and server-side handler. Lives in `solitaire_sync` as a pure function with no I/O. Called once per provider when multiple backends are active simultaneously (e.g. GPGS + server on Android).
+Used by both `SolitaireServerClient` and the server-side handler. Lives in `solitaire_sync` as a pure function with no I/O.
 
 ```rust
 pub fn merge(local: &SyncPayload, remote: &SyncPayload) -> SyncPayload {
@@ -769,7 +657,7 @@ pub fn merge(local: &SyncPayload, remote: &SyncPayload) -> SyncPayload {
 
 ---
 
-## 12. Achievement System
+## 11. Achievement System
 
 ### Definition Structure
 
@@ -814,13 +702,9 @@ pub struct AchievementDef {
 
 Achievement conditions are evaluated by `AchievementPlugin` on every `GameWonEvent` and `StateChangedEvent`. The plugin calls `solitaire_core::check_achievements()` which returns a `Vec<AchievementDef>` of newly unlocked achievements. The plugin then fires `AchievementUnlockedEvent` for each, which the toast and persistence systems handle independently.
 
-### GPGS Mirroring *(Android, future)*
-
-When the `GpgsClient` is active, every `AchievementUnlockedEvent` also triggers a GPGS `achievements.unlock()` call via JNI so the achievement appears in the player's Google Play profile. A static map in `solitaire_gpgs` maps our achievement IDs to GPGS achievement IDs (assigned in the Google Play Console). Mirroring is fire-and-forget — failures are logged but never block the in-game toast.
-
 ---
 
-## 13. Progression System
+## 12. Progression System
 
 ### XP Sources
 
@@ -849,7 +733,7 @@ Levels 11+:   level = 10 + floor((total_xp - 5000) / 1000)
 
 ---
 
-## 14. Audio System
+## 13. Audio System
 
 Audio uses `bevy_kira_audio`. All sound files are `.wav`.
 
@@ -868,7 +752,7 @@ Audio systems listen for Bevy events and never block the game thread.
 
 ---
 
-## 15. Asset Pipeline
+## 14. Asset Pipeline
 
 All assets are loaded through Bevy's `AssetServer`. No bytes are hardcoded in source.
 
@@ -890,21 +774,21 @@ Card backs: `assets/cards/backs/back_0.png` through `back_4.png`. Additional bac
 
 ---
 
-## 16. Platform Targets
+## 15. Platform Targets
 
 | Platform | Status | Primary Sync | Notes |
 |---|---|---|---|
 | macOS | Primary | Self-hosted server | x86_64 + Apple Silicon (universal binary via `cargo-lipo`) |
-| Windows | Primary | Self-hosted server | x86_64, MSVC toolchain; optional GPGS for PC (future) |
+| Windows | Primary | Self-hosted server | x86_64, MSVC toolchain |
 | Linux | Primary | Self-hosted server | x86_64, tested on Ubuntu 22.04+ and Fedora 39+ |
-| Android | Stretch | Google Play Games + server | `cargo-mobile2`, touch input, GPGS via JNI |
-| iOS | Stretch | Self-hosted server | `cargo-mobile2`, touch input; GPGS unavailable on iOS |
+| Android | Stretch | Self-hosted server | `cargo-mobile2`, touch input |
+| iOS | Stretch | Self-hosted server | `cargo-mobile2`, touch input |
 
 Minimum Bevy window size enforced: 800×600. Desktop windows are freely resizable; layout recomputes on `WindowResized`.
 
 ---
 
-## 17. Build & Development Guide
+## 16. Build & Development Guide
 
 ### Prerequisites
 
@@ -965,7 +849,7 @@ Add `--features bevy/dynamic_linking` during development to dramatically reduce 
 
 ---
 
-## 18. Deployment Guide
+## 17. Deployment Guide
 
 ### Docker Compose (Recommended)
 
@@ -1010,7 +894,7 @@ Migrations run automatically on startup via `sqlx::migrate!()`.
 
 ---
 
-## 19. Security Model
+## 18. Security Model
 
 | Concern | Mitigation |
 |---|---|
@@ -1026,7 +910,7 @@ Migrations run automatically on startup via `sqlx::migrate!()`.
 
 ---
 
-## 20. Testing Strategy
+## 19. Testing Strategy
 
 ### Unit Tests (`solitaire_core`)
 
@@ -1065,12 +949,10 @@ Using `axum::test` and an in-memory SQLite database:
 - [ ] Achievement toast appears and dismisses
 - [ ] Server sync: register, login, push, pull on second machine
 - [ ] Server sync: JWT refresh on 401 works transparently
-- [ ] GPGS sync (Android only): sign in, unlock achievement, verify appears in Play Games app
-- [ ] Dual sync (Android only): GPGS + server both configured, payloads merge correctly
 
 ---
 
-## 21. Decision Log
+## 20. Decision Log
 
 | Decision | Rationale | Date |
 |---|---|---|
@@ -1082,7 +964,6 @@ Using `axum::test` and an in-memory SQLite database:
 | bcrypt cost 12 | Balances security and registration latency (~300ms on modern hardware); higher than default 10 | 2026-04-19 |
 | No email required for server accounts | Reduces PII collected; simplifies self-hosted deployments; password reset handled by server admin if needed | 2026-04-19 |
 | Self-hosted server as primary sync (not WebDAV) | A proper Rust server gives us auth, leaderboards, and daily challenge seeding for minimal extra effort over WebDAV, and removes a redundant backend | 2026-04-20 |
-| `SyncProvider` trait, not `SyncBackend` match arms | Allows adding Google Play Games Services cleanly; `SyncPlugin` stays backend-agnostic and testable | 2026-04-20 |
-| GPGS as Android enhancement, not replacement | GPGS has no macOS/Linux support; the server must remain universal, with GPGS layered on top for Android players | 2026-04-20 |
+| `SyncProvider` trait, not `SyncBackend` match arms | `SyncPlugin` stays backend-agnostic and testable; new backends can be added without touching the plugin | 2026-04-20 |
 | Dropped WebDAV backend | Redundant once the self-hosted server exists; removing it reduces surface area and simplifies settings UI | 2026-04-20 |
-| `solitaire_gpgs` crate stubbed from day one | Enforces the `SyncProvider` interface contract at compile time even before Android work begins; avoids architectural rework later | 2026-04-20 |
+| Dropped GPGS backend | Redundant with the self-hosted server; adds JNI complexity for no user-visible benefit on the target platforms | 2026-04-28 |

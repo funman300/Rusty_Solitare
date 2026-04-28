@@ -5,7 +5,6 @@ members = [
     "solitaire_data",
     "solitaire_engine",
     "solitaire_server",
-    "solitaire_gpgs",
     "solitaire_app",
     "solitaire_assetgen",
 ]

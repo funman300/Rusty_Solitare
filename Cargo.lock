@@ -6665,15 +6665,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "solitaire_gpgs"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "solitaire_data",
- "solitaire_sync",
-]
-
-[[package]]
 name = "solitaire_server"
 version = "0.1.0"
 dependencies = [
