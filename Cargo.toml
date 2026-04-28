@@ -20,27 +20,27 @@ serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
 uuid        = { version = "1", features = ["v4", "serde"] }
 chrono      = { version = "0.4", features = ["serde"] }
-thiserror   = "1"
+thiserror   = "2"
 rand        = "0.8"
 async-trait = "0.1"
 tokio       = { version = "1", features = ["full"] }
-dirs        = "5"
+dirs        = "6"
 keyring     = "2"
-reqwest     = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+reqwest     = { version = "0.13", features = ["json", "rustls", "rustls-native-certs"], default-features = false }
 
 solitaire_core   = { path = "solitaire_core" }
 solitaire_sync   = { path = "solitaire_sync" }
 solitaire_data   = { path = "solitaire_data" }
 solitaire_engine = { path = "solitaire_engine" }
 
-bevy = "0.15"
+bevy = "0.16"
 kira = "0.9"
 
-axum               = "0.7"
+axum               = "0.8"
 sqlx               = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "macros", "migrate"] }
-jsonwebtoken       = "9"
-bcrypt             = "0.15"
-tower_governor     = "0.4"
+jsonwebtoken       = { version = "10", default-features = false, features = ["rust_crypto"] }
+bcrypt             = "0.19"
+tower_governor     = "0.8"
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy            = "0.15"

@@ -59,8 +59,8 @@ fn advance_on_challenge_win(
         }
         // Human-readable level is 1-based (index 0 → "Challenge 1").
         let level_number = prev.saturating_add(1);
-        toast.send(InfoToastEvent(format!("Challenge {level_number} complete!")));
-        advanced.send(ChallengeAdvancedEvent {
+        toast.write(InfoToastEvent(format!("Challenge {level_number} complete!")));
+        advanced.write(ChallengeAdvancedEvent {
             previous_index: prev,
             new_index: progress.0.challenge_index,
         });
@@ -77,7 +77,7 @@ fn handle_start_challenge_request(
         return;
     }
     if progress.0.level < CHALLENGE_UNLOCK_LEVEL {
-        info_toast.send(InfoToastEvent(format!(
+        info_toast.write(InfoToastEvent(format!(
             "Challenge mode unlocks at level {CHALLENGE_UNLOCK_LEVEL}"
         )));
         return;
@@ -86,7 +86,7 @@ fn handle_start_challenge_request(
         warn!("challenge seed list is empty");
         return;
     };
-    new_game.send(NewGameRequestEvent {
+    new_game.write(NewGameRequestEvent {
         seed: Some(seed),
         mode: Some(GameMode::Challenge),
     });

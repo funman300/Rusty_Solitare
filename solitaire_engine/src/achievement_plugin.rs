@@ -156,10 +156,10 @@ fn evaluate_on_win(
                         }
                     }
                     Reward::BonusXp(amount) => {
-                        xp_awarded.send(XpAwardedEvent { amount });
+                        xp_awarded.write(XpAwardedEvent { amount });
                         let prev_level = progress.0.add_xp(amount);
                         if progress.0.leveled_up_from(prev_level) {
-                            levelups.send(LevelUpEvent {
+                            levelups.write(LevelUpEvent {
                                 previous_level: prev_level,
                                 new_level: progress.0.level,
                                 total_xp: progress.0.total_xp,
@@ -173,7 +173,7 @@ fn evaluate_on_win(
             record.reward_granted = true;
         }
 
-        unlocks.send(AchievementUnlockedEvent(record.clone()));
+        unlocks.write(AchievementUnlockedEvent(record.clone()));
     }
 
     if achievements_changed {
@@ -211,8 +211,8 @@ fn toggle_achievements_screen(
     if !keys.just_pressed(KeyCode::KeyA) {
         return;
     }
-    if let Ok(entity) = screens.get_single() {
-        commands.entity(entity).despawn_recursive();
+    if let Ok(entity) = screens.single() {
+        commands.entity(entity).despawn();
     } else {
         spawn_achievements_screen(&mut commands, &achievements.0);
     }

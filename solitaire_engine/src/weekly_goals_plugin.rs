@@ -92,7 +92,7 @@ fn evaluate_weekly_goals(
             any_change = true;
             if just_completed {
                 bonus_xp = bonus_xp.saturating_add(WEEKLY_GOAL_XP);
-                completions.send(WeeklyGoalCompletedEvent {
+                completions.write(WeeklyGoalCompletedEvent {
                     goal_id: def.id.to_string(),
                     description: def.description.to_string(),
                 });
@@ -101,10 +101,10 @@ fn evaluate_weekly_goals(
     }
 
     if bonus_xp > 0 {
-        xp_awarded.send(XpAwardedEvent { amount: bonus_xp });
+        xp_awarded.write(XpAwardedEvent { amount: bonus_xp });
         let prev_level = progress.0.add_xp(bonus_xp);
         if progress.0.leveled_up_from(prev_level) {
-            levelups.send(LevelUpEvent {
+            levelups.write(LevelUpEvent {
                 previous_level: prev_level,
                 new_level: progress.0.level,
                 total_xp: progress.0.total_xp,

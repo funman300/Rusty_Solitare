@@ -42,8 +42,8 @@ fn toggle_profile_screen(
     if !keys.just_pressed(KeyCode::KeyP) {
         return;
     }
-    if let Ok(entity) = screens.get_single() {
-        commands.entity(entity).despawn_recursive();
+    if let Ok(entity) = screens.single() {
+        commands.entity(entity).despawn();
     } else {
         spawn_profile_screen(
             &mut commands,
@@ -246,7 +246,7 @@ fn spawn_profile_screen(
 }
 
 /// Spawn a fixed-height vertical spacer node.
-fn spawn_spacer(parent: &mut ChildBuilder, height_px: f32) {
+fn spawn_spacer(parent: &mut ChildSpawnerCommands, height_px: f32) {
     parent.spawn(Node {
         height: Val::Px(height_px),
         ..default()

@@ -88,9 +88,9 @@ fn award_xp_on_win(
         let used_undo = game.0.undo_count > 0;
         let amount = xp_for_win(ev.time_seconds, used_undo);
         let prev_level = progress.0.add_xp(amount);
-        xp_awarded.send(XpAwardedEvent { amount });
+        xp_awarded.write(XpAwardedEvent { amount });
         if progress.0.leveled_up_from(prev_level) {
-            levelups.send(LevelUpEvent {
+            levelups.write(LevelUpEvent {
                 previous_level: prev_level,
                 new_level: progress.0.level,
                 total_xp: progress.0.total_xp,

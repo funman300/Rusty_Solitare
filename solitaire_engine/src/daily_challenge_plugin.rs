@@ -174,17 +174,17 @@ fn handle_daily_completion(
             continue;
         }
         progress.0.add_xp(DAILY_BONUS_XP);
-        xp_awarded.send(XpAwardedEvent { amount: DAILY_BONUS_XP });
+        xp_awarded.write(XpAwardedEvent { amount: DAILY_BONUS_XP });
         if let Some(target) = &path.0 {
             if let Err(e) = save_progress_to(target, &progress.0) {
                 warn!("failed to save progress after daily completion: {e}");
             }
         }
-        completed.send(DailyChallengeCompletedEvent {
+        completed.write(DailyChallengeCompletedEvent {
             date: daily.date,
             streak: progress.0.daily_challenge_streak,
         });
-        toast.send(InfoToastEvent("Daily challenge complete! +100 XP".to_string()));
+        toast.write(InfoToastEvent("Daily challenge complete! +100 XP".to_string()));
     }
 }
 
@@ -195,7 +195,7 @@ fn handle_start_daily_request(
     mut announce: EventWriter<DailyGoalAnnouncementEvent>,
 ) {
     if keys.just_pressed(KeyCode::KeyC) {
-        new_game.send(NewGameRequestEvent {
+        new_game.write(NewGameRequestEvent {
             seed: Some(daily.seed),
             mode: None,
         });
@@ -203,7 +203,7 @@ fn handle_start_daily_request(
             .goal_description
             .clone()
             .unwrap_or_else(|| "Daily Challenge".to_string());
-        announce.send(DailyGoalAnnouncementEvent(desc));
+        announce.write(DailyGoalAnnouncementEvent(desc));
     }
 }
 

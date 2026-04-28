@@ -60,7 +60,7 @@ fn handle_start_time_attack_request(
         return;
     }
     if progress.0.level < CHALLENGE_UNLOCK_LEVEL {
-        info_toast.send(InfoToastEvent(format!(
+        info_toast.write(InfoToastEvent(format!(
             "Time Attack unlocks at level {CHALLENGE_UNLOCK_LEVEL}"
         )));
         return;
@@ -70,7 +70,7 @@ fn handle_start_time_attack_request(
         remaining_secs: TIME_ATTACK_DURATION_SECS,
         wins: 0,
     };
-    new_game.send(NewGameRequestEvent {
+    new_game.write(NewGameRequestEvent {
         seed: None,
         mode: Some(GameMode::TimeAttack),
     });
@@ -93,7 +93,7 @@ fn advance_time_attack(
         let wins = session.wins;
         session.active = false;
         session.remaining_secs = 0.0;
-        ended.send(TimeAttackEndedEvent { wins });
+        ended.write(TimeAttackEndedEvent { wins });
     }
 }
 
@@ -108,7 +108,7 @@ fn auto_deal_on_time_attack_win(
             continue;
         }
         session.wins = session.wins.saturating_add(1);
-        new_game.send(NewGameRequestEvent {
+        new_game.write(NewGameRequestEvent {
             seed: None,
             mode: Some(GameMode::TimeAttack),
         });

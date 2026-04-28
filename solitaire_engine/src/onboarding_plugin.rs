@@ -59,7 +59,7 @@ fn dismiss_on_any_input(
     path: Option<Res<SettingsStoragePath>>,
     screens: Query<Entity, With<OnboardingScreen>>,
 ) {
-    let Ok(entity) = screens.get_single() else {
+    let Ok(entity) = screens.single() else {
         return;
     };
     let pressed = keys.get_just_pressed().next().is_some()
@@ -67,7 +67,7 @@ fn dismiss_on_any_input(
     if !pressed {
         return;
     }
-    commands.entity(entity).despawn_recursive();
+    commands.entity(entity).despawn();
     settings.0.first_run_complete = true;
     persist(path.as_deref().map(|p| &p.0), &settings.0);
 }

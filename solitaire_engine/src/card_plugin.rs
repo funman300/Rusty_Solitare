@@ -187,7 +187,7 @@ fn resync_cards_on_settings_change(
     mut state_events: EventWriter<StateChangedEvent>,
 ) {
     if setting_events.read().next().is_some() {
-        state_events.send(StateChangedEvent);
+        state_events.write(StateChangedEvent);
     }
 }
 
@@ -256,7 +256,7 @@ fn sync_cards(
     // Despawn any entity whose card is no longer tracked.
     for (card_id, (entity, _)) in &existing {
         if !live_ids.contains(card_id) {
-            commands.entity(*entity).despawn_recursive();
+            commands.entity(*entity).despawn();
         }
     }
 
@@ -443,7 +443,7 @@ fn update_card_entity(
 
     // Despawn the old label child and respawn a fresh one, so rank/suit/
     // colour/visibility all stay in sync with the card's current state.
-    commands.entity(entity).despawn_descendants();
+    commands.entity(entity).despawn_related::<Children>();
     commands.entity(entity).with_children(|b| {
         b.spawn((
             CardLabel,
@@ -558,7 +558,7 @@ fn tick_flip_anim(
                     transform.scale.x = 0.0;
                     // Fire the reveal event exactly once, at the phase transition,
                     // so the flip sound is synchronised with the visual face reveal.
-                    reveal_events.send(CardFaceRevealedEvent(card_entity.card_id));
+                    reveal_events.write(CardFaceRevealedEvent(card_entity.card_id));
                 }
             }
             FlipPhase::ScalingUp => {
@@ -592,7 +592,7 @@ fn update_drag_shadow(
     if drag.is_idle() {
         // No drag in progress — remove shadow if it exists.
         if let Some(e) = shadow.take() {
-            commands.entity(e).despawn_recursive();
+            commands.entity(e).despawn();
         }
         return;
     }
@@ -847,9 +847,9 @@ fn cursor_world_pos(
     windows: &Query<&Window, With<bevy::window::PrimaryWindow>>,
     cameras: &Query<(&Camera, &GlobalTransform)>,
 ) -> Option<Vec2> {
-    let window = windows.get_single().ok()?;
+    let window = windows.single().ok()?;
     let cursor = window.cursor_position()?;
-    let (camera, camera_transform) = cameras.get_single().ok()?;
+    let (camera, camera_transform) = cameras.single().ok()?;
     camera.viewport_to_world_2d(camera_transform, cursor).ok()
 }
 
@@ -911,7 +911,7 @@ fn apply_stock_empty_indicator(
     commands: &mut Commands,
     game: &GameState,
     pile_markers: &mut Query<(Entity, &PileMarker, &mut Sprite)>,
-    label_children: &Query<(Entity, &Parent), With<StockEmptyLabel>>,
+    label_children: &Query<(Entity, &ChildOf), With<StockEmptyLabel>>,
     layout: &Layout,
 ) {
     let stock_empty = game
@@ -931,7 +931,7 @@ fn apply_stock_empty_indicator(
             // Spawn the "↺" label only if one does not already exist.
             let already_has_label = label_children
                 .iter()
-                .any(|(_, parent)| parent.get() == entity);
+                .any(|(_, parent)| parent.parent() == entity);
             if !already_has_label {
                 let font_size = layout.card_size.x * 0.4;
                 commands.entity(entity).with_children(|b| {
@@ -950,8 +950,8 @@ fn apply_stock_empty_indicator(
 
             // Despawn any existing "↺" label children.
             for (label_entity, parent) in label_children.iter() {
-                if parent.get() == entity {
-                    commands.entity(label_entity).despawn_recursive();
+                if parent.parent() == entity {
+                    commands.entity(label_entity).despawn();
                 }
             }
         }
@@ -965,7 +965,7 @@ fn update_stock_empty_indicator_startup(
     game: Res<GameStateResource>,
     layout: Option<Res<LayoutResource>>,
     mut pile_markers: Query<(Entity, &PileMarker, &mut Sprite)>,
-    label_children: Query<(Entity, &Parent), With<StockEmptyLabel>>,
+    label_children: Query<(Entity, &ChildOf), With<StockEmptyLabel>>,
 ) {
     let Some(layout) = layout else { return };
     apply_stock_empty_indicator(
@@ -985,7 +985,7 @@ fn update_stock_empty_indicator(
     game: Res<GameStateResource>,
     layout: Option<Res<LayoutResource>>,
     mut pile_markers: Query<(Entity, &PileMarker, &mut Sprite)>,
-    label_children: Query<(Entity, &Parent), With<StockEmptyLabel>>,
+    label_children: Query<(Entity, &ChildOf), With<StockEmptyLabel>>,
 ) {
     if events.read().next().is_none() {
         return;

@@ -64,9 +64,7 @@ fn build_router_inner(pool: SqlitePool, rate_limit: bool) -> Router {
                 .finish()
                 .expect("invalid governor config"),
         );
-        auth_routes.layer(GovernorLayer {
-            config: governor_conf,
-        })
+        auth_routes.layer(GovernorLayer::new(governor_conf))
     } else {
         auth_routes
     };

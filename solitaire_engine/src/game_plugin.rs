@@ -169,7 +169,7 @@ fn handle_new_game(
         if needs_confirm && !confirm_already_open {
             // Despawn any stale game-over overlay before showing confirm dialog.
             for entity in &game_over_screens {
-                commands.entity(entity).despawn_recursive();
+                commands.entity(entity).despawn();
             }
             spawn_confirm_dialog(&mut commands, *ev);
             continue;
@@ -177,10 +177,10 @@ fn handle_new_game(
 
         // Despawn confirm and game-over overlays before starting the new game.
         for entity in &confirm_screens {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
         for entity in &game_over_screens {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
 
         let seed = ev.seed.unwrap_or_else(seed_from_system_time);
@@ -199,7 +199,7 @@ fn handle_new_game(
                 warn!("game_state: failed to delete saved game: {e}");
             }
         }
-        changed.send(StateChangedEvent);
+        changed.write(StateChangedEvent);
     }
 }
 
@@ -289,7 +289,7 @@ fn handle_confirm_input(
     screens: Query<(Entity, &OriginalNewGameRequest), With<ConfirmNewGameScreen>>,
     mut new_game: EventWriter<NewGameRequestEvent>,
 ) {
-    let Ok((entity, original)) = screens.get_single() else {
+    let Ok((entity, original)) = screens.single() else {
         return;
     };
     let Some(keys) = keys else {
@@ -300,16 +300,16 @@ fn handle_confirm_input(
     let cancelled = keys.just_pressed(KeyCode::KeyN) || keys.just_pressed(KeyCode::Escape);
 
     if confirmed {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
         // Re-send with move_count already 0 would bypass the dialog next time.
         // We fire the event — handle_new_game will skip the dialog because
         // the screen is despawned before the next read.
-        new_game.send(NewGameRequestEvent {
+        new_game.write(NewGameRequestEvent {
             seed: original.0.seed,
             mode: original.0.mode,
         });
     } else if cancelled {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 
@@ -347,9 +347,9 @@ fn handle_draw(
             Ok(()) => {
                 // Fire a flip event for each card that moved from stock to waste.
                 for id in drawn_ids {
-                    flipped.send(CardFlippedEvent(id));
+                    flipped.write(CardFlippedEvent(id));
                 }
-                changed.send(StateChangedEvent);
+                changed.write(StateChangedEvent);
             }
             Err(e) => warn!("draw rejected: {e}"),
         }
@@ -385,12 +385,12 @@ fn handle_move(
                         .and_then(|p| p.cards.last())
                         .is_some_and(|c| c.id == fid && c.face_up)
                     {
-                        flipped.send(crate::events::CardFlippedEvent(fid));
+                        flipped.write(crate::events::CardFlippedEvent(fid));
                     }
                 }
-                changed.send(StateChangedEvent);
+                changed.write(StateChangedEvent);
                 if !was_won && game.0.is_won {
-                    won.send(GameWonEvent {
+                    won.write(GameWonEvent {
                         score: game.0.score,
                         time_seconds: game.0.elapsed_seconds,
                     });
@@ -418,10 +418,10 @@ fn handle_undo(
     for _ in undos.read() {
         match game.0.undo() {
             Ok(()) => {
-                changed.send(StateChangedEvent);
+                changed.write(StateChangedEvent);
             }
             Err(MoveError::UndoStackEmpty) => {
-                toast.send(InfoToastEvent("Nothing to undo".to_string()));
+                toast.write(InfoToastEvent("Nothing to undo".to_string()));
             }
             Err(e) => warn!("undo rejected: {e}"),
         }
@@ -523,7 +523,7 @@ fn check_no_moves(
     let moves_ok = has_legal_moves(&game.0);
     if moves_ok || game.0.is_won {
         for entity in &game_over_screens {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 
@@ -532,7 +532,7 @@ fn check_no_moves(
     }
 
     if !moves_ok && !*already_fired {
-        toast.send(InfoToastEvent(
+        toast.write(InfoToastEvent(
             "No moves available \u{2014} press D to draw or N for a new game".to_string(),
         ));
         *already_fired = true;
@@ -639,12 +639,12 @@ fn handle_game_over_input(
     };
 
     if keys.just_pressed(KeyCode::KeyN) || keys.just_pressed(KeyCode::Escape) {
-        new_game.send(NewGameRequestEvent::default());
+        new_game.write(NewGameRequestEvent::default());
     } else if keys.just_pressed(KeyCode::KeyU) {
         for entity in &screens {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
-        undo.send(UndoRequestEvent);
+        undo.write(UndoRequestEvent);
     }
 }
 

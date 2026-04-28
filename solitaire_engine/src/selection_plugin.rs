@@ -200,11 +200,11 @@ fn handle_selection_keys(
     if keys.just_pressed(KeyCode::Tab) {
         let next = cycle_next_pile(&available, selection.selected_pile.as_ref());
         if next.is_none() {
-            info_toast.send(InfoToastEvent("No cards to select".to_string()));
+            info_toast.write(InfoToastEvent("No cards to select".to_string()));
         } else if selection.selected_pile.is_some()
             && did_wrap(&available, selection.selected_pile.as_ref(), next.as_ref())
         {
-            info_toast.send(InfoToastEvent("Back to first card".to_string()));
+            info_toast.write(InfoToastEvent("Back to first card".to_string()));
         }
         selection.selected_pile = next;
         return;
@@ -236,7 +236,7 @@ fn handle_selection_keys(
                 // --- Priority 1: foundation move (single card) ---
                 let foundation_dest = try_foundation_dest(card, &game.0);
                 if let Some(dest) = foundation_dest {
-                    moves.send(MoveRequestEvent {
+                    moves.write(MoveRequestEvent {
                         from: pile.clone(),
                         to: dest,
                         count: 1,
@@ -260,7 +260,7 @@ fn handle_selection_keys(
                     if let Some((dest, count)) =
                         best_tableau_destination_for_stack(bottom, pile, &game.0, run_len)
                     {
-                        moves.send(MoveRequestEvent {
+                        moves.write(MoveRequestEvent {
                             from: pile.clone(),
                             to: dest,
                             count,
@@ -274,7 +274,7 @@ fn handle_selection_keys(
                 // Covers non-tableau sources (Waste, Foundation) that have no
                 // stack-move logic.
                 if let Some(dest) = best_destination(card, &game.0) {
-                    moves.send(MoveRequestEvent {
+                    moves.write(MoveRequestEvent {
                         from: pile.clone(),
                         to: dest,
                         count: 1,
@@ -343,7 +343,7 @@ fn update_selection_highlight(
 ) {
     // Always despawn any existing highlight first.
     for entity in &highlights {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 
     let Some(ref pile) = selection.selected_pile else {

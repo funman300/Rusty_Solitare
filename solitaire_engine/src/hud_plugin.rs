@@ -325,7 +325,7 @@ fn update_hud(
     if game.is_changed() {
         let g = &game.0;
         let is_zen = g.mode == GameMode::Zen;
-        if let Ok(mut t) = score_q.get_single_mut() {
+        if let Ok(mut t) = score_q.single_mut() {
             // Zen mode suppresses score display per spec ("No score display").
             **t = if is_zen {
                 String::new()
@@ -333,10 +333,10 @@ fn update_hud(
                 format!("Score: {}", g.score)
             };
         }
-        if let Ok(mut t) = moves_q.get_single_mut() {
+        if let Ok(mut t) = moves_q.single_mut() {
             **t = format!("Moves: {}", g.move_count);
         }
-        if let Ok(mut t) = mode_q.get_single_mut() {
+        if let Ok(mut t) = mode_q.single_mut() {
             **t = match g.mode {
                 GameMode::Classic => match g.draw_mode {
                     DrawMode::DrawOne => String::new(),
@@ -349,7 +349,7 @@ fn update_hud(
         }
 
         // --- Daily challenge constraint (with time-low colour warning) ---
-        if let Ok((mut t, mut color)) = challenge_q.get_single_mut() {
+        if let Ok((mut t, mut color)) = challenge_q.single_mut() {
             if g.is_won {
                 **t = String::new();
             } else if let Some(dc) = daily.as_deref() {
@@ -364,7 +364,7 @@ fn update_hud(
         }
 
         // --- Undo count ---
-        if let Ok((mut t, mut color)) = undos_q.get_single_mut() {
+        if let Ok((mut t, mut color)) = undos_q.single_mut() {
             let count = g.undo_count;
             if count == 0 {
                 **t = String::new();
@@ -377,7 +377,7 @@ fn update_hud(
         }
 
         // --- Recycle counter (both modes, hidden until first recycle) ---
-        if let Ok(mut t) = recycles_q.get_single_mut() {
+        if let Ok(mut t) = recycles_q.single_mut() {
             **t = if g.recycle_count > 0 {
                 format!("Recycles: {}", g.recycle_count)
             } else {
@@ -386,7 +386,7 @@ fn update_hud(
         }
 
         // --- Draw-cycle indicator (Draw-Three mode only) ---
-        if let Ok(mut t) = draw_cycle_q.get_single_mut() {
+        if let Ok(mut t) = draw_cycle_q.single_mut() {
             **t = if g.is_won || g.draw_mode != DrawMode::DrawThree {
                 // Hide when not in Draw-Three or after the game is won.
                 String::new()
@@ -405,7 +405,7 @@ fn update_hud(
     let is_zen = game.0.mode == GameMode::Zen;
     let update_time = (ta_active || game.is_changed()) && !is_zen;
     if update_time {
-        if let Ok(mut t) = time_q.get_single_mut() {
+        if let Ok(mut t) = time_q.single_mut() {
             if let Some(ta) = time_attack.as_ref().filter(|ta| ta.active) {
                 let remaining = ta.remaining_secs.max(0.0) as u64;
                 let m = remaining / 60;
@@ -422,7 +422,7 @@ fn update_hud(
         // Clear the time display immediately whenever Zen mode is active —
         // do not guard on game.is_changed() so it clears on the same frame
         // the player presses Z, before any move is made.
-        if let Ok(mut t) = time_q.get_single_mut() {
+        if let Ok(mut t) = time_q.single_mut() {
             **t = String::new();
         }
     }
@@ -432,7 +432,7 @@ fn update_hud(
     let ac_active = auto_complete.as_ref().is_some_and(|ac| ac.active);
     let ac_changed = auto_complete.as_ref().is_some_and(|ac| ac.is_changed());
     if ac_changed || game.is_changed() {
-        if let Ok(mut t) = auto_q.get_single_mut() {
+        if let Ok(mut t) = auto_q.single_mut() {
             **t = if ac_active {
                 "AUTO".to_string()
             } else {
@@ -451,7 +451,7 @@ fn update_selection_hud(
     selection: Option<Res<SelectionState>>,
     mut q: Query<&mut Text, With<HudSelection>>,
 ) {
-    let Ok(mut t) = q.get_single_mut() else { return };
+    let Ok(mut t) = q.single_mut() else { return };
     let label = match selection.as_deref().and_then(|s| s.selected_pile.as_ref()) {
         None => String::new(),
         Some(PileType::Waste) => "▶ Waste".to_string(),
@@ -480,7 +480,7 @@ fn announce_auto_complete(
 ) {
     let now_active = auto_complete.as_ref().is_some_and(|ac| ac.active);
     if now_active && !*was_active {
-        toast.send(InfoToastEvent("Auto-completing...".to_string()));
+        toast.write(InfoToastEvent("Auto-completing...".to_string()));
     }
     *was_active = now_active;
 }

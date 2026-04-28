@@ -137,7 +137,7 @@ fn update_stats_on_new_game(
             stats.0.record_abandoned();
             persist(&path, &stats.0, "abandoned game");
             if streak > 1 {
-                toast.send(InfoToastEvent(format!("Streak of {streak} broken!")));
+                toast.write(InfoToastEvent(format!("Streak of {streak} broken!")));
             }
         }
     }
@@ -163,7 +163,7 @@ fn handle_forfeit(
             stats.0.record_abandoned();
             persist(&path, &stats.0, "forfeit");
             if streak > 1 {
-                toast.send(InfoToastEvent(format!("Streak of {streak} broken!")));
+                toast.write(InfoToastEvent(format!("Streak of {streak} broken!")));
             }
         }
         // Reset auto-complete so the badge and chime don't carry over to the
@@ -171,8 +171,8 @@ fn handle_forfeit(
         if let Some(ref mut ac) = auto_complete {
             **ac = AutoCompleteState::default();
         }
-        toast.send(InfoToastEvent("Game forfeited".to_string()));
-        new_game.send(NewGameRequestEvent::default());
+        toast.write(InfoToastEvent("Game forfeited".to_string()));
+        new_game.write(NewGameRequestEvent::default());
     }
 }
 
@@ -187,8 +187,8 @@ fn toggle_stats_screen(
     if !keys.just_pressed(KeyCode::KeyS) {
         return;
     }
-    if let Ok(entity) = screens.get_single() {
-        commands.entity(entity).despawn_recursive();
+    if let Ok(entity) = screens.single() {
+        commands.entity(entity).despawn();
     } else {
         spawn_stats_screen(
             &mut commands,
@@ -349,7 +349,7 @@ fn spawn_stats_screen(
 
 /// Spawn a single stat cell: a large value label on top and a small grey
 /// descriptor below, inside a fixed-width column node with a [`StatsCell`] marker.
-fn spawn_stat_cell(parent: &mut ChildBuilder, value: &str, label: &str) {
+fn spawn_stat_cell(parent: &mut ChildSpawnerCommands, value: &str, label: &str) {
     parent
         .spawn((
             StatsCell,

@@ -52,7 +52,7 @@ fn update_cursor_icon(
     game: Option<Res<GameStateResource>>,
     mut commands: Commands,
 ) {
-    let Ok((win_entity, window)) = windows.get_single() else { return };
+    let Ok((win_entity, window)) = windows.single() else { return };
 
     if !drag.is_idle() {
         commands
@@ -63,7 +63,7 @@ fn update_cursor_icon(
 
     let hovering = (|| {
         let cursor = window.cursor_position()?;
-        let (camera, cam_xf) = cameras.get_single().ok()?;
+        let (camera, cam_xf) = cameras.single().ok()?;
         let world = camera.viewport_to_world_2d(cam_xf, cursor).ok()?;
         let layout = layout.as_ref()?.0.clone();
         let game = game.as_ref()?;

@@ -255,7 +255,7 @@ fn cache_win_data(
         pending.challenge_level = challenge_level;
 
         if is_new_record {
-            toast.send(InfoToastEvent("New Record!".to_string()));
+            toast.write(InfoToastEvent("New Record!".to_string()));
         }
     }
     for ev in xp.read() {
@@ -321,7 +321,7 @@ fn spawn_win_summary_after_delay(
         *delay = Some(WIN_SUMMARY_DELAY_SECS);
         // Clear any stale overlay from a previous win.
         for entity in &overlays {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 
@@ -362,9 +362,9 @@ fn handle_win_summary_buttons(
             WinSummaryButton::PlayAgain => {
                 // Despawn the modal.
                 for entity in &overlays {
-                    commands.entity(entity).despawn_recursive();
+                    commands.entity(entity).despawn();
                 }
-                new_game.send(NewGameRequestEvent::default());
+                new_game.write(NewGameRequestEvent::default());
             }
         }
     }
@@ -543,7 +543,7 @@ const MAX_ACHIEVEMENTS_SHOWN: usize = 3;
 /// Shows at most [`MAX_ACHIEVEMENTS_SHOWN`] names. When more achievements were
 /// unlocked than the cap, appends a "...and N more" line so the player knows
 /// there are additional unlocks visible on the achievements screen.
-fn spawn_achievements_section(card: &mut ChildBuilder, names: &[String]) {
+fn spawn_achievements_section(card: &mut ChildSpawnerCommands, names: &[String]) {
     card.spawn((
         Text::new("Achievements Unlocked"),
         TextFont { font_size: 18.0, ..default() },

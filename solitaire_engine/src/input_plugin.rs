@@ -126,7 +126,7 @@ fn handle_keyboard(
             // Countdown expired without a second N press — notify the player.
             if *confirm_pending {
                 *confirm_pending = false;
-                ev.info_toast.send(InfoToastEvent("New game cancelled".to_string()));
+                ev.info_toast.write(InfoToastEvent("New game cancelled".to_string()));
             }
         }
     }
@@ -140,7 +140,7 @@ fn handle_keyboard(
 
     if keys.just_pressed(KeyCode::KeyU) {
         if *forfeit_countdown > 0.0 { *forfeit_countdown = 0.0; }
-        ev.undo.send(UndoRequestEvent);
+        ev.undo.write(UndoRequestEvent);
     }
     if keys.just_pressed(KeyCode::KeyN) {
         // If a Time Attack session is running, cancel it and start a Classic game.
@@ -148,8 +148,8 @@ fn handle_keyboard(
             if session.active {
                 session.active = false;
                 session.remaining_secs = 0.0;
-                ev.info_toast.send(InfoToastEvent("Time Attack ended".to_string()));
-                ev.new_game.send(NewGameRequestEvent {
+                ev.info_toast.write(InfoToastEvent("Time Attack ended".to_string()));
+                ev.new_game.write(NewGameRequestEvent {
                     seed: None,
                     mode: Some(solitaire_core::game_state::GameMode::Classic),
                 });
@@ -162,19 +162,19 @@ fn handle_keyboard(
         let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
         if shift_held || !active_game {
             // Shift+N or no active game — start immediately, no confirmation.
-            ev.new_game.send(NewGameRequestEvent::default());
+            ev.new_game.write(NewGameRequestEvent::default());
             *confirm_countdown = 0.0;
             *confirm_pending = false;
         } else if *confirm_countdown > 0.0 {
             // Second press within the window — confirmed.
-            ev.new_game.send(NewGameRequestEvent::default());
+            ev.new_game.write(NewGameRequestEvent::default());
             *confirm_countdown = 0.0;
             *confirm_pending = false;
         } else {
             // First press on an active game — require confirmation.
             *confirm_countdown = NEW_GAME_CONFIRM_WINDOW;
             *confirm_pending = true;
-            ev.confirm_event.send(NewGameConfirmEvent);
+            ev.confirm_event.write(NewGameConfirmEvent);
         }
     }
     if keys.just_pressed(KeyCode::KeyZ) {
@@ -183,19 +183,19 @@ fn handle_keyboard(
         // X is gated separately by ChallengePlugin.
         let level = progress.as_ref().map_or(0, |p| p.0.level);
         if level >= CHALLENGE_UNLOCK_LEVEL {
-            ev.new_game.send(NewGameRequestEvent {
+            ev.new_game.write(NewGameRequestEvent {
                 seed: None,
                 mode: Some(solitaire_core::game_state::GameMode::Zen),
             });
         } else {
-            ev.info_toast.send(InfoToastEvent(format!(
+            ev.info_toast.write(InfoToastEvent(format!(
                 "Zen mode unlocks at level {CHALLENGE_UNLOCK_LEVEL}"
             )));
         }
     }
     if keys.just_pressed(KeyCode::KeyD) || keys.just_pressed(KeyCode::Space) {
         if *forfeit_countdown > 0.0 { *forfeit_countdown = 0.0; }
-        ev.draw.send(DrawRequestEvent);
+        ev.draw.write(DrawRequestEvent);
     }
     // H — cycle through all available hints on each press, highlighting the
     // source card yellow for 1.5 s. The index wraps around once all hints have
@@ -204,13 +204,13 @@ fn handle_keyboard(
         if *forfeit_countdown > 0.0 { *forfeit_countdown = 0.0; }
         if let Some(ref g) = game {
             if g.0.is_won {
-                ev.info_toast.send(InfoToastEvent(
+                ev.info_toast.write(InfoToastEvent(
                     "Game won! Press N for a new game".to_string(),
                 ));
             } else if let Some(ref layout_res) = layout {
                     let hints = all_hints(&g.0);
                     if hints.is_empty() {
-                        ev.info_toast.send(InfoToastEvent("No hints available".to_string()));
+                        ev.info_toast.write(InfoToastEvent("No hints available".to_string()));
                     } else {
                         // Pick the hint at the current cycle index (wrapping) and advance.
                         let idx = hint_cycle.0 % hints.len();
@@ -229,7 +229,7 @@ fn handle_keyboard(
                             } else {
                                 "Hint: draw from stock (D)".to_string()
                             };
-                            ev.info_toast.send(InfoToastEvent(msg));
+                            ev.info_toast.write(InfoToastEvent(msg));
                         } else {
                             // Find the top face-up card in the source pile and highlight it.
                             let top_card_id = g.0.piles.get(from)
@@ -251,7 +251,7 @@ fn handle_keyboard(
                                 }
                                 // Emit HintVisualEvent so the destination pile
                                 // marker is also tinted gold for 2 s.
-                                ev.hint_visual.send(HintVisualEvent {
+                                ev.hint_visual.write(HintVisualEvent {
                                     source_card_id: card_id,
                                     dest_pile: to.clone(),
                                 });
@@ -273,7 +273,7 @@ fn handle_keyboard(
                                 }
                                 _ => "Hint: move card".to_string(),
                             };
-                            ev.info_toast.send(InfoToastEvent(msg));
+                            ev.info_toast.write(InfoToastEvent(msg));
                         }
                     }
             }
@@ -287,12 +287,12 @@ fn handle_keyboard(
         if active_game {
             if *forfeit_countdown > 0.0 {
                 // Second press within the confirmation window — confirmed.
-                ev.forfeit.send(ForfeitEvent);
+                ev.forfeit.write(ForfeitEvent);
                 *forfeit_countdown = 0.0;
             } else {
                 // First press — start the countdown and warn the player.
                 *forfeit_countdown = FORFEIT_CONFIRM_WINDOW;
-                ev.info_toast.send(InfoToastEvent("Press G again to forfeit".to_string()));
+                ev.info_toast.write(InfoToastEvent("Press G again to forfeit".to_string()));
             }
         }
     }
@@ -327,7 +327,7 @@ fn handle_fullscreen(
     if !keys.just_pressed(KeyCode::F11) {
         return;
     }
-    let Ok(mut window) = windows.get_single_mut() else { return };
+    let Ok(mut window) = windows.single_mut() else { return };
     let new_mode = match window.mode {
         WindowMode::Windowed => WindowMode::BorderlessFullscreen(MonitorSelection::Current),
         _ => WindowMode::Windowed,
@@ -337,7 +337,7 @@ fn handle_fullscreen(
         WindowMode::Windowed => "Fullscreen: off",
         _ => "Fullscreen: on",
     };
-    toast.send(InfoToastEvent(label.to_string()));
+    toast.write(InfoToastEvent(label.to_string()));
 }
 
 fn handle_stock_click(
@@ -366,7 +366,7 @@ fn handle_stock_click(
         return;
     };
     if point_in_rect(world, stock_pos, layout.0.card_size) {
-        draw.send(DrawRequestEvent);
+        draw.write(DrawRequestEvent);
     }
 }
 
@@ -517,14 +517,14 @@ fn end_drag(
                     _ => false,
                 };
                 if ok {
-                    moves.send(MoveRequestEvent {
+                    moves.write(MoveRequestEvent {
                         from: origin.clone(),
                         to: target.clone(),
                         count,
                     });
                     fired = true;
                 } else {
-                    rejected.send(MoveRejectedEvent {
+                    rejected.write(MoveRejectedEvent {
                         from: origin.clone(),
                         to: target.clone(),
                         count,
@@ -552,7 +552,7 @@ fn end_drag(
     // Either the move succeeded (GamePlugin will also fire StateChangedEvent)
     // or it didn't — in both cases we emit one so cards resync to the current
     // game state. Duplicate events are harmless.
-    changed.send(StateChangedEvent);
+    changed.write(StateChangedEvent);
     let _ = fired;
 }
 
@@ -564,9 +564,9 @@ fn cursor_world(
     windows: &Query<&Window, With<PrimaryWindow>>,
     cameras: &Query<(&Camera, &GlobalTransform)>,
 ) -> Option<Vec2> {
-    let window = windows.get_single().ok()?;
+    let window = windows.single().ok()?;
     let cursor = window.cursor_position()?;
-    let (camera, camera_transform) = cameras.get_single().ok()?;
+    let (camera, camera_transform) = cameras.single().ok()?;
     camera.viewport_to_world_2d(camera_transform, cursor).ok()
 }
 
@@ -844,7 +844,7 @@ fn handle_double_click(
 
         // Priority 1: move the single top card (foundation preferred, then tableau).
         if let Some(dest) = best_destination(top_card, &game.0) {
-            moves.send(MoveRequestEvent {
+            moves.write(MoveRequestEvent {
                 from: pile,
                 to: dest,
                 count: 1,
@@ -864,7 +864,7 @@ fn handle_double_click(
                 &game.0,
                 card_ids.len(),
             ) {
-                moves.send(MoveRequestEvent {
+                moves.write(MoveRequestEvent {
                     from: pile,
                     to: dest,
                     count,
@@ -874,7 +874,7 @@ fn handle_double_click(
                 // sound and shake the source pile cards as feedback.
                 // `MoveRejectedEvent` with `from == to` routes the shake to
                 // the source pile (which `start_shake_anim` reads from `ev.to`).
-                rejected.send(MoveRejectedEvent {
+                rejected.write(MoveRejectedEvent {
                     from: pile.clone(),
                     to: pile,
                     count: card_ids.len(),

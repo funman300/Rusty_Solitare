@@ -465,7 +465,7 @@ fn drive_toast_display(
         active.timer -= dt;
         if active.timer <= 0.0 {
             // Despawn the toast entity and clear the active slot.
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
             active.entity = None;
             active.timer = 0.0;
         }
@@ -532,7 +532,7 @@ fn tick_toasts(
     for (entity, mut timer) in &mut toasts {
         timer.0 -= dt;
         if timer.0 <= 0.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }

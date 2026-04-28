@@ -203,7 +203,7 @@ fn handle_volume_keys(
         return;
     }
     persist(&path, &settings.0);
-    changed.send(SettingsChangedEvent(settings.0.clone()));
+    changed.write(SettingsChangedEvent(settings.0.clone()));
 }
 
 /// Opens or closes the Settings panel when `O` is pressed.
@@ -256,11 +256,11 @@ fn sync_settings_panel_visibility(
         }
     } else {
         // Save the current scroll offset before despawning the panel.
-        if let Ok(sp) = scroll_nodes.get_single() {
+        if let Ok(sp) = scroll_nodes.single() {
             scroll_pos.0 = sp.offset_y;
         }
         for entity in &panels {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }
@@ -402,8 +402,8 @@ fn handle_settings_buttons(
                 let after = settings.0.adjust_sfx_volume(-SFX_STEP);
                 if (before - after).abs() > f32::EPSILON {
                     persist(&path, &settings.0);
-                    changed.send(SettingsChangedEvent(settings.0.clone()));
-                    if let Ok(mut t) = sfx_text.get_single_mut() {
+                    changed.write(SettingsChangedEvent(settings.0.clone()));
+                    if let Ok(mut t) = sfx_text.single_mut() {
                         **t = format!("{:.2}", after);
                     }
                 }
@@ -413,8 +413,8 @@ fn handle_settings_buttons(
                 let after = settings.0.adjust_sfx_volume(SFX_STEP);
                 if (before - after).abs() > f32::EPSILON {
                     persist(&path, &settings.0);
-                    changed.send(SettingsChangedEvent(settings.0.clone()));
-                    if let Ok(mut t) = sfx_text.get_single_mut() {
+                    changed.write(SettingsChangedEvent(settings.0.clone()));
+                    if let Ok(mut t) = sfx_text.single_mut() {
                         **t = format!("{:.2}", after);
                     }
                 }
@@ -424,8 +424,8 @@ fn handle_settings_buttons(
                 let after = settings.0.adjust_music_volume(-SFX_STEP);
                 if (before - after).abs() > f32::EPSILON {
                     persist(&path, &settings.0);
-                    changed.send(SettingsChangedEvent(settings.0.clone()));
-                    if let Ok(mut t) = music_text.get_single_mut() {
+                    changed.write(SettingsChangedEvent(settings.0.clone()));
+                    if let Ok(mut t) = music_text.single_mut() {
                         **t = format!("{:.2}", after);
                     }
                 }
@@ -435,8 +435,8 @@ fn handle_settings_buttons(
                 let after = settings.0.adjust_music_volume(SFX_STEP);
                 if (before - after).abs() > f32::EPSILON {
                     persist(&path, &settings.0);
-                    changed.send(SettingsChangedEvent(settings.0.clone()));
-                    if let Ok(mut t) = music_text.get_single_mut() {
+                    changed.write(SettingsChangedEvent(settings.0.clone()));
+                    if let Ok(mut t) = music_text.single_mut() {
                         **t = format!("{:.2}", after);
                     }
                 }
@@ -447,8 +447,8 @@ fn handle_settings_buttons(
                     DrawMode::DrawThree => DrawMode::DrawOne,
                 };
                 persist(&path, &settings.0);
-                changed.send(SettingsChangedEvent(settings.0.clone()));
-                if let Ok(mut t) = draw_text.get_single_mut() {
+                changed.write(SettingsChangedEvent(settings.0.clone()));
+                if let Ok(mut t) = draw_text.single_mut() {
                     **t = draw_mode_label(&settings.0.draw_mode);
                 }
             }
@@ -459,8 +459,8 @@ fn handle_settings_buttons(
                     AnimSpeed::Instant => AnimSpeed::Normal,
                 };
                 persist(&path, &settings.0);
-                changed.send(SettingsChangedEvent(settings.0.clone()));
-                if let Ok(mut t) = anim_speed_text.get_single_mut() {
+                changed.write(SettingsChangedEvent(settings.0.clone()));
+                if let Ok(mut t) = anim_speed_text.single_mut() {
                     **t = anim_speed_label(&settings.0.animation_speed);
                 }
             }
@@ -471,31 +471,31 @@ fn handle_settings_buttons(
                     Theme::Dark => Theme::Green,
                 };
                 persist(&path, &settings.0);
-                changed.send(SettingsChangedEvent(settings.0.clone()));
-                if let Ok(mut t) = theme_text.get_single_mut() {
+                changed.write(SettingsChangedEvent(settings.0.clone()));
+                if let Ok(mut t) = theme_text.single_mut() {
                     **t = theme_label(&settings.0.theme);
                 }
             }
             SettingsButton::ToggleColorBlind => {
                 settings.0.color_blind_mode = !settings.0.color_blind_mode;
                 persist(&path, &settings.0);
-                changed.send(SettingsChangedEvent(settings.0.clone()));
-                if let Ok(mut t) = color_blind_text.get_single_mut() {
+                changed.write(SettingsChangedEvent(settings.0.clone()));
+                if let Ok(mut t) = color_blind_text.single_mut() {
                     **t = color_blind_label(settings.0.color_blind_mode);
                 }
             }
             SettingsButton::SelectCardBack(idx) => {
                 settings.0.selected_card_back = *idx;
                 persist(&path, &settings.0);
-                changed.send(SettingsChangedEvent(settings.0.clone()));
+                changed.write(SettingsChangedEvent(settings.0.clone()));
             }
             SettingsButton::SelectBackground(idx) => {
                 settings.0.selected_background = *idx;
                 persist(&path, &settings.0);
-                changed.send(SettingsChangedEvent(settings.0.clone()));
+                changed.write(SettingsChangedEvent(settings.0.clone()));
             }
             SettingsButton::SyncNow => {
-                manual_sync.send(ManualSyncRequestEvent);
+                manual_sync.write(ManualSyncRequestEvent);
             }
             SettingsButton::Done => {
                 screen.0 = false;
@@ -880,7 +880,7 @@ fn spawn_settings_panel(
         });
 }
 
-fn section_label(parent: &mut ChildBuilder, title: &str) {
+fn section_label(parent: &mut ChildSpawnerCommands, title: &str) {
     parent.spawn((
         Text::new(title),
         TextFont {
@@ -893,7 +893,7 @@ fn section_label(parent: &mut ChildBuilder, title: &str) {
 
 /// Generic volume row: `Label  0.80  [−]  [+]`
 fn volume_row<Marker: Component>(
-    parent: &mut ChildBuilder,
+    parent: &mut ChildSpawnerCommands,
     label: &str,
     value: f32,
     marker: Marker,
@@ -924,7 +924,7 @@ fn volume_row<Marker: Component>(
         });
 }
 
-fn icon_button(parent: &mut ChildBuilder, label: &str, action: SettingsButton) {
+fn icon_button(parent: &mut ChildSpawnerCommands, label: &str, action: SettingsButton) {
     parent
         .spawn((
             action,

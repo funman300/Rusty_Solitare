@@ -25,8 +25,8 @@ fn toggle_help_screen(
     if !keys.just_pressed(KeyCode::F1) {
         return;
     }
-    if let Ok(entity) = screens.get_single() {
-        commands.entity(entity).despawn_recursive();
+    if let Ok(entity) = screens.single() {
+        commands.entity(entity).despawn();
     } else {
         spawn_help_screen(&mut commands);
     }

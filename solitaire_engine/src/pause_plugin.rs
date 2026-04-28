@@ -90,12 +90,12 @@ fn toggle_pause(
     if let Some(ref mut d) = drag {
         if !d.is_idle() {
             d.clear();
-            changed.send(StateChangedEvent);
+            changed.write(StateChangedEvent);
             return;
         }
     }
-    if let Ok(entity) = screens.get_single() {
-        commands.entity(entity).despawn_recursive();
+    if let Ok(entity) = screens.single() {
+        commands.entity(entity).despawn();
         paused.0 = false;
     } else {
         // Snapshot current level and streak at pause time.
@@ -146,7 +146,7 @@ fn handle_pause_draw_toggle(
                 }
             }
         }
-        changed.send(SettingsChangedEvent(settings.0.clone()));
+        changed.write(SettingsChangedEvent(settings.0.clone()));
     }
 }
 

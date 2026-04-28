@@ -236,13 +236,13 @@ pub(crate) fn drain_input_buffer(
     }
     match buffer.queue.pop_front() {
         Some(BufferedInput::Move { from }) => {
-            move_events.send(from);
+            move_events.write(from);
         }
         Some(BufferedInput::Draw) => {
-            draw_events.send(DrawRequestEvent);
+            draw_events.write(DrawRequestEvent);
         }
         Some(BufferedInput::Undo) => {
-            undo_events.send(UndoRequestEvent);
+            undo_events.write(UndoRequestEvent);
         }
         None => {}
     }
@@ -259,9 +259,9 @@ fn cursor_world(
     windows: &Query<&Window, With<PrimaryWindow>>,
     cameras: &Query<(&Camera, &GlobalTransform)>,
 ) -> Option<Vec2> {
-    let window = windows.get_single().ok()?;
+    let window = windows.single().ok()?;
     let cursor = window.cursor_position()?;
-    let (camera, camera_transform) = cameras.get_single().ok()?;
+    let (camera, camera_transform) = cameras.single().ok()?;
     camera.viewport_to_world_2d(camera_transform, cursor).ok()
 }
 

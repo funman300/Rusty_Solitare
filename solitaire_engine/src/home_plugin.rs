@@ -31,8 +31,8 @@ fn toggle_home_screen(
     if !keys.just_pressed(KeyCode::KeyM) {
         return;
     }
-    if let Ok(entity) = screens.get_single() {
-        commands.entity(entity).despawn_recursive();
+    if let Ok(entity) = screens.single() {
+        commands.entity(entity).despawn();
     } else {
         spawn_home_screen(&mut commands, &game);
     }
@@ -139,7 +139,7 @@ fn spawn_home_screen(commands: &mut Commands, game: &GameStateResource) {
         });
 }
 
-fn spawn_shortcut_row(parent: &mut ChildBuilder, key: &str, action: &str) {
+fn spawn_shortcut_row(parent: &mut ChildSpawnerCommands, key: &str, action: &str) {
     parent
         .spawn(Node {
             flex_direction: FlexDirection::Row,

@@ -100,7 +100,6 @@ pub fn validate_refresh_token(token: &str, secret: &str) -> Result<Claims, AppEr
 // Axum extractor — allows handlers to receive AuthenticatedUser directly
 // ---------------------------------------------------------------------------
 
-#[axum::async_trait]
 impl<S> FromRequestParts<S> for AuthenticatedUser
 where
     S: Send + Sync,

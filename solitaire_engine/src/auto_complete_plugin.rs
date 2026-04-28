@@ -122,7 +122,7 @@ fn drive_auto_complete(
         return;
     };
 
-    moves.send(MoveRequestEvent { from, to, count: 1 });
+    moves.write(MoveRequestEvent { from, to, count: 1 });
     state.cooldown = STEP_INTERVAL;
 }
 

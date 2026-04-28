@@ -112,8 +112,8 @@ fn toggle_leaderboard_screen(
     if !keys.just_pressed(KeyCode::KeyL) {
         return;
     }
-    if let Ok(entity) = screens.get_single() {
-        commands.entity(entity).despawn_recursive();
+    if let Ok(entity) = screens.single() {
+        commands.entity(entity).despawn();
         closed_flag.0 = true;
         return;
     }
@@ -174,7 +174,7 @@ fn update_leaderboard_panel(
         return;
     }
     for entity in &screens {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
         spawn_leaderboard_screen(&mut commands, data.0.as_deref());
     }
 }
@@ -225,11 +225,11 @@ fn poll_opt_in_task(
     task_res.0 = None;
     match result {
         Ok(()) => {
-            toast.send(InfoToastEvent("Opted in to leaderboard".to_string()));
+            toast.write(InfoToastEvent("Opted in to leaderboard".to_string()));
         }
         Err(e) => {
             warn!("leaderboard opt-in failed: {e}");
-            toast.send(InfoToastEvent("Leaderboard update failed".to_string()));
+            toast.write(InfoToastEvent("Leaderboard update failed".to_string()));
         }
     }
 }
@@ -265,11 +265,11 @@ fn poll_opt_out_task(
     task_res.0 = None;
     match result {
         Ok(()) => {
-            toast.send(InfoToastEvent("Opted out of leaderboard".to_string()));
+            toast.write(InfoToastEvent("Opted out of leaderboard".to_string()));
         }
         Err(e) => {
             warn!("leaderboard opt-out failed: {e}");
-            toast.send(InfoToastEvent("Leaderboard update failed".to_string()));
+            toast.write(InfoToastEvent("Leaderboard update failed".to_string()));
         }
     }
 }
@@ -454,7 +454,7 @@ fn spawn_leaderboard_screen(commands: &mut Commands, entries: Option<&[Leaderboa
         });
 }
 
-fn header_cell(parent: &mut ChildBuilder, text: &str, width: f32) {
+fn header_cell(parent: &mut ChildSpawnerCommands, text: &str, width: f32) {
     parent.spawn((
         Text::new(text.to_string()),
         TextFont { font_size: 13.0, ..default() },
@@ -463,7 +463,7 @@ fn header_cell(parent: &mut ChildBuilder, text: &str, width: f32) {
     ));
 }
 
-fn data_cell(parent: &mut ChildBuilder, text: &str, width: f32, color: Color) {
+fn data_cell(parent: &mut ChildSpawnerCommands, text: &str, width: f32, color: Color) {
     parent.spawn((
         Text::new(text.to_string()),
         TextFont { font_size: 15.0, ..default() },
