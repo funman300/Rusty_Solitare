@@ -472,7 +472,7 @@ fn handle_stock_click(
 /// — since the stock cannot be dragged, there is no ambiguity between a tap and
 /// the start of a drag on this pile. Does nothing while a drag is in progress.
 fn handle_touch_stock_tap(
-    mut touch_events: EventReader<TouchInput>,
+    mut touch_events: MessageReader<TouchInput>,
     paused: Option<Res<PausedResource>>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     layout: Option<Res<LayoutResource>>,
@@ -731,7 +731,7 @@ fn end_drag(
 /// buttons. Records the touch ID in [`DragState`] so only this finger drives
 /// the drag — other fingers are ignored.
 fn touch_start_drag(
-    mut touch_events: EventReader<TouchInput>,
+    mut touch_events: MessageReader<TouchInput>,
     paused: Option<Res<PausedResource>>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     layout: Option<Res<LayoutResource>>,
@@ -841,7 +841,7 @@ fn touch_follow_drag(
 /// buttons. Uncommitted drags (tap gestures) are cancelled cleanly.
 #[allow(clippy::too_many_arguments)]
 fn touch_end_drag(
-    mut touch_events: EventReader<TouchInput>,
+    mut touch_events: MessageReader<TouchInput>,
     paused: Option<Res<PausedResource>>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     layout: Option<Res<LayoutResource>>,
