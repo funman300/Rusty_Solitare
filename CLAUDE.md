@@ -47,7 +47,7 @@ cargo clippy -p solitaire_core -- -D warnings
 
 - `solitaire_core` and `solitaire_sync` must never gain Bevy or network dependencies.
 - No `unwrap()` or `panic!()` in game logic. All state transitions return `Result<_, MoveError>`.
-- Assets are embedded at compile time using `include_bytes!()`. No runtime asset loading via `AssetServer`.
+- Audio assets are embedded at compile time using `include_bytes!()` in `audio_plugin.rs`. Cards and backgrounds are rendered procedurally (colored `Sprite` entities + text) — no image files are used and no `AssetServer` is needed.
 - Atomic file writes only: write to `filename.json.tmp`, then `rename()`.
 - Passwords and tokens are stored in the OS keychain via the `keyring` crate — never in plaintext files or logs.
 - Sync runs on `AsyncComputeTaskPool` — never block the Bevy main thread.

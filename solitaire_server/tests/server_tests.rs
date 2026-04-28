@@ -1248,3 +1248,64 @@ async fn refresh_token_rejected_on_protected_routes() {
         "refresh token must be rejected on protected endpoints"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Rate-limiting test (uses the production router with rate limiting enabled)
+// ---------------------------------------------------------------------------
+
+/// The 11th request to an auth endpoint within the rate-limit window must
+/// return 429 Too Many Requests.
+///
+/// Uses [`solitaire_server::build_router`] (rate limiting ON) rather than
+/// [`build_test_router`] so the GovernorLayer is actually applied.
+/// All 11 requests share the same router clone — cloning an Axum Router with
+/// GovernorLayer clones the inner `Arc`, so the request counter is shared.
+#[tokio::test]
+async fn auth_rate_limit_returns_429_on_11th_request() {
+    let state = solitaire_server::AppState {
+        pool: test_pool().await,
+        jwt_secret: TEST_SECRET.to_string(),
+    };
+    let app = solitaire_server::build_router(state);
+
+    let body_bytes = serde_json::to_vec(&serde_json::json!({
+        "username": "ratelimituser",
+        "password": "password1!"
+    }))
+    .unwrap();
+
+    // First 10 requests consume the burst allowance (burst_size = 10).
+    // The status may be 200 (first registration) or 400/409 (duplicate username)
+    // on retries — what matters is that none of them are 429.
+    for i in 0..10 {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/auth/register")
+            .header("content-type", "application/json")
+            .header("x-forwarded-for", TEST_CLIENT_IP)
+            .body(Body::from(body_bytes.clone()))
+            .expect("failed to build request");
+        let resp = app.clone().oneshot(req).await.expect("oneshot failed");
+        assert_ne!(
+            resp.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "request {} of 10 must not be rate-limited",
+            i + 1
+        );
+    }
+
+    // The 11th request must be rejected by the rate limiter.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/auth/register")
+        .header("content-type", "application/json")
+        .header("x-forwarded-for", TEST_CLIENT_IP)
+        .body(Body::from(body_bytes))
+        .expect("failed to build 11th request");
+    let resp = app.clone().oneshot(req).await.expect("oneshot failed");
+    assert_eq!(
+        resp.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "11th request must be rate-limited with 429"
+    );
+}

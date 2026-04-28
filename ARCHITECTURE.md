@@ -67,19 +67,18 @@ solitaire_quest/
 ├── Dockerfile                  # Multi-stage server build
 ├── docker-compose.yml          # Server + Caddy reverse proxy
 │
-├── assets/                     # All runtime assets (loaded via Bevy AssetServer)
-│   ├── cards/
-│   │   ├── faces/              # Card face sprites (suit + rank)
-│   │   └── backs/              # Card back designs (back_0.png … back_4.png)
-│   ├── backgrounds/            # Table backgrounds (bg_0.png … bg_4.png)
-│   ├── fonts/                  # .ttf font files
+├── assets/                     # Audio embedded at compile time via include_bytes!()
+│   ├── cards/                  # Reserved for future art pass (currently unused)
+│   │   ├── faces/
+│   │   └── backs/
+│   ├── backgrounds/            # Reserved for future art pass (currently unused)
+│   ├── fonts/                  # Reserved for future art pass (currently unused)
 │   └── audio/
-│       ├── card_deal.ogg
-│       ├── card_flip.ogg
-│       ├── card_place.ogg
-│       ├── card_invalid.ogg
-│       ├── win_fanfare.ogg
-│       └── ambient_loop.ogg
+│       ├── card_deal.wav
+│       ├── card_flip.wav
+│       ├── card_place.wav
+│       ├── card_invalid.wav
+│       └── win_fanfare.wav
 │
 ├── solitaire_core/             # Pure Rust game logic — zero external deps beyond rand/serde
 ├── solitaire_sync/             # Shared API types — used by client and server
@@ -744,7 +743,7 @@ Audio uses `bevy_kira_audio`. All sound files are `.wav`.
 | `card_place.wav` | Valid card placement |
 | `card_invalid.wav` | Invalid move attempt |
 | `win_fanfare.wav` | Game won |
-| `ambient_loop.wav` | Looping background music (restarts seamlessly) |
+| `ambient_loop` | Looping background music — uses `card_flip.wav` looped at very low volume as a placeholder until a dedicated track is added |
 
 Volume is controlled by two independent sliders in Settings (`sfx_volume`, `music_volume`), each stored in `Settings` and applied as `bevy_kira_audio` channel volumes.
 
@@ -754,23 +753,32 @@ Audio systems listen for Bevy events and never block the game thread.
 
 ## 14. Asset Pipeline
 
-All assets are loaded through Bevy's `AssetServer`. No bytes are hardcoded in source.
+### Rendering approach
 
-### Card Sprites
+Cards, backgrounds, and UI are rendered **procedurally** — no image files are used. Cards are Bevy `Sprite` entities (colored rectangles) with `Text` children showing rank and suit symbols. Card back colors and background colors are selected by index from compile-time color tables in `card_plugin.rs` and `table_plugin.rs`. All UI text uses Bevy's built-in default font.
 
-Card faces can be either:
-- A texture atlas (`assets/cards/atlas.png` + `atlas.ron` layout) — faster to load, preferred
-- Individual files (`assets/cards/faces/2_of_clubs.png`, etc.) — easier to author
+This means the `assets/cards/`, `assets/backgrounds/`, and `assets/fonts/` directories are reserved for a future art pass and are currently empty (`.gitkeep` only).
 
-Card backs: `assets/cards/backs/back_0.png` through `back_4.png`. Additional backs unlocked via achievements are in the same folder, gated by `PlayerProgress::unlocked_card_backs`.
+### Audio
 
-### Backgrounds
+All five sound effect WAV files are embedded at compile time via `include_bytes!()` in `audio_plugin.rs`. There is no runtime asset loading — the binary is fully self-contained.
 
-`assets/backgrounds/bg_0.png` through `bg_4.png`. Same unlock gating as card backs.
+| File | Size |
+|---|---|
+| `card_deal.wav` | SFX |
+| `card_flip.wav` | SFX |
+| `card_place.wav` | SFX |
+| `card_invalid.wav` | SFX |
+| `win_fanfare.wav` | SFX |
 
-### Fonts
+The ambient music loop reuses `card_flip.wav` at very low volume as a placeholder; a dedicated `ambient_loop.wav` can be dropped into `assets/audio/` and wired into `audio_plugin.rs` when ready.
 
-`assets/fonts/main.ttf` — used for card rank/suit text in Bevy UI.
+### Future art pass
+
+When image-based card art is added, the recommended approach is:
+- Embed assets via `bevy::asset::embedded_asset!()` macro (keeps the binary self-contained)
+- Use a texture atlas (`assets/cards/atlas.png` + layout descriptor) for card faces
+- Individual PNGs for card backs and backgrounds (5 each)
 
 ---
 
