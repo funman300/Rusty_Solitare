@@ -32,8 +32,8 @@ use kira::tween::Tween;
 use kira::Volume;
 
 use crate::events::{
-    CardFlippedEvent, DrawRequestEvent, GameWonEvent, MoveRejectedEvent, MoveRequestEvent,
-    NewGameRequestEvent, UndoRequestEvent,
+    CardFaceRevealedEvent, CardFlippedEvent, DrawRequestEvent, GameWonEvent, MoveRejectedEvent,
+    MoveRequestEvent, NewGameRequestEvent, UndoRequestEvent,
 };
 use crate::pause_plugin::PausedResource;
 use crate::resources::GameStateResource;
@@ -136,6 +136,7 @@ impl Plugin for AudioPlugin {
             .add_event::<NewGameRequestEvent>()
             .add_event::<GameWonEvent>()
             .add_event::<CardFlippedEvent>()
+            .add_event::<CardFaceRevealedEvent>()
             .add_event::<UndoRequestEvent>()
             .add_event::<SettingsChangedEvent>()
             .add_systems(Startup, apply_initial_volume)
@@ -147,7 +148,7 @@ impl Plugin for AudioPlugin {
                     play_on_rejected,
                     play_on_new_game,
                     play_on_win,
-                    play_on_card_flip,
+                    play_on_face_revealed,
                     play_on_undo,
                     apply_volume_on_change,
                     handle_mute_keys,
@@ -223,6 +224,27 @@ fn play(audio: &mut AudioState, sound: &StaticSoundData) {
     }
     if let Err(e) = manager.play(data) {
         warn!("failed to play SFX: {e}");
+    }
+}
+
+impl AudioState {
+    /// Plays `sound` through the SFX sub-track at `volume` amplitude (0.0–1.0+).
+    ///
+    /// Behaves identically to the crate-private `play()` function but accepts an
+    /// explicit volume override so callers can play sounds at a fraction of their
+    /// normal level. Silently does nothing when audio is unavailable.
+    pub fn play_sfx_at_volume(&mut self, sound: &StaticSoundData, volume: f64) {
+        let Some(manager) = self.manager.as_mut() else {
+            return;
+        };
+        let mut data = sound.clone();
+        data.settings.volume = Volume::Amplitude(volume).into();
+        if let Some(track) = &self.sfx_track {
+            data.settings.output_destination = track.id().into();
+        }
+        if let Err(e) = manager.play(data) {
+            warn!("failed to play SFX at volume {volume}: {e}");
+        }
     }
 }
 
@@ -390,8 +412,13 @@ fn play_on_win(
     }
 }
 
-fn play_on_card_flip(
-    mut events: EventReader<CardFlippedEvent>,
+/// Plays the card-flip sound at the animation midpoint — the instant the face
+/// is visually revealed — keeping audio and visuals in sync.
+///
+/// Driven by `CardFaceRevealedEvent`, which is fired by `tick_flip_anim` at
+/// the phase transition (scale.x crosses 0), not by the move event itself.
+fn play_on_face_revealed(
+    mut events: EventReader<CardFaceRevealedEvent>,
     mut audio: NonSendMut<AudioState>,
     lib: Option<Res<SoundLibrary>>,
 ) {

@@ -18,7 +18,7 @@ use chrono::{Local, NaiveDate};
 use solitaire_data::{daily_seed_for, save_progress_to};
 use solitaire_sync::ChallengeGoal;
 
-use crate::events::{GameWonEvent, NewGameRequestEvent, XpAwardedEvent};
+use crate::events::{GameWonEvent, InfoToastEvent, NewGameRequestEvent, XpAwardedEvent};
 use crate::game_plugin::GameMutation;
 use crate::progress_plugin::{ProgressResource, ProgressStoragePath, ProgressUpdate};
 use crate::resources::GameStateResource;
@@ -143,6 +143,7 @@ fn poll_server_challenge(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_daily_completion(
     mut wins: EventReader<GameWonEvent>,
     daily: Res<DailyChallengeResource>,
@@ -151,6 +152,7 @@ fn handle_daily_completion(
     path: Res<ProgressStoragePath>,
     mut completed: EventWriter<DailyChallengeCompletedEvent>,
     mut xp_awarded: EventWriter<XpAwardedEvent>,
+    mut toast: EventWriter<InfoToastEvent>,
 ) {
     for ev in wins.read() {
         if game.0.seed != daily.seed {
@@ -182,6 +184,7 @@ fn handle_daily_completion(
             date: daily.date,
             streak: progress.0.daily_challenge_streak,
         });
+        toast.send(InfoToastEvent("Daily challenge complete! +100 XP".to_string()));
     }
 }
 

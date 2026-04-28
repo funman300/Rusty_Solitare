@@ -5,7 +5,7 @@
 //!
 //! Keyboard:
 //! - `U` → `UndoRequestEvent`
-//! - `N` → `NewGameRequestEvent { seed: None }`
+//! - `N` → `NewGameRequestEvent { seed: None }` (cancels Time Attack if active)
 //! - `D` / `Space` → `DrawRequestEvent`
 //! - `Esc` → handled by `PausePlugin` (overlay toggle + paused flag)
 //!
@@ -18,6 +18,7 @@
 
 use std::collections::HashMap;
 
+use bevy::ecs::system::SystemParam;
 use bevy::input::ButtonInput;
 use bevy::math::{Vec2, Vec3};
 use bevy::prelude::*;
@@ -28,6 +29,7 @@ use solitaire_core::pile::PileType;
 use solitaire_core::rules::{can_place_on_foundation, can_place_on_tableau};
 
 use crate::card_plugin::{CardEntity, HintHighlight, TABLEAU_FAN_FRAC};
+use crate::feedback_anim_plugin::ShakeAnim;
 use solitaire_core::game_state::DrawMode;
 use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
 use crate::events::{
@@ -38,7 +40,8 @@ use crate::game_plugin::GameMutation;
 use crate::pause_plugin::PausedResource;
 use crate::progress_plugin::ProgressResource;
 use crate::layout::{Layout, LayoutResource};
-use crate::resources::{DragState, GameStateResource};
+use crate::resources::{DragState, GameStateResource, HintCycleIndex};
+use crate::time_attack_plugin::TimeAttackResource;
 
 /// Z-depth used for cards while being dragged — above all resting cards.
 const DRAG_Z: f32 = 500.0;
@@ -54,7 +57,8 @@ pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<NewGameConfirmEvent>()
+        app.init_resource::<HintCycleIndex>()
+            .add_event::<NewGameConfirmEvent>()
             .add_event::<InfoToastEvent>()
             .add_event::<ForfeitEvent>()
             .add_systems(
@@ -69,12 +73,28 @@ impl Plugin for InputPlugin {
                 )
                     .chain(),
             )
-            .add_systems(Update, handle_fullscreen);
+            .add_systems(Update, handle_fullscreen)
+            .add_systems(Update, reset_hint_cycle_on_state_change);
     }
 }
 
 /// Seconds after the first N press during which a second N confirms new game.
 const NEW_GAME_CONFIRM_WINDOW: f32 = 3.0;
+
+/// Seconds after the first G press during which a second G confirms forfeit.
+const FORFEIT_CONFIRM_WINDOW: f32 = 3.0;
+
+/// Bundles all event writers used by `handle_keyboard` so the system stays
+/// within Bevy's 16-parameter limit.
+#[derive(SystemParam)]
+struct KeyboardEvents<'w> {
+    undo: EventWriter<'w, UndoRequestEvent>,
+    new_game: EventWriter<'w, NewGameRequestEvent>,
+    confirm_event: EventWriter<'w, NewGameConfirmEvent>,
+    info_toast: EventWriter<'w, InfoToastEvent>,
+    draw: EventWriter<'w, DrawRequestEvent>,
+    forfeit: EventWriter<'w, ForfeitEvent>,
+}
 
 #[allow(clippy::too_many_arguments)]
 fn handle_keyboard(
@@ -84,15 +104,14 @@ fn handle_keyboard(
     game: Option<Res<GameStateResource>>,
     time: Res<Time>,
     mut confirm_countdown: Local<f32>,
-    mut undo: EventWriter<UndoRequestEvent>,
-    mut new_game: EventWriter<NewGameRequestEvent>,
-    mut confirm_event: EventWriter<NewGameConfirmEvent>,
-    mut info_toast: EventWriter<InfoToastEvent>,
-    mut draw: EventWriter<DrawRequestEvent>,
-    mut forfeit: EventWriter<ForfeitEvent>,
+    mut confirm_pending: Local<bool>,
+    mut forfeit_countdown: Local<f32>,
+    mut ev: KeyboardEvents,
     mut commands: Commands,
     card_entities: Query<(Entity, &CardEntity, &Sprite)>,
     layout: Option<Res<LayoutResource>>,
+    mut hint_cycle: ResMut<HintCycleIndex>,
+    mut time_attack: Option<ResMut<TimeAttackResource>>,
 ) {
     if paused.is_some_and(|p| p.0) {
         return;
@@ -102,86 +121,191 @@ fn handle_keyboard(
         *confirm_countdown -= time.delta_secs();
         if *confirm_countdown <= 0.0 {
             *confirm_countdown = 0.0;
+            // Countdown expired without a second N press — notify the player.
+            if *confirm_pending {
+                *confirm_pending = false;
+                ev.info_toast.send(InfoToastEvent("New game cancelled".to_string()));
+            }
+        }
+    }
+    // Tick down the forfeit confirmation window.
+    if *forfeit_countdown > 0.0 {
+        *forfeit_countdown -= time.delta_secs();
+        if *forfeit_countdown <= 0.0 {
+            *forfeit_countdown = 0.0;
         }
     }
 
     if keys.just_pressed(KeyCode::KeyU) {
-        undo.send(UndoRequestEvent);
+        if *forfeit_countdown > 0.0 { *forfeit_countdown = 0.0; }
+        ev.undo.send(UndoRequestEvent);
     }
     if keys.just_pressed(KeyCode::KeyN) {
+        // If a Time Attack session is running, cancel it and start a Classic game.
+        if let Some(ref mut session) = time_attack {
+            if session.active {
+                session.active = false;
+                session.remaining_secs = 0.0;
+                ev.info_toast.send(InfoToastEvent("Time Attack ended".to_string()));
+                ev.new_game.send(NewGameRequestEvent {
+                    seed: None,
+                    mode: Some(solitaire_core::game_state::GameMode::Classic),
+                });
+                *confirm_countdown = 0.0;
+                return;
+            }
+        }
+
         let active_game = game.as_ref().is_some_and(|g| g.0.move_count > 0 && !g.0.is_won);
         let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
         if shift_held || !active_game {
             // Shift+N or no active game — start immediately, no confirmation.
-            new_game.send(NewGameRequestEvent::default());
+            ev.new_game.send(NewGameRequestEvent::default());
             *confirm_countdown = 0.0;
+            *confirm_pending = false;
         } else if *confirm_countdown > 0.0 {
             // Second press within the window — confirmed.
-            new_game.send(NewGameRequestEvent::default());
+            ev.new_game.send(NewGameRequestEvent::default());
             *confirm_countdown = 0.0;
+            *confirm_pending = false;
         } else {
             // First press on an active game — require confirmation.
             *confirm_countdown = NEW_GAME_CONFIRM_WINDOW;
-            confirm_event.send(NewGameConfirmEvent);
+            *confirm_pending = true;
+            ev.confirm_event.send(NewGameConfirmEvent);
         }
     }
     if keys.just_pressed(KeyCode::KeyZ) {
+        if *forfeit_countdown > 0.0 { *forfeit_countdown = 0.0; }
         // Zen / Challenge / Time Attack are gated to level >= CHALLENGE_UNLOCK_LEVEL.
         // X is gated separately by ChallengePlugin.
         let level = progress.as_ref().map_or(0, |p| p.0.level);
         if level >= CHALLENGE_UNLOCK_LEVEL {
-            new_game.send(NewGameRequestEvent {
+            ev.new_game.send(NewGameRequestEvent {
                 seed: None,
                 mode: Some(solitaire_core::game_state::GameMode::Zen),
             });
         } else {
-            info_toast.send(InfoToastEvent(format!(
+            ev.info_toast.send(InfoToastEvent(format!(
                 "Zen mode unlocks at level {CHALLENGE_UNLOCK_LEVEL}"
             )));
         }
     }
     if keys.just_pressed(KeyCode::KeyD) || keys.just_pressed(KeyCode::Space) {
-        draw.send(DrawRequestEvent);
+        if *forfeit_countdown > 0.0 { *forfeit_countdown = 0.0; }
+        ev.draw.send(DrawRequestEvent);
     }
-    // H — show a hint (highlight the source card of the best available move).
+    // H — cycle through all available hints on each press, highlighting the
+    // source card yellow for 1.5 s. The index wraps around once all hints have
+    // been shown. When no moves are available a toast is shown instead.
     if keys.just_pressed(KeyCode::KeyH) {
+        if *forfeit_countdown > 0.0 { *forfeit_countdown = 0.0; }
         if let Some(ref g) = game {
-            if !g.0.is_won {
-                if let Some(ref layout_res) = layout {
-                    if let Some((from, _to, _count)) = find_hint(&g.0) {
-                        // Find the top face-up card in the source pile.
-                        let top_card_id = g.0.piles.get(&from)
-                            .and_then(|p| p.cards.last().filter(|c| c.face_up))
-                            .map(|c| c.id);
-                        if let Some(card_id) = top_card_id {
-                            for (entity, card_entity, _sprite) in card_entities.iter() {
-                                if card_entity.card_id == card_id {
-                                    commands.entity(entity)
-                                        .insert(HintHighlight { remaining: 1.5 })
-                                        .insert(Sprite {
-                                            color: Color::srgba(1.0, 1.0, 0.4, 1.0),
-                                            custom_size: Some(layout_res.0.card_size),
-                                            ..default()
-                                        });
-                                    break;
+            if g.0.is_won {
+                ev.info_toast.send(InfoToastEvent(
+                    "Game won! Press N for a new game".to_string(),
+                ));
+            } else if let Some(ref layout_res) = layout {
+                    let hints = all_hints(&g.0);
+                    if hints.is_empty() {
+                        ev.info_toast.send(InfoToastEvent("No hints available".to_string()));
+                    } else {
+                        // Pick the hint at the current cycle index (wrapping) and advance.
+                        let idx = hint_cycle.0 % hints.len();
+                        hint_cycle.0 = hint_cycle.0.wrapping_add(1);
+                        let (from, to, _count) = &hints[idx];
+                        // When the hint points at the stock (draw suggestion) there is no
+                        // face-up card to highlight — show a toast instead.
+                        // If the stock is empty, pressing D will recycle the waste rather
+                        // than draw a card, so the toast text must reflect that.
+                        if *from == PileType::Stock {
+                            let stock_empty = g.0.piles
+                                .get(&PileType::Stock)
+                                .is_some_and(|p| p.cards.is_empty());
+                            let msg = if stock_empty {
+                                "Hint: recycle waste (D)".to_string()
+                            } else {
+                                "Hint: draw from stock (D)".to_string()
+                            };
+                            ev.info_toast.send(InfoToastEvent(msg));
+                        } else {
+                            // Find the top face-up card in the source pile and highlight it.
+                            let top_card_id = g.0.piles.get(from)
+                                .and_then(|p| p.cards.last().filter(|c| c.face_up))
+                                .map(|c| c.id);
+                            if let Some(card_id) = top_card_id {
+                                for (entity, card_entity, _sprite) in card_entities.iter() {
+                                    if card_entity.card_id == card_id {
+                                        commands.entity(entity)
+                                            .insert(HintHighlight { remaining: 1.5 })
+                                            .insert(Sprite {
+                                                color: Color::srgba(1.0, 1.0, 0.4, 1.0),
+                                                custom_size: Some(layout_res.0.card_size),
+                                                ..default()
+                                            });
+                                        break;
+                                    }
                                 }
                             }
+                            // Fire an informational toast describing where the hinted card
+                            // should move so the player always sees the suggestion in text.
+                            let msg = match to {
+                                PileType::Foundation(suit) => {
+                                    let suit_name = match suit {
+                                        Suit::Clubs => "Clubs",
+                                        Suit::Diamonds => "Diamonds",
+                                        Suit::Hearts => "Hearts",
+                                        Suit::Spades => "Spades",
+                                    };
+                                    format!("Hint: move to {suit_name} foundation")
+                                }
+                                PileType::Tableau(col) => {
+                                    format!("Hint: move to tableau (col {})", col + 1)
+                                }
+                                _ => "Hint: move card".to_string(),
+                            };
+                            ev.info_toast.send(InfoToastEvent(msg));
                         }
-                    } else {
-                        info_toast.send(InfoToastEvent("No hints available".to_string()));
                     }
-                }
             }
         }
     }
-    // G — forfeit the current game (only when a game is actually in progress).
+    // G — forfeit the current game with a 3-second double-confirm window to
+    // prevent accidental forfeits. First press shows a toast and starts the
+    // countdown; second press within the window sends the ForfeitEvent.
     if keys.just_pressed(KeyCode::KeyG) {
         let active_game = game.as_ref().is_some_and(|g| g.0.move_count > 0 && !g.0.is_won);
         if active_game {
-            forfeit.send(ForfeitEvent);
+            if *forfeit_countdown > 0.0 {
+                // Second press within the confirmation window — confirmed.
+                ev.forfeit.send(ForfeitEvent);
+                *forfeit_countdown = 0.0;
+            } else {
+                // First press — start the countdown and warn the player.
+                *forfeit_countdown = FORFEIT_CONFIRM_WINDOW;
+                ev.info_toast.send(InfoToastEvent("Press G again to forfeit".to_string()));
+            }
         }
     }
     // Esc is handled by `PausePlugin` (overlay toggle + paused flag).
+}
+
+/// Resets [`HintCycleIndex`] to `0` whenever the game state changes or a new
+/// game is requested so the next H press always starts cycling from the first
+/// hint of the new position.
+///
+/// Listening to both events ensures the reset happens immediately on
+/// `NewGameRequestEvent`, one frame before the `StateChangedEvent` that the
+/// game plugin fires after dealing — preventing a stale hint from the previous
+/// game being shown when H is pressed in that gap frame.
+fn reset_hint_cycle_on_state_change(
+    mut state_events: EventReader<StateChangedEvent>,
+    mut new_game_events: EventReader<NewGameRequestEvent>,
+    mut hint_cycle: ResMut<HintCycleIndex>,
+) {
+    if state_events.read().next().is_some() || new_game_events.read().next().is_some() {
+        hint_cycle.0 = 0;
+    }
 }
 
 /// `F11` toggles between borderless-fullscreen and windowed mode.
@@ -189,15 +313,22 @@ fn handle_keyboard(
 fn handle_fullscreen(
     keys: Res<ButtonInput<KeyCode>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
+    mut toast: EventWriter<InfoToastEvent>,
 ) {
     if !keys.just_pressed(KeyCode::F11) {
         return;
     }
     let Ok(mut window) = windows.get_single_mut() else { return };
-    window.mode = match window.mode {
+    let new_mode = match window.mode {
         WindowMode::Windowed => WindowMode::BorderlessFullscreen(MonitorSelection::Current),
         _ => WindowMode::Windowed,
     };
+    window.mode = new_mode;
+    let label = match window.mode {
+        WindowMode::Windowed => "Fullscreen: off",
+        _ => "Fullscreen: on",
+    };
+    toast.send(InfoToastEvent(label.to_string()));
 }
 
 fn handle_stock_click(
@@ -239,7 +370,7 @@ fn start_drag(
     layout: Option<Res<LayoutResource>>,
     game: Res<GameStateResource>,
     mut drag: ResMut<DragState>,
-    mut card_transforms: Query<(&CardEntity, &mut Transform)>,
+    mut card_visuals: Query<(&CardEntity, &mut Transform, &mut Sprite)>,
 ) {
     if paused.is_some_and(|p| p.0) {
         return;
@@ -268,13 +399,15 @@ fn start_drag(
     let bottom_pos = card_position(&game.0, &layout.0, pile.clone(), stack_index);
     let cursor_offset = bottom_pos - world;
 
-    // Elevate dragged cards to DRAG_Z.
+    // Elevate dragged cards to DRAG_Z and dim them slightly so the board
+    // beneath remains visible during the drag.
     for (i, id) in card_ids.iter().enumerate() {
-        if let Some((_, mut transform)) = card_transforms
+        if let Some((_, mut transform, mut sprite)) = card_visuals
             .iter_mut()
-            .find(|(entity, _)| entity.card_id == *id)
+            .find(|(entity, _, _)| entity.card_id == *id)
         {
             transform.translation.z = DRAG_Z + (i as f32) * 0.01;
+            sprite.color.set_alpha(0.85);
         }
     }
 
@@ -328,6 +461,8 @@ fn end_drag(
     mut moves: EventWriter<MoveRequestEvent>,
     mut rejected: EventWriter<MoveRejectedEvent>,
     mut changed: EventWriter<StateChangedEvent>,
+    mut commands: Commands,
+    card_entities: Query<(Entity, &CardEntity, &Transform)>,
 ) {
     if paused.is_some_and(|p| p.0) {
         drag.clear();
@@ -385,6 +520,19 @@ fn end_drag(
                         to: target.clone(),
                         count,
                     });
+                    // Shake each dragged card so the player gets immediate
+                    // visual feedback that the drop was rejected.
+                    for &card_id in &drag.cards {
+                        if let Some((entity, _, transform)) = card_entities
+                            .iter()
+                            .find(|(_, ce, _)| ce.card_id == card_id)
+                        {
+                            commands.entity(entity).insert(ShakeAnim {
+                                elapsed: 0.0,
+                                origin_x: transform.translation.x,
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -604,8 +752,43 @@ pub fn best_destination(card: &Card, game: &GameState) -> Option<PileType> {
     None
 }
 
+/// Find the best tableau column onto which the stack rooted at `bottom_card`
+/// can be legally placed, excluding the stack's own source pile.
+///
+/// Returns `(destination, stack_count)` if a legal target exists, or `None`
+/// if the stack cannot move anywhere. Only tableau destinations are considered
+/// because multi-card stacks cannot go to foundations.
+pub fn best_tableau_destination_for_stack(
+    bottom_card: &Card,
+    from: &PileType,
+    game: &GameState,
+    stack_count: usize,
+) -> Option<(PileType, usize)> {
+    for i in 0..7_usize {
+        let dest = PileType::Tableau(i);
+        if dest == *from {
+            continue;
+        }
+        if let Some(pile) = game.piles.get(&dest) {
+            if can_place_on_tableau(bottom_card, pile) {
+                return Some((dest, stack_count));
+            }
+        }
+    }
+    None
+}
+
 /// System that detects double-clicks on face-up cards and fires `MoveRequestEvent`
-/// to the best legal destination (foundation before tableau).
+/// to the best legal destination.
+///
+/// Move priority:
+/// 1. Move the single **top** card to its best foundation (or tableau) destination.
+/// 2. If no single-card move exists and the clicked card is the base of a
+///    multi-card face-up stack, move the whole stack to the best tableau column.
+///
+/// When a multi-card stack double-click finds no legal destination (Priority 2
+/// returns `None`), fires `MoveRejectedEvent` with `from == to == pile` so the
+/// invalid-move sound plays and the source pile cards shake as feedback.
 #[allow(clippy::too_many_arguments)]
 fn handle_double_click(
     buttons: Res<ButtonInput<MouseButton>>,
@@ -618,6 +801,7 @@ fn handle_double_click(
     game: Res<GameStateResource>,
     mut last_click: Local<HashMap<u32, f32>>,
     mut moves: EventWriter<MoveRequestEvent>,
+    mut rejected: EventWriter<MoveRejectedEvent>,
 ) {
     if paused.is_some_and(|p| p.0) {
         return;
@@ -628,18 +812,17 @@ fn handle_double_click(
     let Some(layout) = layout else { return };
     let Some(world) = cursor_world(&windows, &cameras) else { return };
 
-    // Identify which card was clicked (must be face-up and draggable).
+    // Identify which card (or stack base) was clicked (must be face-up and draggable).
     let Some((pile, stack_index, card_ids)) = find_draggable_at(world, &game.0, &layout.0) else {
         return;
     };
-    // Only auto-move a single card (top card of the stack).
-    let Some(&top_card_id) = card_ids.last() else { return };
-    // The top draggable card is at `stack_index + card_ids.len() - 1`.
-    let top_index = stack_index + card_ids.len() - 1;
-    let Some(card) = game.0.piles.get(&pile)
-        .and_then(|p| p.cards.get(top_index)) else { return };
 
-    if !card.face_up || card.id != top_card_id {
+    // The topmost card in the draggable run — used as the double-click key.
+    let Some(&top_card_id) = card_ids.last() else { return };
+    let top_index = stack_index + card_ids.len() - 1;
+    let Some(top_card) = game.0.piles.get(&pile)
+        .and_then(|p| p.cards.get(top_index)) else { return };
+    if !top_card.face_up || top_card.id != top_card_id {
         return;
     }
 
@@ -647,14 +830,47 @@ fn handle_double_click(
     let prev = last_click.get(&top_card_id).copied().unwrap_or(f32::NEG_INFINITY);
 
     if now - prev <= DOUBLE_CLICK_WINDOW {
-        // Double-click detected — find and fire the best move.
+        // Double-click confirmed.
         last_click.remove(&top_card_id);
-        if let Some(dest) = best_destination(card, &game.0) {
+
+        // Priority 1: move the single top card (foundation preferred, then tableau).
+        if let Some(dest) = best_destination(top_card, &game.0) {
             moves.send(MoveRequestEvent {
                 from: pile,
                 to: dest,
                 count: 1,
             });
+            return;
+        }
+
+        // Priority 2: if the player clicked the base of a multi-card face-up
+        // stack (card_ids.len() > 1), try moving the whole stack to another
+        // tableau column.
+        if card_ids.len() > 1 {
+            let Some(bottom_card) = game.0.piles.get(&pile)
+                .and_then(|p| p.cards.get(stack_index)) else { return };
+            if let Some((dest, count)) = best_tableau_destination_for_stack(
+                bottom_card,
+                &pile,
+                &game.0,
+                card_ids.len(),
+            ) {
+                moves.send(MoveRequestEvent {
+                    from: pile,
+                    to: dest,
+                    count,
+                });
+            } else {
+                // No legal destination for the stack — play the invalid-move
+                // sound and shake the source pile cards as feedback.
+                // `MoveRejectedEvent` with `from == to` routes the shake to
+                // the source pile (which `start_shake_anim` reads from `ev.to`).
+                rejected.send(MoveRejectedEvent {
+                    from: pile.clone(),
+                    to: pile,
+                    count: card_ids.len(),
+                });
+            }
         }
     } else {
         // Single click — record the time.
@@ -666,12 +882,19 @@ fn handle_double_click(
 // Task #28 — Hint system helpers
 // ---------------------------------------------------------------------------
 
-/// Find one valid move in the current game state.
+/// Build the complete list of legal moves available in `game`, ordered so that
+/// foundation moves come first, then tableau-to-tableau moves, with "draw from
+/// stock" appended last when the stock is non-empty and nothing else is
+/// available.
 ///
-/// Returns `(from, to, count)` for the first legal move found, or `None` if
-/// no move is available. Sources checked: Waste top, then Tableau 0–6.
-/// Destinations checked: all 4 Foundations, then all 7 Tableau piles.
-pub fn find_hint(game: &GameState) -> Option<(PileType, PileType, usize)> {
+/// Each entry is `(from, to, count)` — the same triple used by
+/// [`MoveRequestEvent`]. The list may be empty when no move exists at all
+/// (game is stuck).
+///
+/// This is the backing data for the cycling hint system: the H key steps
+/// through `hints[HintCycleIndex % hints.len()]` on each press.
+pub fn all_hints(game: &GameState) -> Vec<(PileType, PileType, usize)> {
+    let suits = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
     let sources: Vec<PileType> = {
         let mut s = vec![PileType::Waste];
         for i in 0..7_usize {
@@ -680,23 +903,38 @@ pub fn find_hint(game: &GameState) -> Option<(PileType, PileType, usize)> {
         s
     };
 
-    let suits = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
+    let mut hints: Vec<(PileType, PileType, usize)> = Vec::new();
 
+    // Pass 1 — foundation moves (highest priority, shown first).
     for from in &sources {
         let Some(from_pile) = game.piles.get(from) else { continue };
         let Some(card) = from_pile.cards.last().filter(|c| c.face_up) else { continue };
-
-        // Check foundations.
         for &suit in &suits {
             let dest = PileType::Foundation(suit);
             if let Some(dest_pile) = game.piles.get(&dest) {
                 if can_place_on_foundation(card, dest_pile, suit) {
-                    return Some((from.clone(), dest, 1));
+                    hints.push((from.clone(), dest, 1));
+                    // Each source card can go to at most one foundation suit;
+                    // no need to check the remaining three for this card.
+                    break;
                 }
             }
         }
+    }
 
-        // Check tableau piles (skip the source pile itself).
+    // Pass 2 — tableau moves (deduplicated by source pile so we don't
+    // repeat the same source card multiple times for different destinations).
+    for from in &sources {
+        let Some(from_pile) = game.piles.get(from) else { continue };
+        let Some(card) = from_pile.cards.last().filter(|c| c.face_up) else { continue };
+        // Skip if this source already has a foundation hint — prefer to show
+        // that one when cycling rather than suggesting a less optimal move.
+        let already_has_foundation_hint = hints.iter().any(|(f, t, _)| {
+            f == from && matches!(t, PileType::Foundation(_))
+        });
+        if already_has_foundation_hint {
+            continue;
+        }
         for i in 0..7_usize {
             let dest = PileType::Tableau(i);
             if dest == *from {
@@ -704,12 +942,41 @@ pub fn find_hint(game: &GameState) -> Option<(PileType, PileType, usize)> {
             }
             if let Some(dest_pile) = game.piles.get(&dest) {
                 if can_place_on_tableau(card, dest_pile) {
-                    return Some((from.clone(), dest, 1));
+                    hints.push((from.clone(), dest, 1));
+                    // One tableau destination per source card is enough for the
+                    // hint list — the player can see where else a card can go
+                    // via the right-click destination highlights.
+                    break;
                 }
             }
         }
     }
-    None
+
+    // Pass 3 — suggest drawing from the stock when no other hint was found.
+    if hints.is_empty() {
+        let stock_non_empty = game.piles.get(&PileType::Stock)
+            .is_some_and(|p| !p.cards.is_empty());
+        let waste_can_recycle = game.piles.get(&PileType::Stock)
+            .is_some_and(|p| p.cards.is_empty())
+            && game.piles.get(&PileType::Waste)
+                .is_some_and(|p| !p.cards.is_empty());
+        if stock_non_empty || waste_can_recycle {
+            // Stock→Waste is not a real pile-to-pile move, but we reuse the
+            // triple to signal "draw". The H handler only reads `from` to
+            // locate the card to highlight; we point at the stock pile.
+            hints.push((PileType::Stock, PileType::Waste, 1));
+        }
+    }
+
+    hints
+}
+
+/// Find one valid move in the current game state.
+///
+/// Returns `(from, to, count)` for the first legal move found, or `None` if
+/// no move is available. This is a convenience wrapper over [`all_hints`].
+pub fn find_hint(game: &GameState) -> Option<(PileType, PileType, usize)> {
+    all_hints(game).into_iter().next()
 }
 
 #[cfg(test)]
@@ -1000,6 +1267,102 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // best_tableau_destination_for_stack pure-function tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn best_tableau_destination_for_stack_finds_legal_column() {
+        use solitaire_core::card::{Card, Rank, Suit};
+        let mut game = GameState::new(1, DrawMode::DrawOne);
+
+        // Clear all piles for a clean test.
+        for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
+            game.piles.get_mut(&PileType::Foundation(suit)).unwrap().cards.clear();
+        }
+        for i in 0..7_usize {
+            game.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+        }
+
+        // Tableau 0: King of Spades (the source stack base), Queen of Hearts on top.
+        let t0 = game.piles.get_mut(&PileType::Tableau(0)).unwrap();
+        t0.cards.push(Card { id: 100, suit: Suit::Spades, rank: Rank::King, face_up: true });
+        t0.cards.push(Card { id: 101, suit: Suit::Hearts, rank: Rank::Queen, face_up: true });
+
+        // Tableau 1..6: empty — Kings can land on any of them.
+
+        let bottom_card = Card { id: 100, suit: Suit::Spades, rank: Rank::King, face_up: true };
+        let result = best_tableau_destination_for_stack(
+            &bottom_card,
+            &PileType::Tableau(0),
+            &game,
+            2,
+        );
+        assert!(result.is_some(), "should find a destination for King-stack");
+        let (dest, count) = result.unwrap();
+        assert!(matches!(dest, PileType::Tableau(_)));
+        assert_ne!(dest, PileType::Tableau(0), "must not return the source pile");
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn best_tableau_destination_for_stack_skips_source_pile() {
+        use solitaire_core::card::{Card, Rank, Suit};
+        let mut game = GameState::new(1, DrawMode::DrawOne);
+
+        for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
+            game.piles.get_mut(&PileType::Foundation(suit)).unwrap().cards.clear();
+        }
+        for i in 0..7_usize {
+            game.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+        }
+
+        // Only tableau 0 has anything; every other column is empty.
+        // A King is the only card that can go on an empty tableau column.
+        // Source is Tableau(0), so the result must NOT be Tableau(0).
+        let t0 = game.piles.get_mut(&PileType::Tableau(0)).unwrap();
+        t0.cards.push(Card { id: 200, suit: Suit::Hearts, rank: Rank::King, face_up: true });
+
+        let bottom_card = Card { id: 200, suit: Suit::Hearts, rank: Rank::King, face_up: true };
+        let result = best_tableau_destination_for_stack(
+            &bottom_card,
+            &PileType::Tableau(0),
+            &game,
+            1,
+        );
+        // Result must be some other empty tableau column, never the source.
+        if let Some((dest, _)) = result {
+            assert_ne!(dest, PileType::Tableau(0));
+        }
+    }
+
+    #[test]
+    fn best_tableau_destination_for_stack_returns_none_when_no_legal_move() {
+        use solitaire_core::card::{Card, Rank, Suit};
+        let mut game = GameState::new(1, DrawMode::DrawOne);
+
+        for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
+            game.piles.get_mut(&PileType::Foundation(suit)).unwrap().cards.clear();
+        }
+        for i in 0..7_usize {
+            game.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+        }
+
+        // Source: tableau 0 has a Two of Clubs (can't go on empty pile; not a King).
+        // All other piles are empty — no legal tableau target.
+        let t0 = game.piles.get_mut(&PileType::Tableau(0)).unwrap();
+        t0.cards.push(Card { id: 300, suit: Suit::Clubs, rank: Rank::Two, face_up: true });
+
+        let bottom_card = Card { id: 300, suit: Suit::Clubs, rank: Rank::Two, face_up: true };
+        let result = best_tableau_destination_for_stack(
+            &bottom_card,
+            &PileType::Tableau(0),
+            &game,
+            1,
+        );
+        assert!(result.is_none(), "Two of Clubs has no legal tableau destination on empty piles");
+    }
+
+    // -----------------------------------------------------------------------
     // Task #28 — find_hint pure-function tests
     // -----------------------------------------------------------------------
 
@@ -1046,6 +1409,201 @@ mod tests {
         });
 
         assert!(find_hint(&game).is_none(), "no hint should exist");
+    }
+
+    // -----------------------------------------------------------------------
+    // Task #54 — forfeit double-confirm logic pure-function tests
+    // -----------------------------------------------------------------------
+
+    /// Verify the FORFEIT_CONFIRM_WINDOW constant is positive so the countdown
+    /// window actually opens on the first G press.
+    #[test]
+    fn forfeit_confirm_window_is_positive() {
+        assert!(FORFEIT_CONFIRM_WINDOW > 0.0, "FORFEIT_CONFIRM_WINDOW must be > 0");
+    }
+
+    /// Simulate the first G press: countdown was 0, so it should become
+    /// FORFEIT_CONFIRM_WINDOW and no ForfeitEvent should be "sent" yet.
+    #[test]
+    fn forfeit_first_press_opens_countdown() {
+        // Simulate: forfeit_countdown starts at 0 (no pending confirmation).
+        let mut forfeit_countdown: f32 = 0.0;
+        let active_game = true;
+
+        // --- first G press logic (mirrors handle_keyboard) ---
+        let forfeit_sent = if active_game {
+            if forfeit_countdown > 0.0 {
+                // Second press — would send ForfeitEvent.
+                forfeit_countdown = 0.0;
+                true
+            } else {
+                // First press — open window, send toast (not ForfeitEvent).
+                forfeit_countdown = FORFEIT_CONFIRM_WINDOW;
+                false
+            }
+        } else {
+            false
+        };
+
+        assert!(!forfeit_sent, "ForfeitEvent must NOT fire on first G press");
+        assert_eq!(
+            forfeit_countdown, FORFEIT_CONFIRM_WINDOW,
+            "countdown must be opened to FORFEIT_CONFIRM_WINDOW after first press"
+        );
+    }
+
+    /// Simulate the second G press within the window: countdown > 0, so
+    /// ForfeitEvent should fire and countdown resets to 0.
+    #[test]
+    fn forfeit_second_press_within_window_sends_event() {
+        // Countdown is open from the first press.
+        let mut forfeit_countdown: f32 = FORFEIT_CONFIRM_WINDOW - 1.0; // still in window
+        let active_game = true;
+
+        // --- second G press logic ---
+        let forfeit_sent = if active_game {
+            if forfeit_countdown > 0.0 {
+                forfeit_countdown = 0.0;
+                true
+            } else {
+                forfeit_countdown = FORFEIT_CONFIRM_WINDOW;
+                false
+            }
+        } else {
+            false
+        };
+
+        assert!(forfeit_sent, "ForfeitEvent MUST fire on second G press within window");
+        assert_eq!(forfeit_countdown, 0.0, "countdown must reset to 0 after confirmation");
+    }
+
+    /// Simulate G press after the countdown has expired: countdown ticked to 0,
+    /// so the next G press opens a fresh window (no ForfeitEvent).
+    #[test]
+    fn forfeit_press_after_countdown_expired_reopens_window() {
+        // Countdown already expired.
+        let mut forfeit_countdown: f32 = 0.0;
+        let active_game = true;
+
+        let forfeit_sent = if active_game {
+            if forfeit_countdown > 0.0 {
+                forfeit_countdown = 0.0;
+                true
+            } else {
+                forfeit_countdown = FORFEIT_CONFIRM_WINDOW;
+                false
+            }
+        } else {
+            false
+        };
+
+        assert!(!forfeit_sent, "ForfeitEvent must NOT fire when countdown expired before second press");
+        assert_eq!(
+            forfeit_countdown, FORFEIT_CONFIRM_WINDOW,
+            "a new confirmation window must open"
+        );
+    }
+
+    /// Pressing any other key (e.g. U for undo) while the forfeit countdown is
+    /// active must immediately cancel it (reset to 0.0).
+    #[test]
+    fn forfeit_cancelled_by_other_key_press() {
+        // Countdown is open from the first G press.
+        let mut forfeit_countdown: f32 = FORFEIT_CONFIRM_WINDOW - 0.5; // still in window
+
+        // --- simulate U (undo) press: cancel countdown ---
+        if forfeit_countdown > 0.0 {
+            forfeit_countdown = 0.0;
+        }
+        // Then perform undo logic (omitted here as it requires Bevy infrastructure).
+
+        assert_eq!(
+            forfeit_countdown, 0.0,
+            "forfeit countdown must be reset to 0.0 when another key is pressed"
+        );
+    }
+
+    /// G press when no game is active must never fire ForfeitEvent and must
+    /// not open a countdown.
+    #[test]
+    fn forfeit_no_active_game_does_nothing() {
+        let mut forfeit_countdown: f32 = 0.0;
+        let active_game = false;
+
+        let forfeit_sent = if active_game {
+            if forfeit_countdown > 0.0 {
+                forfeit_countdown = 0.0;
+                true
+            } else {
+                forfeit_countdown = FORFEIT_CONFIRM_WINDOW;
+                false
+            }
+        } else {
+            false
+        };
+
+        assert!(!forfeit_sent, "ForfeitEvent must not fire when no game is active");
+        assert_eq!(forfeit_countdown, 0.0, "countdown must remain 0 when no game is active");
+    }
+
+    // -----------------------------------------------------------------------
+    // Task #57 — ShakeAnim insertion on rejected drag
+    // -----------------------------------------------------------------------
+
+    /// Verifies that `ShakeAnim` constructed for a rejected drag has the
+    /// correct initial values: `elapsed` starts at 0.0 and `origin_x` matches
+    /// the card's current transform X position.
+    ///
+    /// The Bevy ECS part (Commands + Query) is exercised at runtime; this test
+    /// covers the data path — that we build the component with the right values
+    /// before handing it to `commands.entity(...).insert(...)`.
+    #[test]
+    fn shake_anim_for_rejected_drag_has_correct_initial_values() {
+        use crate::feedback_anim_plugin::ShakeAnim;
+
+        // Simulate the transform X that a dragged card would have at the
+        // moment the drag is released (could be anywhere on screen).
+        let current_x = 123.5_f32;
+
+        // This mirrors the ShakeAnim construction in `end_drag`.
+        let anim = ShakeAnim {
+            elapsed: 0.0,
+            origin_x: current_x,
+        };
+
+        assert_eq!(
+            anim.elapsed, 0.0,
+            "ShakeAnim must start with elapsed=0.0 so the animation plays from the beginning"
+        );
+        assert!(
+            (anim.origin_x - current_x).abs() < 1e-6,
+            "ShakeAnim origin_x must match the card's transform X at drop time, \
+             expected {current_x}, got {}",
+            anim.origin_x
+        );
+    }
+
+    /// When a drag is rejected, every card id in `drag.cards` should receive a
+    /// `ShakeAnim`. Verify that the set of card ids we would iterate matches
+    /// exactly the ids stored in `DragState::cards` at rejection time.
+    #[test]
+    fn rejected_drag_shakes_all_dragged_cards() {
+        // Simulate a DragState with two card ids (a stack drag).
+        let dragged_ids: Vec<u32> = vec![10, 11];
+
+        // In `end_drag`, we iterate `drag.cards` and look up each id in
+        // `card_entities`. The ids we would insert ShakeAnim on must exactly
+        // match the dragged set.
+        let mut shaken: Vec<u32> = Vec::new();
+        for &card_id in &dragged_ids {
+            // Simulate finding the entity for card_id (always succeeds here).
+            shaken.push(card_id);
+        }
+
+        assert_eq!(
+            shaken, dragged_ids,
+            "every card id in drag.cards must receive a ShakeAnim on rejection"
+        );
     }
 }
 

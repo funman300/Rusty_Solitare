@@ -14,6 +14,7 @@ use bevy::tasks::{futures_lite::future, AsyncComputeTaskPool, Task};
 use solitaire_data::settings::SyncBackend;
 use solitaire_sync::LeaderboardEntry;
 
+use crate::events::InfoToastEvent;
 use crate::settings_plugin::SettingsResource;
 use crate::sync_plugin::SyncProviderResource;
 
@@ -214,13 +215,22 @@ fn handle_opt_in_button(
     }
 }
 
-/// Polls the opt-in task; logs on error, clears on completion.
-fn poll_opt_in_task(mut task_res: ResMut<OptInTask>) {
+/// Polls the opt-in task; fires an `InfoToastEvent` on completion or failure.
+fn poll_opt_in_task(
+    mut task_res: ResMut<OptInTask>,
+    mut toast: EventWriter<InfoToastEvent>,
+) {
     let Some(task) = task_res.0.as_mut() else { return };
     let Some(result) = future::block_on(future::poll_once(task)) else { return };
     task_res.0 = None;
-    if let Err(e) = result {
-        warn!("leaderboard opt-in failed: {e}");
+    match result {
+        Ok(()) => {
+            toast.send(InfoToastEvent("Opted in to leaderboard".to_string()));
+        }
+        Err(e) => {
+            warn!("leaderboard opt-in failed: {e}");
+            toast.send(InfoToastEvent("Leaderboard update failed".to_string()));
+        }
     }
 }
 
@@ -245,13 +255,22 @@ fn handle_opt_out_button(
     }
 }
 
-/// Polls the opt-out task; logs on error, clears on completion.
-fn poll_opt_out_task(mut task_res: ResMut<OptOutTask>) {
+/// Polls the opt-out task; fires an `InfoToastEvent` on completion or failure.
+fn poll_opt_out_task(
+    mut task_res: ResMut<OptOutTask>,
+    mut toast: EventWriter<InfoToastEvent>,
+) {
     let Some(task) = task_res.0.as_mut() else { return };
     let Some(result) = future::block_on(future::poll_once(task)) else { return };
     task_res.0 = None;
-    if let Err(e) = result {
-        warn!("leaderboard opt-out failed: {e}");
+    match result {
+        Ok(()) => {
+            toast.send(InfoToastEvent("Opted out of leaderboard".to_string()));
+        }
+        Err(e) => {
+            warn!("leaderboard opt-out failed: {e}");
+            toast.send(InfoToastEvent("Leaderboard update failed".to_string()));
+        }
     }
 }
 

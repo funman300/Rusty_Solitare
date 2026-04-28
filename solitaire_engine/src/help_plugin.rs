@@ -1,6 +1,6 @@
 //! Toggleable on-screen help / cheat sheet showing keyboard bindings.
 //!
-//! Press **H** (or `?`) to toggle. Listed shortcuts are grouped by intent —
+//! Press **F1** to toggle. Listed shortcuts are grouped by intent —
 //! gameplay, modes, and overlays.
 
 use bevy::prelude::*;
@@ -22,8 +22,7 @@ fn toggle_help_screen(
     keys: Res<ButtonInput<KeyCode>>,
     screens: Query<Entity, With<HelpScreen>>,
 ) {
-    let pressed_help = keys.just_pressed(KeyCode::KeyH) || keys.just_pressed(KeyCode::Slash);
-    if !pressed_help {
+    if !keys.just_pressed(KeyCode::F1) {
         return;
     }
     if let Ok(entity) = screens.get_single() {
@@ -55,11 +54,12 @@ fn spawn_help_screen(commands: &mut Commands) {
         "  A            Achievements".to_string(),
         "  L            Leaderboard".to_string(),
         "  O            Settings".to_string(),
-        "  H or ?       This help screen".to_string(),
+        "  F1            This help screen".to_string(),
+        "  F11           Toggle fullscreen".to_string(),
         "  Esc          Pause / resume".to_string(),
         "  [ / ]        SFX volume down / up".to_string(),
         String::new(),
-        "Press H or ? to close".to_string(),
+        "Press F1 to close".to_string(),
     ];
 
     commands
@@ -107,11 +107,11 @@ mod tests {
     }
 
     #[test]
-    fn pressing_h_spawns_help_screen() {
+    fn pressing_f1_spawns_help_screen() {
         let mut app = headless_app();
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::KeyH);
+            .press(KeyCode::F1);
         app.update();
 
         assert_eq!(
@@ -124,18 +124,18 @@ mod tests {
     }
 
     #[test]
-    fn pressing_h_twice_closes_help_screen() {
+    fn pressing_f1_twice_closes_help_screen() {
         let mut app = headless_app();
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::KeyH);
+            .press(KeyCode::F1);
         app.update();
 
         {
             let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-            input.release(KeyCode::KeyH);
+            input.release(KeyCode::F1);
             input.clear();
-            input.press(KeyCode::KeyH);
+            input.press(KeyCode::F1);
         }
         app.update();
 
@@ -145,23 +145,6 @@ mod tests {
                 .iter(app.world())
                 .count(),
             0
-        );
-    }
-
-    #[test]
-    fn pressing_slash_also_toggles_help() {
-        let mut app = headless_app();
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Slash);
-        app.update();
-
-        assert_eq!(
-            app.world_mut()
-                .query::<&HelpScreen>()
-                .iter(app.world())
-                .count(),
-            1
         );
     }
 }

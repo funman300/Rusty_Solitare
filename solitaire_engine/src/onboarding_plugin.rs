@@ -1,11 +1,11 @@
 //! First-run onboarding banner.
 //!
 //! On startup, if `Settings.first_run_complete` is `false`, spawn a centered
-//! welcome banner pointing at the **H**/`?` cheat sheet. The first key or
+//! welcome banner pointing at the **F1** cheat sheet. The first key or
 //! mouse-button press dismisses it, sets the flag, and persists settings —
 //! so returning players never see it again.
 //!
-//! **Key highlights** (#49): The key names **D**, **H**, and **U** inside the
+//! **Key highlights** (#49): The key names **D** and **U** inside the
 //! instructional text are rendered in a bright orange colour via `TextSpan`
 //! children tagged with `KeyHighlightSpan`.
 
@@ -20,7 +20,7 @@ use crate::settings_plugin::{SettingsResource, SettingsStoragePath};
 #[derive(Component, Debug)]
 pub struct OnboardingScreen;
 
-/// Marker on `TextSpan` entities that display a key name (D, H, U …) in the
+/// Marker on `TextSpan` entities that display a key name (D, U …) in the
 /// onboarding banner.  Colour distinct from body text; usable by tests and any
 /// future flash-animation system.
 #[derive(Component, Debug)]
@@ -112,7 +112,7 @@ fn spawn_onboarding_screen(commands: &mut Commands) {
             b.spawn((Text::new(""), TextFont { font_size: 20.0, ..default() }));
 
             // Instruction line: "Drag cards between piles. Press D to draw, U to undo."
-            // D and U rendered as KeyHighlightSpan children with KEY_COLOR.
+            // D is tagged KeyHighlightSpan; U uses KEY_COLOR but not the marker.
             b.spawn((
                 Text::new("Drag cards between piles. Press "),
                 TextFont { font_size: 22.0, ..default() },
@@ -129,24 +129,12 @@ fn spawn_onboarding_screen(commands: &mut Commands) {
                 t.spawn((TextSpan::new(" to undo."), TextColor(BODY_COLOR)));
             });
 
-            // Help line: "Press H or ? at any time to see the full controls."
-            // H rendered as a KeyHighlightSpan child with KEY_COLOR.
+            // Help line: "Press F1 at any time to see the full controls."
             b.spawn((
-                Text::new("Press "),
+                Text::new("Press F1 at any time to see the full controls."),
                 TextFont { font_size: 22.0, ..default() },
                 TextColor(BODY_COLOR),
-            ))
-            .with_children(|t| {
-                t.spawn((
-                    TextSpan::new("H"),
-                    TextColor(KEY_COLOR),
-                    KeyHighlightSpan,
-                ));
-                t.spawn((
-                    TextSpan::new(" or ? at any time to see the full controls."),
-                    TextColor(BODY_COLOR),
-                ));
-            });
+            ));
 
             // Spacer
             b.spawn((Text::new(""), TextFont { font_size: 20.0, ..default() }));
@@ -237,9 +225,9 @@ mod tests {
     }
 
     #[test]
-    fn banner_has_two_key_highlight_spans() {
-        // D and H must be tagged KeyHighlightSpan so their colour is distinct
-        // from body text and future flash-animation systems can target them.
+    fn banner_has_key_highlight_span_for_d() {
+        // D must be tagged KeyHighlightSpan so its colour is distinct from body
+        // text and future flash-animation systems can target it.
         let mut app = headless_app();
         app.update();
         let count = app
@@ -247,7 +235,7 @@ mod tests {
             .query::<&KeyHighlightSpan>()
             .iter(app.world())
             .count();
-        assert_eq!(count, 2, "expected KeyHighlightSpan for D and H");
+        assert_eq!(count, 1, "expected KeyHighlightSpan for D");
     }
 
     #[test]

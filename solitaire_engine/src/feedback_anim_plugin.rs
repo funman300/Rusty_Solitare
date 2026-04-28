@@ -21,20 +21,31 @@
 //! When `NewGameRequestEvent` fires (on a fresh game, `move_count == 0`) or
 //! `NewGameConfirmEvent` fires, `start_deal_anim` reads `LayoutResource` and
 //! inserts a `CardAnim` on every card entity, sliding each card from the stock
-//! pile's position to its current (final) position with a per-card stagger of
-//! 0.04 s. `deal_stagger_delay` is a pure helper exposed for unit testing.
+//! pile's position to its current (final) position with a per-card stagger
+//! derived from the current `AnimSpeed` setting:
+//!
+//! | `AnimSpeed`   | Stagger           |
+//! |---------------|-------------------|
+//! | `Normal`      | 0.04 s (default)  |
+//! | `Fast`        | 0.02 s (half)     |
+//! | `Instant`     | 0.00 s (no delay) |
+//!
+//! `deal_stagger_delay` is a pure helper exposed for unit testing.
 
 use std::f32::consts::PI;
 
 use bevy::prelude::*;
 use solitaire_core::pile::PileType;
+use solitaire_data::AnimSpeed;
 
 use crate::animation_plugin::CardAnim;
 use crate::card_plugin::CardEntity;
 use crate::events::{MoveRejectedEvent, NewGameRequestEvent, StateChangedEvent};
 use crate::game_plugin::GameMutation;
 use crate::layout::LayoutResource;
+use crate::pause_plugin::PausedResource;
 use crate::resources::GameStateResource;
+use crate::settings_plugin::SettingsResource;
 
 // ---------------------------------------------------------------------------
 // Shared constants
@@ -114,17 +125,34 @@ pub fn settle_scale(elapsed: f32) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
-// Task #69 — Stagger delay helper
+// Task #69 — Stagger delay helpers
 // ---------------------------------------------------------------------------
 
-/// Returns the stagger delay in seconds for card at position `index` during the
-/// deal animation.
+/// Returns the per-card stagger delay in seconds for the given `AnimSpeed`.
 ///
-/// `delay = index * DEAL_STAGGER_SECS`
+/// | `AnimSpeed`   | Returned value |
+/// |---------------|----------------|
+/// | `Normal`      | `DEAL_STAGGER_SECS` (0.04 s) |
+/// | `Fast`        | `DEAL_STAGGER_SECS / 2` (0.02 s) |
+/// | `Instant`     | `0.0` — all cards appear simultaneously |
 ///
 /// This is a pure function exposed for unit testing without Bevy.
-pub fn deal_stagger_delay(index: usize) -> f32 {
-    index as f32 * DEAL_STAGGER_SECS
+pub fn deal_stagger_secs_for_speed(speed: &AnimSpeed) -> f32 {
+    match speed {
+        AnimSpeed::Normal => DEAL_STAGGER_SECS,
+        AnimSpeed::Fast => DEAL_STAGGER_SECS / 2.0,
+        AnimSpeed::Instant => 0.0,
+    }
+}
+
+/// Returns the stagger delay in seconds for card at position `index` during the
+/// deal animation, given a per-card stagger interval.
+///
+/// `delay = index * stagger_secs`
+///
+/// This is a pure function exposed for unit testing without Bevy.
+pub fn deal_stagger_delay(index: usize, stagger_secs: f32) -> f32 {
+    index as f32 * stagger_secs
 }
 
 // ---------------------------------------------------------------------------
@@ -186,12 +214,16 @@ fn start_shake_anim(
 ///
 /// Applies `translation.x = shake_offset(elapsed, origin_x)`. When done,
 /// restores `translation.x = origin_x` so the card is left at its correct
-/// position.
+/// position. Skipped while the game is paused.
 fn tick_shake_anim(
     mut commands: Commands,
     time: Res<Time>,
+    paused: Option<Res<PausedResource>>,
     mut anims: Query<(Entity, &mut Transform, &mut ShakeAnim)>,
 ) {
+    if paused.is_some_and(|p| p.0) {
+        return;
+    }
     let dt = time.delta_secs();
     for (entity, mut transform, mut anim) in &mut anims {
         anim.elapsed += dt;
@@ -238,12 +270,16 @@ fn start_settle_anim(
 /// Advances `SettleAnim` each frame and removes it once the animation completes.
 ///
 /// Applies `transform.scale.y = settle_scale(elapsed)`. Restores scale to 1.0
-/// when done.
+/// when done. Skipped while the game is paused.
 fn tick_settle_anim(
     mut commands: Commands,
     time: Res<Time>,
+    paused: Option<Res<PausedResource>>,
     mut anims: Query<(Entity, &mut Transform, &mut SettleAnim)>,
 ) {
+    if paused.is_some_and(|p| p.0) {
+        return;
+    }
     let dt = time.delta_secs();
     for (entity, mut transform, mut anim) in &mut anims {
         anim.elapsed += dt;
@@ -262,14 +298,16 @@ fn tick_settle_anim(
 
 /// Inserts `CardAnim` on every card entity when a new game starts, sliding
 /// each card from the stock pile position to its final position with a
-/// per-card stagger of `DEAL_STAGGER_SECS`.
+/// per-card stagger derived from the current `AnimSpeed` setting.
 ///
 /// Triggered by `NewGameRequestEvent` (when the new game has `move_count == 0`)
 /// and fires the deal animation for every card entity currently in the world.
+/// The stagger is looked up from `SettingsResource` via `deal_stagger_secs_for_speed`.
 fn start_deal_anim(
     mut events: EventReader<NewGameRequestEvent>,
     layout: Option<Res<LayoutResource>>,
     game: Res<GameStateResource>,
+    settings: Option<Res<SettingsResource>>,
     card_entities: Query<(Entity, &Transform), With<CardEntity>>,
     mut commands: Commands,
 ) {
@@ -284,6 +322,11 @@ fn start_deal_anim(
     let Some(&stock_pos) = layout.0.pile_positions.get(&PileType::Stock) else { return };
     let stock_start = Vec3::new(stock_pos.x, stock_pos.y, 0.0);
 
+    let speed = settings.as_ref().map(|s| &s.0.animation_speed);
+    let stagger_secs = speed
+        .map(deal_stagger_secs_for_speed)
+        .unwrap_or(DEAL_STAGGER_SECS);
+
     for (index, (entity, transform)) in card_entities.iter().enumerate() {
         let final_pos = transform.translation;
         commands.entity(entity).insert((
@@ -293,7 +336,7 @@ fn start_deal_anim(
                 target: final_pos,
                 elapsed: 0.0,
                 duration: DEAL_SLIDE_SECS,
-                delay: deal_stagger_delay(index),
+                delay: deal_stagger_delay(index, stagger_secs),
             },
         ));
     }
@@ -359,17 +402,50 @@ mod tests {
 
     #[test]
     fn deal_stagger_delay_zero_index_is_zero() {
-        assert_eq!(deal_stagger_delay(0), 0.0);
+        assert_eq!(deal_stagger_delay(0, DEAL_STAGGER_SECS), 0.0);
     }
 
     #[test]
-    fn deal_stagger_delay_returns_index_times_constant() {
+    fn deal_stagger_delay_returns_index_times_stagger() {
+        let stagger = DEAL_STAGGER_SECS;
         for i in 0..52 {
-            let expected = i as f32 * DEAL_STAGGER_SECS;
-            let actual = deal_stagger_delay(i);
+            let expected = i as f32 * stagger;
+            let actual = deal_stagger_delay(i, stagger);
             assert!(
                 (actual - expected).abs() < 1e-6,
-                "deal_stagger_delay({i}) expected {expected}, got {actual}"
+                "deal_stagger_delay({i}, {stagger}) expected {expected}, got {actual}"
+            );
+        }
+    }
+
+    #[test]
+    fn deal_stagger_secs_normal_is_constant() {
+        assert!((deal_stagger_secs_for_speed(&AnimSpeed::Normal) - DEAL_STAGGER_SECS).abs() < 1e-6);
+    }
+
+    #[test]
+    fn deal_stagger_secs_fast_is_half_normal() {
+        let fast = deal_stagger_secs_for_speed(&AnimSpeed::Fast);
+        let normal = deal_stagger_secs_for_speed(&AnimSpeed::Normal);
+        assert!(
+            (fast - normal / 2.0).abs() < 1e-6,
+            "Fast stagger must be half of Normal, got fast={fast} normal={normal}"
+        );
+    }
+
+    #[test]
+    fn deal_stagger_secs_instant_is_zero() {
+        assert_eq!(deal_stagger_secs_for_speed(&AnimSpeed::Instant), 0.0);
+    }
+
+    #[test]
+    fn deal_stagger_delay_instant_is_always_zero() {
+        let stagger = deal_stagger_secs_for_speed(&AnimSpeed::Instant);
+        for i in 0..52 {
+            assert_eq!(
+                deal_stagger_delay(i, stagger),
+                0.0,
+                "Instant speed must produce zero delay for index {i}"
             );
         }
     }

@@ -18,7 +18,7 @@ use solitaire_data::{load_settings_from, save_settings_to, settings_file_path, s
 
 use crate::events::ManualSyncRequestEvent;
 use crate::progress_plugin::ProgressResource;
-use crate::resources::{SyncStatus, SyncStatusResource};
+use crate::resources::{SettingsScrollPos, SyncStatus, SyncStatusResource};
 
 /// Volume adjustment step applied by the `[` / `]` hotkeys.
 pub const SFX_STEP: f32 = 0.1;
@@ -83,6 +83,10 @@ struct ColorBlindText;
 #[derive(Component, Debug)]
 struct SettingsPanelScrollable;
 
+/// Marks the scrollable inner card so its `ScrollPosition` can be read before despawn.
+#[derive(Component, Debug)]
+struct SettingsScrollNode;
+
 /// Tags interactive buttons inside the Settings panel.
 #[derive(Component, Debug)]
 enum SettingsButton {
@@ -139,6 +143,7 @@ impl Plugin for SettingsPlugin {
         app.insert_resource(SettingsResource(loaded))
             .insert_resource(SettingsStoragePath(self.storage_path.clone()))
             .init_resource::<SettingsScreen>()
+            .init_resource::<SettingsScrollPos>()
             .add_event::<SettingsChangedEvent>()
             .add_event::<ManualSyncRequestEvent>()
             .add_event::<bevy::input::mouse::MouseWheel>()
@@ -213,9 +218,12 @@ fn toggle_settings_screen(
 
 /// Spawns the Settings panel when `SettingsScreen` becomes `true`;
 /// despawns it when it becomes `false`.
+#[allow(clippy::too_many_arguments)]
 fn sync_settings_panel_visibility(
     screen: Res<SettingsScreen>,
     panels: Query<Entity, With<SettingsPanel>>,
+    scroll_nodes: Query<&ScrollPosition, With<SettingsScrollNode>>,
+    mut scroll_pos: ResMut<SettingsScrollPos>,
     mut commands: Commands,
     settings: Res<SettingsResource>,
     sync_status: Option<Res<SyncStatusResource>>,
@@ -243,9 +251,14 @@ fn sync_settings_panel_visibility(
                 &status_label,
                 unlocked_backs,
                 unlocked_bgs,
+                scroll_pos.0,
             );
         }
     } else {
+        // Save the current scroll offset before despawning the panel.
+        if let Ok(sp) = scroll_nodes.get_single() {
+            scroll_pos.0 = sp.offset_y;
+        }
         for entity in &panels {
             commands.entity(entity).despawn_recursive();
         }
@@ -557,6 +570,7 @@ fn spawn_settings_panel(
     sync_status: &str,
     unlocked_card_backs: &[usize],
     unlocked_backgrounds: &[usize],
+    scroll_offset: f32,
 ) {
     commands
         .spawn((
@@ -580,7 +594,8 @@ fn spawn_settings_panel(
             // on small windows by scrolling with the mouse wheel.
             root.spawn((
                 SettingsPanelScrollable,
-                ScrollPosition::default(),
+                SettingsScrollNode,
+                ScrollPosition { offset_y: scroll_offset, ..default() },
                 Node {
                     flex_direction: FlexDirection::Column,
                     padding: UiRect::all(Val::Px(28.0)),

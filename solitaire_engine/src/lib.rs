@@ -12,12 +12,14 @@ pub mod daily_challenge_plugin;
 pub mod events;
 pub mod game_plugin;
 pub mod help_plugin;
+pub mod home_plugin;
 pub mod hud_plugin;
 pub mod leaderboard_plugin;
 pub mod input_plugin;
 pub mod layout;
 pub mod onboarding_plugin;
 pub mod pause_plugin;
+pub mod profile_plugin;
 pub mod settings_plugin;
 pub mod progress_plugin;
 pub mod resources;
@@ -40,7 +42,8 @@ pub use progress_plugin::{LevelUpEvent, ProgressPlugin, ProgressResource, Progre
 pub use weekly_goals_plugin::{WeeklyGoalCompletedEvent, WeeklyGoalsPlugin};
 pub use animation_plugin::{ActiveToast, AnimationPlugin, CardAnim, ToastEntity, ToastQueue};
 pub use feedback_anim_plugin::{
-    deal_stagger_delay, shake_offset, settle_scale, FeedbackAnimPlugin, SettleAnim, ShakeAnim,
+    deal_stagger_delay, deal_stagger_secs_for_speed, shake_offset, settle_scale,
+    FeedbackAnimPlugin, SettleAnim, ShakeAnim,
 };
 pub use auto_complete_plugin::AutoCompletePlugin;
 pub use audio_plugin::{AudioPlugin, AudioState, SoundLibrary};
@@ -53,16 +56,18 @@ pub use events::{
 };
 pub use game_plugin::{ConfirmNewGameScreen, GameMutation, GameOverScreen, GamePlugin, GameStatePath};
 pub use help_plugin::{HelpPlugin, HelpScreen};
+pub use home_plugin::{HomePlugin, HomeScreen};
 pub use hud_plugin::{HudAutoComplete, HudPlugin};
 pub use leaderboard_plugin::{LeaderboardPlugin, LeaderboardResource, LeaderboardScreen};
 pub use input_plugin::InputPlugin;
 pub use onboarding_plugin::{OnboardingPlugin, OnboardingScreen};
 pub use pause_plugin::{PausePlugin, PauseScreen, PausedResource};
+pub use profile_plugin::{ProfilePlugin, ProfileScreen};
 pub use settings_plugin::{
     SettingsChangedEvent, SettingsPlugin, SettingsResource, SettingsScreen, SFX_STEP,
 };
 pub use layout::{compute_layout, Layout, LayoutResource};
-pub use resources::{DragState, GameStateResource, SyncStatus, SyncStatusResource};
+pub use resources::{DragState, GameStateResource, HintCycleIndex, SettingsScrollPos, SyncStatus, SyncStatusResource};
 pub use selection_plugin::{SelectionHighlight, SelectionPlugin, SelectionState};
 pub use stats_plugin::{StatsPlugin, StatsResource, StatsScreen, StatsUpdate};
 pub use sync_plugin::{SyncPlugin, SyncProviderResource};
@@ -71,5 +76,5 @@ pub use time_attack_plugin::{
     TimeAttackEndedEvent, TimeAttackPlugin, TimeAttackResource, TIME_ATTACK_DURATION_SECS,
 };
 pub use win_summary_plugin::{
-    format_win_time, ScreenShakeResource, WinSummaryPending, WinSummaryPlugin,
+    format_win_time, ScreenShakeResource, SessionAchievements, WinSummaryPending, WinSummaryPlugin,
 };

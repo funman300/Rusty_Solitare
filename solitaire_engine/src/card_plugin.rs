@@ -22,7 +22,7 @@ use solitaire_core::pile::PileType;
 use solitaire_core::rules::{can_place_on_foundation, can_place_on_tableau};
 
 use crate::animation_plugin::{CardAnim, EffectiveSlideDuration};
-use crate::events::{CardFlippedEvent, StateChangedEvent};
+use crate::events::{CardFaceRevealedEvent, CardFlippedEvent, StateChangedEvent};
 use crate::game_plugin::GameMutation;
 use crate::layout::{Layout, LayoutResource};
 use crate::pause_plugin::PausedResource;
@@ -87,6 +87,11 @@ pub struct HintHighlight {
 #[derive(Component, Debug)]
 pub struct RightClickHighlight;
 
+/// Marker placed on the child `Text2d` entity that shows "↺" on the stock pile
+/// marker when the stock pile is empty.
+#[derive(Component, Debug)]
+pub struct StockEmptyLabel;
+
 // ---------------------------------------------------------------------------
 // Task #34 — Card-flip animation
 // ---------------------------------------------------------------------------
@@ -137,7 +142,8 @@ impl Plugin for CardPlugin {
         app.init_resource::<ButtonInput<MouseButton>>()
             .add_event::<SettingsChangedEvent>()
             .add_event::<CardFlippedEvent>()
-            .add_systems(PostStartup, sync_cards_startup)
+            .add_event::<CardFaceRevealedEvent>()
+            .add_systems(PostStartup, (sync_cards_startup, update_stock_empty_indicator_startup))
             .add_systems(
                 Update,
                 (
@@ -148,6 +154,9 @@ impl Plugin for CardPlugin {
                     update_drag_shadow,
                     tick_hint_highlight,
                     handle_right_click,
+                    clear_right_click_highlights_on_state_change.after(GameMutation),
+                    clear_right_click_highlights_on_pause,
+                    update_stock_empty_indicator.after(GameMutation),
                 ),
             );
     }
@@ -508,16 +517,18 @@ fn start_flip_anim(
 /// Advances `CardFlipAnim` each frame, modifying `Transform::scale.x`.
 ///
 /// - Phase `ScalingDown`: lerps scale.x from 1.0 → 0.0 over `FLIP_HALF_SECS`.
-/// - At the midpoint the phase switches to `ScalingUp` and scale.x resets to 0.
+/// - At the midpoint the phase switches to `ScalingUp`, scale.x resets to 0,
+///   and a `CardFaceRevealedEvent` is fired so audio plays in sync with the reveal.
 /// - Phase `ScalingUp`:  lerps scale.x from 0.0 → 1.0 over `FLIP_HALF_SECS`.
 /// - When complete the component is removed and scale.x is restored to 1.0.
 fn tick_flip_anim(
     mut commands: Commands,
     time: Res<Time>,
-    mut anims: Query<(Entity, &mut Transform, &mut CardFlipAnim)>,
+    mut anims: Query<(Entity, &CardEntity, &mut Transform, &mut CardFlipAnim)>,
+    mut reveal_events: EventWriter<CardFaceRevealedEvent>,
 ) {
     let dt = time.delta_secs();
-    for (entity, mut transform, mut anim) in &mut anims {
+    for (entity, card_entity, mut transform, mut anim) in &mut anims {
         anim.timer += dt;
         match anim.phase {
             FlipPhase::ScalingDown => {
@@ -527,6 +538,9 @@ fn tick_flip_anim(
                     anim.phase = FlipPhase::ScalingUp;
                     anim.timer = 0.0;
                     transform.scale.x = 0.0;
+                    // Fire the reveal event exactly once, at the phase transition,
+                    // so the flip sound is synchronised with the visual face reveal.
+                    reveal_events.send(CardFaceRevealedEvent(card_entity.card_id));
                 }
             }
             FlipPhase::ScalingUp => {
@@ -650,6 +664,59 @@ const RIGHT_CLICK_HIGHLIGHT_COLOUR: Color = Color::srgba(0.2, 0.8, 0.2, 0.6);
 /// Restored color for `PileMarker` sprites when the highlight is cleared.
 const PILE_MARKER_DEFAULT_COLOUR: Color = Color::srgba(1.0, 1.0, 1.0, 0.08);
 
+/// Removes the `RightClickHighlight` marker from every highlighted pile and
+/// resets its sprite colour to `PILE_MARKER_DEFAULT_COLOUR`.
+///
+/// Shared by the on-state-change and on-pause clear systems to avoid
+/// duplicating the removal logic.
+fn clear_right_click_highlights(
+    commands: &mut Commands,
+    highlighted: &Query<Entity, With<RightClickHighlight>>,
+    pile_markers: &mut Query<(Entity, &PileMarker, &mut Sprite)>,
+) {
+    for entity in highlighted.iter() {
+        commands.entity(entity).remove::<RightClickHighlight>();
+    }
+    for (_entity, _, mut sprite) in pile_markers.iter_mut() {
+        if sprite.color == RIGHT_CLICK_HIGHLIGHT_COLOUR {
+            sprite.color = PILE_MARKER_DEFAULT_COLOUR;
+        }
+    }
+}
+
+/// Clears all right-click destination highlights whenever any game-state
+/// mutation succeeds (`StateChangedEvent` fires).
+///
+/// This ensures stale highlights do not linger after a card is moved.
+fn clear_right_click_highlights_on_state_change(
+    mut events: EventReader<StateChangedEvent>,
+    mut commands: Commands,
+    highlighted: Query<Entity, With<RightClickHighlight>>,
+    mut pile_markers: Query<(Entity, &PileMarker, &mut Sprite)>,
+) {
+    if events.read().next().is_none() {
+        return;
+    }
+    clear_right_click_highlights(&mut commands, &highlighted, &mut pile_markers);
+}
+
+/// Clears all right-click destination highlights when the game is paused
+/// (`PausedResource` changes to `true`).
+///
+/// Prevents highlighted pile markers from remaining visible behind the pause
+/// overlay.
+fn clear_right_click_highlights_on_pause(
+    paused: Option<Res<PausedResource>>,
+    mut commands: Commands,
+    highlighted: Query<Entity, With<RightClickHighlight>>,
+    mut pile_markers: Query<(Entity, &PileMarker, &mut Sprite)>,
+) {
+    let Some(paused) = paused else { return };
+    if paused.is_changed() && paused.0 {
+        clear_right_click_highlights(&mut commands, &highlighted, &mut pile_markers);
+    }
+}
+
 /// Handles right-click: highlights legal destination piles for the clicked card,
 /// and clears highlights on any subsequent right- or left-click.
 ///
@@ -764,6 +831,117 @@ fn find_top_card_at(
         }
     }
     best.map(|(_, card)| card)
+}
+
+// ---------------------------------------------------------------------------
+// Task #28 — Stock-empty visual indicator
+// ---------------------------------------------------------------------------
+
+/// Sprite colour applied to the stock `PileMarker` when the stock pile is empty,
+/// to signal to the player that there are no more cards to draw.
+const STOCK_EMPTY_DIM_COLOUR: Color = Color::srgba(1.0, 1.0, 1.0, 0.4);
+
+/// Sprite colour applied to the stock `PileMarker` when cards remain in stock.
+const STOCK_NORMAL_COLOUR: Color = Color::srgba(1.0, 1.0, 1.0, 0.08);
+
+/// Shared logic for updating the stock pile marker's dim state and "↺" label.
+///
+/// If the stock pile is empty the marker sprite is dimmed to
+/// `STOCK_EMPTY_DIM_COLOUR` and a child `Text2d` with `StockEmptyLabel` is
+/// spawned (if not already present). When the stock is non-empty the marker is
+/// restored to `STOCK_NORMAL_COLOUR` and any `StockEmptyLabel` children are
+/// despawned.
+fn apply_stock_empty_indicator(
+    commands: &mut Commands,
+    game: &GameState,
+    pile_markers: &mut Query<(Entity, &PileMarker, &mut Sprite)>,
+    label_children: &Query<(Entity, &Parent), With<StockEmptyLabel>>,
+    layout: &Layout,
+) {
+    let stock_empty = game
+        .piles
+        .get(&PileType::Stock)
+        .is_none_or(|p| p.cards.is_empty());
+
+    for (entity, pile_marker, mut sprite) in pile_markers.iter_mut() {
+        if pile_marker.0 != PileType::Stock {
+            continue;
+        }
+
+        if stock_empty {
+            // Dim the marker sprite.
+            sprite.color = STOCK_EMPTY_DIM_COLOUR;
+
+            // Spawn the "↺" label only if one does not already exist.
+            let already_has_label = label_children
+                .iter()
+                .any(|(_, parent)| parent.get() == entity);
+            if !already_has_label {
+                let font_size = layout.card_size.x * 0.4;
+                commands.entity(entity).with_children(|b| {
+                    b.spawn((
+                        StockEmptyLabel,
+                        Text2d::new("↺"),
+                        TextFont { font_size, ..default() },
+                        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7)),
+                        Transform::from_xyz(0.0, 0.0, 0.1),
+                    ));
+                });
+            }
+        } else {
+            // Restore normal brightness.
+            sprite.color = STOCK_NORMAL_COLOUR;
+
+            // Despawn any existing "↺" label children.
+            for (label_entity, parent) in label_children.iter() {
+                if parent.get() == entity {
+                    commands.entity(label_entity).despawn_recursive();
+                }
+            }
+        }
+    }
+}
+
+/// Runs at `PostStartup` to apply the stock-empty indicator for the initial
+/// game state (before any `StateChangedEvent` fires).
+fn update_stock_empty_indicator_startup(
+    mut commands: Commands,
+    game: Res<GameStateResource>,
+    layout: Option<Res<LayoutResource>>,
+    mut pile_markers: Query<(Entity, &PileMarker, &mut Sprite)>,
+    label_children: Query<(Entity, &Parent), With<StockEmptyLabel>>,
+) {
+    let Some(layout) = layout else { return };
+    apply_stock_empty_indicator(
+        &mut commands,
+        &game.0,
+        &mut pile_markers,
+        &label_children,
+        &layout.0,
+    );
+}
+
+/// Runs each `Update` tick when a `StateChangedEvent` arrives, keeping the
+/// stock pile marker dim state and "↺" label in sync with the current stock.
+fn update_stock_empty_indicator(
+    mut events: EventReader<StateChangedEvent>,
+    mut commands: Commands,
+    game: Res<GameStateResource>,
+    layout: Option<Res<LayoutResource>>,
+    mut pile_markers: Query<(Entity, &PileMarker, &mut Sprite)>,
+    label_children: Query<(Entity, &Parent), With<StockEmptyLabel>>,
+) {
+    if events.read().next().is_none() {
+        return;
+    }
+    let Some(layout) = layout else { return };
+    apply_stock_empty_indicator(
+        &mut commands,
+        &game.0,
+        &mut pile_markers,
+        &label_children,
+        &layout.0,
+    );
 }
 
 #[cfg(test)]

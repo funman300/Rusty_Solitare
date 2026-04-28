@@ -256,16 +256,35 @@ Done
 
 ### Bevy Plugins
 
-| Plugin | Responsibility |
-|---|---|
-| `CardPlugin` | Card entity spawning, sprite management, drag-and-drop |
-| `TablePlugin` | Pile markers, background, layout calculation |
-| `AnimationPlugin` | Slide, flip, win cascade, toast animations |
-| `AudioPlugin` | Sound effect and music playback via bevy_kira_audio |
-| `UIPlugin` | All Bevy UI screens: Home, Stats, Achievements, Settings, Profile |
-| `AchievementPlugin` | Listens for game events, evaluates unlock conditions, fires toasts |
-| `SyncPlugin` | Manages sync lifecycle (pull on start, push on exit, status display) |
-| `GamePlugin` | Core game state resource, input routing, win detection |
+| Plugin | Key | Responsibility |
+|---|---|---|
+| `CardPlugin` | — | Card entity spawning, sprite management, drag-and-drop |
+| `TablePlugin` | — | Pile markers, background, layout calculation |
+| `AnimationPlugin` | — | Slide, flip, win cascade, toast animations |
+| `FeedbackAnimPlugin` | — | Shake, settle, and deal-stagger animations |
+| `AutoCompletePlugin` | Enter | Executes auto-complete when the HUD badge is lit |
+| `AudioPlugin` | — | Sound effect and music playback via bevy_kira_audio |
+| `InputPlugin` | — | Keyboard and mouse input routing |
+| `CursorPlugin` | — | Custom cursor sprite during drag |
+| `SelectionPlugin` | — | Keyboard-driven card selection |
+| `GamePlugin` | N | Core game state resource, new-game flow, win/game-over overlays |
+| `HudPlugin` | — | Score, move counter, timer, auto-complete badge |
+| `StatsPlugin` | S | Stats overlay and persistence |
+| `ProgressPlugin` | — | XP/level system, persistence |
+| `AchievementPlugin` | A | Unlock evaluation, toast events, persistence |
+| `DailyChallengePlugin` | — | Daily challenge resource and completion tracking |
+| `WeeklyGoalsPlugin` | — | Weekly goal progress and completion events |
+| `ChallengePlugin` | — | Challenge mode progression (seeded hard deals) |
+| `TimeAttackPlugin` | — | 10-minute time-attack mode timer |
+| `HomePlugin` | M | Main-menu overlay with keyboard shortcut reference |
+| `ProfilePlugin` | P | Player profile overlay: level, XP, achievements, sync status |
+| `SettingsPlugin` | O | Settings panel: audio, draw mode, theme, sync, cosmetics |
+| `LeaderboardPlugin` | L | Leaderboard overlay |
+| `HelpPlugin` | H | Help / controls overlay |
+| `PausePlugin` | Esc | Pause and resume |
+| `OnboardingPlugin` | — | First-run welcome screen |
+| `SyncPlugin` | — | Async sync lifecycle (pull on start, push on exit, status display) |
+| `WinSummaryPlugin` | — | Win cascade overlay and screen-shake effect |
 
 ### Key Bevy Resources
 
@@ -588,6 +607,9 @@ pub enum PileType {
 
 pub enum DrawMode { DrawOne, DrawThree }
 
+/// Active game mode. Classic is the default; others unlock at level 5.
+pub enum GameMode { Classic, Zen, Challenge, TimeAttack }
+
 pub enum MoveError {
     InvalidSource,
     InvalidDestination,
@@ -600,13 +622,16 @@ pub enum MoveError {
 pub struct GameState {
     pub piles: HashMap<PileType, Vec<Card>>,
     pub draw_mode: DrawMode,
+    pub mode: GameMode,
     pub score: i32,
     pub move_count: u32,
+    pub undo_count: u32,        // number of undos used in this game
+    pub recycle_count: u32,     // number of stock recycles
     pub elapsed_seconds: u64,
     pub seed: u64,
     pub is_won: bool,
     pub is_auto_completable: bool,
-    undo_stack: Vec<StateSnapshot>,   // private, max 64
+    undo_stack: VecDeque<StateSnapshot>,   // private, max 64 (VecDeque for O(1) pop_front)
 }
 ```
 

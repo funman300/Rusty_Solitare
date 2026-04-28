@@ -7,13 +7,16 @@
 //! without a separate tick system.
 
 use bevy::prelude::*;
+use solitaire_core::card::Suit;
 use solitaire_core::game_state::{DrawMode, GameMode};
+use solitaire_core::pile::PileType;
 
 use crate::auto_complete_plugin::AutoCompleteState;
 use crate::daily_challenge_plugin::DailyChallengeResource;
 use crate::events::InfoToastEvent;
 use crate::game_plugin::GameMutation;
 use crate::resources::GameStateResource;
+use crate::selection_plugin::SelectionState;
 use crate::time_attack_plugin::TimeAttackResource;
 
 /// Marker on the score text node.
@@ -53,6 +56,33 @@ pub struct HudUndos;
 #[derive(Component, Debug)]
 pub struct HudAutoComplete;
 
+/// Marker on the stock-recycle counter text node.
+///
+/// Displays `"Recycles: N"` whenever `recycle_count > 0`, regardless of draw
+/// mode, so the player can track stock recycling in both Draw-One and
+/// Draw-Three (relevant to the `comeback` achievement). Hidden (empty string)
+/// until the first recycle occurs.
+#[derive(Component, Debug)]
+pub struct HudRecycles;
+
+/// Marker on the draw-cycle indicator text node.
+///
+/// Only shown in Draw-Three mode. Displays `"Cycle: N/3"` where N is the
+/// number of cards that will be drawn on the next stock click
+/// (`min(stock_len, 3)`). Shows `"Cycle: 0/3"` when the stock is empty
+/// (recycle available). Hidden (empty string) in Draw-One mode or after the
+/// game is won.
+#[derive(Component, Debug)]
+pub struct HudDrawCycle;
+
+/// Marker on the keyboard-selection indicator text node.
+///
+/// Displays `"▶ {pile_name}"` while a pile is selected via Tab, or an empty
+/// string when no pile is selected. Uses a light-yellow colour so it stands
+/// out from the other white HUD items.
+#[derive(Component, Debug)]
+pub struct HudSelection;
+
 /// HUD Z-layer — above cards (which start at z=0) but below overlay screens.
 const Z_HUD: i32 = 50;
 
@@ -62,7 +92,8 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_hud)
             .add_systems(Update, update_hud.after(GameMutation))
-            .add_systems(Update, announce_auto_complete.after(GameMutation));
+            .add_systems(Update, announce_auto_complete.after(GameMutation))
+            .add_systems(Update, update_selection_hud);
     }
 }
 
@@ -103,7 +134,7 @@ fn spawn_hud(mut commands: Commands) {
             b.spawn((
                 HudUndos,
                 Text::new(""),
-                font,
+                font.clone(),
                 white,
             ));
             // Auto-complete badge (green "AUTO" when sequence is running).
@@ -112,6 +143,27 @@ fn spawn_hud(mut commands: Commands) {
                 Text::new(""),
                 TextFont { font_size: 17.0, ..default() },
                 TextColor(Color::srgb(0.2, 0.9, 0.3)),
+            ));
+            // Recycle counter — hidden until the first recycle in either draw mode.
+            b.spawn((
+                HudRecycles,
+                Text::new(""),
+                font.clone(),
+                white,
+            ));
+            // Draw-cycle indicator — only visible in Draw-Three mode.
+            b.spawn((
+                HudDrawCycle,
+                Text::new(""),
+                font,
+                TextColor(Color::srgb(0.7, 0.85, 1.0)),
+            ));
+            // Keyboard-selection indicator — shows which pile is Tab-selected.
+            b.spawn((
+                HudSelection,
+                Text::new(""),
+                TextFont { font_size: 17.0, ..default() },
+                TextColor(Color::srgb(1.0, 1.0, 0.5)),
             ));
         });
 }
@@ -141,6 +193,9 @@ fn update_hud(
             Without<HudChallenge>,
             Without<HudUndos>,
             Without<HudAutoComplete>,
+            Without<HudRecycles>,
+            Without<HudDrawCycle>,
+            Without<HudSelection>,
         ),
     >,
     mut moves_q: Query<
@@ -153,6 +208,9 @@ fn update_hud(
             Without<HudChallenge>,
             Without<HudUndos>,
             Without<HudAutoComplete>,
+            Without<HudRecycles>,
+            Without<HudDrawCycle>,
+            Without<HudSelection>,
         ),
     >,
     mut time_q: Query<
@@ -165,6 +223,9 @@ fn update_hud(
             Without<HudChallenge>,
             Without<HudUndos>,
             Without<HudAutoComplete>,
+            Without<HudRecycles>,
+            Without<HudDrawCycle>,
+            Without<HudSelection>,
         ),
     >,
     mut mode_q: Query<
@@ -177,6 +238,9 @@ fn update_hud(
             Without<HudChallenge>,
             Without<HudUndos>,
             Without<HudAutoComplete>,
+            Without<HudRecycles>,
+            Without<HudDrawCycle>,
+            Without<HudSelection>,
         ),
     >,
     mut challenge_q: Query<
@@ -189,6 +253,9 @@ fn update_hud(
             Without<HudMode>,
             Without<HudUndos>,
             Without<HudAutoComplete>,
+            Without<HudRecycles>,
+            Without<HudDrawCycle>,
+            Without<HudSelection>,
         ),
     >,
     mut undos_q: Query<
@@ -201,6 +268,9 @@ fn update_hud(
             Without<HudMode>,
             Without<HudChallenge>,
             Without<HudAutoComplete>,
+            Without<HudRecycles>,
+            Without<HudDrawCycle>,
+            Without<HudSelection>,
         ),
     >,
     mut auto_q: Query<
@@ -213,6 +283,39 @@ fn update_hud(
             Without<HudMode>,
             Without<HudChallenge>,
             Without<HudUndos>,
+            Without<HudRecycles>,
+            Without<HudDrawCycle>,
+            Without<HudSelection>,
+        ),
+    >,
+    mut recycles_q: Query<
+        &mut Text,
+        (
+            With<HudRecycles>,
+            Without<HudScore>,
+            Without<HudMoves>,
+            Without<HudTime>,
+            Without<HudMode>,
+            Without<HudChallenge>,
+            Without<HudUndos>,
+            Without<HudAutoComplete>,
+            Without<HudDrawCycle>,
+            Without<HudSelection>,
+        ),
+    >,
+    mut draw_cycle_q: Query<
+        &mut Text,
+        (
+            With<HudDrawCycle>,
+            Without<HudScore>,
+            Without<HudMoves>,
+            Without<HudTime>,
+            Without<HudMode>,
+            Without<HudChallenge>,
+            Without<HudUndos>,
+            Without<HudAutoComplete>,
+            Without<HudRecycles>,
+            Without<HudSelection>,
         ),
     >,
 ) {
@@ -245,16 +348,19 @@ fn update_hud(
             };
         }
 
-        // --- Daily challenge constraint ---
-        if let Ok((mut t, _)) = challenge_q.get_single_mut() {
-            **t = if g.is_won {
-                // Hide constraint once the game is over.
-                String::new()
+        // --- Daily challenge constraint (with time-low colour warning) ---
+        if let Ok((mut t, mut color)) = challenge_q.get_single_mut() {
+            if g.is_won {
+                **t = String::new();
             } else if let Some(dc) = daily.as_deref() {
-                challenge_hud_text(dc)
+                **t = challenge_hud_text(dc);
+                if let Some(max_secs) = dc.max_time_secs {
+                    let remaining = max_secs.saturating_sub(g.elapsed_seconds);
+                    *color = TextColor(challenge_time_color(remaining));
+                }
             } else {
-                String::new()
-            };
+                **t = String::new();
+            }
         }
 
         // --- Undo count ---
@@ -269,10 +375,32 @@ fn update_hud(
                 *color = TextColor(Color::srgb(1.0, 0.7, 0.2));
             }
         }
+
+        // --- Recycle counter (both modes, hidden until first recycle) ---
+        if let Ok(mut t) = recycles_q.get_single_mut() {
+            **t = if g.recycle_count > 0 {
+                format!("Recycles: {}", g.recycle_count)
+            } else {
+                String::new()
+            };
+        }
+
+        // --- Draw-cycle indicator (Draw-Three mode only) ---
+        if let Ok(mut t) = draw_cycle_q.get_single_mut() {
+            **t = if g.is_won || g.draw_mode != DrawMode::DrawThree {
+                // Hide when not in Draw-Three or after the game is won.
+                String::new()
+            } else {
+                let stock_len = g.piles[&solitaire_core::pile::PileType::Stock].cards.len();
+                let next_draw = stock_len.min(3);
+                format!("Cycle: {next_draw}/3")
+            };
+        }
     }
 
     // Time display: show Time Attack countdown every frame when active;
-    // Zen mode suppresses the timer per spec ("No timer").
+    // Zen mode suppresses the timer per spec ("No timer") — cleared unconditionally
+    // every frame so it disappears immediately on the frame Z is pressed.
     // Otherwise show game elapsed time (updates once per second via game.is_changed()).
     let is_zen = game.0.mode == GameMode::Zen;
     let update_time = (ta_active || game.is_changed()) && !is_zen;
@@ -290,8 +418,10 @@ fn update_hud(
                 **t = format!("{m}:{s:02}");
             }
         }
-    } else if is_zen && game.is_changed() {
-        // Clear the time display when entering Zen mode.
+    } else if is_zen {
+        // Clear the time display immediately whenever Zen mode is active —
+        // do not guard on game.is_changed() so it clears on the same frame
+        // the player presses Z, before any move is made.
         if let Ok(mut t) = time_q.get_single_mut() {
             **t = String::new();
         }
@@ -310,6 +440,34 @@ fn update_hud(
             };
         }
     }
+}
+
+/// Updates the `HudSelection` text node to show which pile is Tab-selected.
+///
+/// Displays `"▶ {pile_name}"` while `SelectionState::selected_pile` is `Some`,
+/// or an empty string when no pile is selected. Runs every frame so the
+/// indicator stays in sync with the selection resource.
+fn update_selection_hud(
+    selection: Option<Res<SelectionState>>,
+    mut q: Query<&mut Text, With<HudSelection>>,
+) {
+    let Ok(mut t) = q.get_single_mut() else { return };
+    let label = match selection.as_deref().and_then(|s| s.selected_pile.as_ref()) {
+        None => String::new(),
+        Some(PileType::Waste) => "▶ Waste".to_string(),
+        Some(PileType::Stock) => "▶ Stock".to_string(),
+        Some(PileType::Foundation(suit)) => {
+            let s = match suit {
+                Suit::Clubs => "Clubs",
+                Suit::Diamonds => "Diamonds",
+                Suit::Hearts => "Hearts",
+                Suit::Spades => "Spades",
+            };
+            format!("▶ {s} Foundation")
+        }
+        Some(PileType::Tableau(idx)) => format!("▶ Column {}", idx + 1),
+    };
+    **t = label;
 }
 
 /// Fires `InfoToastEvent("Auto-completing...")` exactly once each time
@@ -339,6 +497,23 @@ fn challenge_hud_text(dc: &DailyChallengeResource) -> String {
         format!("Goal: {score} pts")
     } else {
         String::new()
+    }
+}
+
+/// Returns the colour for the challenge time-limit HUD label based on seconds remaining.
+///
+/// | Remaining   | Colour |
+/// |-------------|--------|
+/// | ≥ 60 s      | Cyan (default) |
+/// | 30 – 59 s   | Orange (warning) |
+/// | < 30 s      | Red (urgent) |
+pub fn challenge_time_color(remaining: u64) -> Color {
+    if remaining < 30 {
+        Color::srgb(1.0, 0.2, 0.2)
+    } else if remaining < 60 {
+        Color::srgb(1.0, 0.6, 0.0)
+    } else {
+        Color::srgb(0.4, 0.9, 1.0)
     }
 }
 
@@ -488,6 +663,42 @@ mod tests {
         assert_eq!(challenge_hud_text(&dc), "");
     }
 
+    #[test]
+    fn challenge_time_color_above_60_is_cyan() {
+        let c = challenge_time_color(61);
+        assert_eq!(c, Color::srgb(0.4, 0.9, 1.0));
+    }
+
+    #[test]
+    fn challenge_time_color_exactly_60_is_cyan() {
+        let c = challenge_time_color(60);
+        assert_eq!(c, Color::srgb(0.4, 0.9, 1.0));
+    }
+
+    #[test]
+    fn challenge_time_color_59_is_orange() {
+        let c = challenge_time_color(59);
+        assert_eq!(c, Color::srgb(1.0, 0.6, 0.0));
+    }
+
+    #[test]
+    fn challenge_time_color_30_is_orange() {
+        let c = challenge_time_color(30);
+        assert_eq!(c, Color::srgb(1.0, 0.6, 0.0));
+    }
+
+    #[test]
+    fn challenge_time_color_29_is_red() {
+        let c = challenge_time_color(29);
+        assert_eq!(c, Color::srgb(1.0, 0.2, 0.2));
+    }
+
+    #[test]
+    fn challenge_time_color_zero_is_red() {
+        let c = challenge_time_color(0);
+        assert_eq!(c, Color::srgb(1.0, 0.2, 0.2));
+    }
+
     // -----------------------------------------------------------------------
     // HudChallenge in-app tests
     // -----------------------------------------------------------------------
@@ -598,5 +809,50 @@ mod tests {
         app.world_mut().resource_mut::<GameStateResource>().0.move_count += 1;
         app.update();
         assert_eq!(read_hud_text::<HudAutoComplete>(&mut app), "");
+    }
+
+    // -----------------------------------------------------------------------
+    // HudRecycles in-app tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn recycles_hud_hidden_when_zero_in_draw_one_mode() {
+        let mut app = headless_app();
+        // Draw-One, no recycles yet — text must be empty.
+        app.world_mut().resource_mut::<GameStateResource>().0 =
+            GameState::new(42, DrawMode::DrawOne);
+        app.update();
+        assert_eq!(read_hud_text::<HudRecycles>(&mut app), "");
+    }
+
+    #[test]
+    fn recycles_hud_hidden_when_zero_in_draw_three_mode() {
+        let mut app = headless_app();
+        // Draw-Three, no recycles yet — text must also be empty.
+        app.world_mut().resource_mut::<GameStateResource>().0 =
+            GameState::new(42, DrawMode::DrawThree);
+        app.update();
+        assert_eq!(read_hud_text::<HudRecycles>(&mut app), "");
+    }
+
+    #[test]
+    fn recycles_hud_shows_count_draw_three() {
+        let mut app = headless_app();
+        let mut gs = GameState::new(42, DrawMode::DrawThree);
+        gs.recycle_count = 3;
+        app.world_mut().resource_mut::<GameStateResource>().0 = gs;
+        app.update();
+        assert_eq!(read_hud_text::<HudRecycles>(&mut app), "Recycles: 3");
+    }
+
+    #[test]
+    fn recycles_hud_shows_count_draw_one() {
+        let mut app = headless_app();
+        // Draw-One with recycle_count > 0 must now show the counter too.
+        let mut gs = GameState::new(42, DrawMode::DrawOne);
+        gs.recycle_count = 2;
+        app.world_mut().resource_mut::<GameStateResource>().0 = gs;
+        app.update();
+        assert_eq!(read_hud_text::<HudRecycles>(&mut app), "Recycles: 2");
     }
 }

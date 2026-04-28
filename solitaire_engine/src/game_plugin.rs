@@ -15,8 +15,8 @@ use solitaire_data::{delete_game_state_at, game_state_file_path, load_game_state
     save_game_state_to};
 
 use crate::events::{
-    DrawRequestEvent, GameWonEvent, InfoToastEvent, MoveRequestEvent, NewGameRequestEvent,
-    StateChangedEvent, UndoRequestEvent,
+    CardFlippedEvent, DrawRequestEvent, GameWonEvent, InfoToastEvent, MoveRequestEvent,
+    NewGameRequestEvent, StateChangedEvent, UndoRequestEvent,
 };
 use crate::resources::{DragState, GameStateResource, SyncStatusResource};
 
@@ -317,10 +317,38 @@ fn handle_draw(
     mut draws: EventReader<DrawRequestEvent>,
     mut game: ResMut<GameStateResource>,
     mut changed: EventWriter<StateChangedEvent>,
+    mut flipped: EventWriter<CardFlippedEvent>,
 ) {
+    use solitaire_core::pile::PileType;
+
     for _ in draws.read() {
+        // Capture which cards are about to be drawn (top of the stock pile)
+        // so we can fire flip events after they land face-up in the waste.
+        // Only relevant when stock is non-empty; a recycle moves waste back to
+        // stock face-down, so no flip events are needed in that case.
+        let drawn_ids: Vec<u32> = {
+            let stock = game.0.piles.get(&PileType::Stock);
+            match stock {
+                Some(p) if !p.cards.is_empty() => {
+                    let draw_count = match game.0.draw_mode {
+                        DrawMode::DrawOne => 1_usize,
+                        DrawMode::DrawThree => 3_usize,
+                    };
+                    let n = p.cards.len();
+                    let take = n.min(draw_count);
+                    // The top `take` cards (at the end of the vec) will be drawn.
+                    p.cards[n - take..].iter().map(|c| c.id).collect()
+                }
+                _ => Vec::new(),
+            }
+        };
+
         match game.0.draw() {
             Ok(()) => {
+                // Fire a flip event for each card that moved from stock to waste.
+                for id in drawn_ids {
+                    flipped.send(CardFlippedEvent(id));
+                }
                 changed.send(StateChangedEvent);
             }
             Err(e) => warn!("draw rejected: {e}"),
@@ -383,11 +411,17 @@ fn handle_undo(
     mut undos: EventReader<UndoRequestEvent>,
     mut game: ResMut<GameStateResource>,
     mut changed: EventWriter<StateChangedEvent>,
+    mut toast: EventWriter<InfoToastEvent>,
 ) {
+    use solitaire_core::error::MoveError;
+
     for _ in undos.read() {
         match game.0.undo() {
             Ok(()) => {
                 changed.send(StateChangedEvent);
+            }
+            Err(MoveError::UndoStackEmpty) => {
+                toast.send(InfoToastEvent("Nothing to undo".to_string()));
             }
             Err(e) => warn!("undo rejected: {e}"),
         }
@@ -509,7 +543,10 @@ fn check_no_moves(
     }
 }
 
-/// Spawns the full-screen game-over overlay with score display and action buttons.
+/// Spawns the full-screen game-over overlay with score display and action hints.
+///
+/// The background is intentionally semi-transparent (alpha 0.6) so the stuck
+/// card layout remains visible behind the dialog.
 fn spawn_game_over_screen(commands: &mut Commands, score: i32) {
     commands
         .spawn((
@@ -526,7 +563,7 @@ fn spawn_game_over_screen(commands: &mut Commands, score: i32) {
                 row_gap: Val::Px(20.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.78)),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
             ZIndex(200),
         ))
         .with_children(|root| {
@@ -543,9 +580,9 @@ fn spawn_game_over_screen(commands: &mut Commands, score: i32) {
                 BorderRadius::all(Val::Px(12.0)),
             ))
             .with_children(|card| {
-                // Title
+                // Header — explains why the overlay appeared.
                 card.spawn((
-                    Text::new("No More Moves"),
+                    Text::new("No more moves available"),
                     TextFont { font_size: 36.0, ..default() },
                     TextColor(Color::srgb(1.0, 0.4, 0.1)),
                 ));
@@ -555,23 +592,26 @@ fn spawn_game_over_screen(commands: &mut Commands, score: i32) {
                     TextFont { font_size: 24.0, ..default() },
                     TextColor(Color::WHITE),
                 ));
-                // Button row
-                card.spawn((Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(24.0),
-                    margin: UiRect::top(Val::Px(8.0)),
-                    ..default()
-                },))
-                .with_children(|row| {
-                    row.spawn((
-                        Text::new("New Game (N)"),
+                // Action hints — stacked vertically for legibility.
+                card.spawn((
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(8.0),
+                        margin: UiRect::top(Val::Px(8.0)),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                ))
+                .with_children(|hints| {
+                    hints.spawn((
+                        Text::new("Press N or Escape for a new game"),
                         TextFont { font_size: 20.0, ..default() },
                         TextColor(Color::srgb(0.3, 1.0, 0.4)),
                     ));
-                    row.spawn((
-                        Text::new("Undo (U)"),
+                    hints.spawn((
+                        Text::new("Press G to forfeit (counts as a loss)"),
                         TextFont { font_size: 20.0, ..default() },
-                        TextColor(Color::srgb(0.6, 0.8, 1.0)),
+                        TextColor(Color::srgb(1.0, 0.6, 0.2)),
                     ));
                 });
             });
@@ -580,10 +620,10 @@ fn spawn_game_over_screen(commands: &mut Commands, score: i32) {
 
 /// Handles keyboard input while `GameOverScreen` is open.
 ///
-/// `N` fires `NewGameRequestEvent` (which will trigger the confirm dialog if
-/// moves have been made). `U` fires `UndoRequestEvent` and despawns the overlay
-/// — the `check_no_moves` system will re-show it on the next `StateChangedEvent`
-/// if the undo did not restore any legal moves.
+/// `N` or `Escape` fires `NewGameRequestEvent` (which will trigger the confirm
+/// dialog if moves have been made). `U` fires `UndoRequestEvent` and despawns
+/// the overlay — the `check_no_moves` system will re-show it on the next
+/// `StateChangedEvent` if the undo did not restore any legal moves.
 fn handle_game_over_input(
     mut commands: Commands,
     keys: Option<Res<ButtonInput<KeyCode>>>,
@@ -598,7 +638,7 @@ fn handle_game_over_input(
         return;
     };
 
-    if keys.just_pressed(KeyCode::KeyN) {
+    if keys.just_pressed(KeyCode::KeyN) || keys.just_pressed(KeyCode::Escape) {
         new_game.send(NewGameRequestEvent::default());
     } else if keys.just_pressed(KeyCode::KeyU) {
         for entity in &screens {
@@ -1170,5 +1210,167 @@ mod tests {
             .iter(app.world())
             .count();
         assert_eq!(count, 1, "GameOverScreen must appear when no legal moves exist");
+    }
+
+    /// Verify that the game-over overlay contains the expected header text and
+    /// action-hint strings so players understand why the overlay appeared and
+    /// what keys to press.
+    #[test]
+    fn game_over_screen_text_content() {
+        use solitaire_core::card::{Card, Rank, Suit};
+
+        let mut app = test_app_with_input(1);
+
+        // Force a stuck state identical to `game_over_screen_spawns_when_stuck`.
+        {
+            let mut gs = app.world_mut().resource_mut::<GameStateResource>();
+            gs.0.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+            gs.0.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+            for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
+                gs.0.piles.get_mut(&PileType::Foundation(suit)).unwrap().cards.clear();
+            }
+            for i in 0..7_usize {
+                gs.0.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+            }
+            gs.0.piles.get_mut(&PileType::Tableau(0)).unwrap().cards.push(Card {
+                id: 1,
+                suit: Suit::Clubs,
+                rank: Rank::Two,
+                face_up: true,
+            });
+        }
+
+        app.world_mut().send_event(StateChangedEvent);
+        app.update();
+
+        // Collect all Text values that are children of the GameOverScreen entity tree.
+        let texts: Vec<String> = app
+            .world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|t| t.0.clone())
+            .collect();
+
+        assert!(
+            texts.iter().any(|t| t == "No more moves available"),
+            "header must read 'No more moves available'; found: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "Press N or Escape for a new game"),
+            "hint 1 must read 'Press N or Escape for a new game'; found: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "Press G to forfeit (counts as a loss)"),
+            "hint 2 must read 'Press G to forfeit (counts as a loss)'; found: {texts:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Task #56 — Escape dismisses GameOverScreen and starts new game
+    // -----------------------------------------------------------------------
+
+    /// Pressing Escape while `GameOverScreen` is visible must fire
+    /// `NewGameRequestEvent` — identical behaviour to pressing N.
+    #[test]
+    fn escape_on_game_over_screen_fires_new_game_request() {
+        use solitaire_core::card::{Card, Rank, Suit};
+
+        let mut app = test_app_with_input(1);
+
+        // Force a stuck state so GameOverScreen spawns.
+        {
+            let mut gs = app.world_mut().resource_mut::<GameStateResource>();
+            gs.0.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+            gs.0.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+            for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
+                gs.0.piles.get_mut(&PileType::Foundation(suit)).unwrap().cards.clear();
+            }
+            for i in 0..7_usize {
+                gs.0.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+            }
+            gs.0.piles.get_mut(&PileType::Tableau(0)).unwrap().cards.push(Card {
+                id: 1,
+                suit: Suit::Clubs,
+                rank: Rank::Two,
+                face_up: true,
+            });
+        }
+        app.world_mut().send_event(StateChangedEvent);
+        app.update();
+
+        // Confirm the overlay is present.
+        assert_eq!(
+            app.world_mut()
+                .query::<&GameOverScreen>()
+                .iter(app.world())
+                .count(),
+            1,
+            "GameOverScreen must be present before pressing Escape"
+        );
+
+        // Clear the NewGameRequestEvent queue so we start with a clean slate.
+        app.world_mut().resource_mut::<Events<NewGameRequestEvent>>().clear();
+
+        // Simulate Escape press.
+        {
+            let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            input.clear();
+            input.press(KeyCode::Escape);
+        }
+        app.update();
+
+        // NewGameRequestEvent must have been fired.
+        let events = app.world().resource::<Events<NewGameRequestEvent>>();
+        let mut reader = events.get_cursor();
+        assert!(
+            reader.read(events).next().is_some(),
+            "Escape on GameOverScreen must fire NewGameRequestEvent"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Task #48 — Undo with empty stack fires InfoToastEvent
+    // -----------------------------------------------------------------------
+
+    /// Sending `UndoRequestEvent` on a fresh game (empty undo stack) must fire
+    /// exactly one `InfoToastEvent` with the message "Nothing to undo".
+    #[test]
+    fn undo_on_empty_stack_fires_info_toast() {
+        let mut app = test_app(42);
+        // Fresh game — undo stack is empty, so undo() returns UndoStackEmpty.
+        app.world_mut().send_event(UndoRequestEvent);
+        app.update();
+
+        let events = app.world().resource::<Events<InfoToastEvent>>();
+        let mut reader = events.get_cursor();
+        let fired: Vec<_> = reader.read(events).collect();
+        assert_eq!(fired.len(), 1, "exactly one InfoToastEvent must fire on empty-stack undo");
+        assert_eq!(
+            fired[0].0,
+            "Nothing to undo",
+            "toast message must be 'Nothing to undo'"
+        );
+    }
+
+    /// A successful undo must NOT fire an `InfoToastEvent`.
+    #[test]
+    fn undo_after_draw_does_not_fire_info_toast() {
+        let mut app = test_app(42);
+        // Make a move so the undo stack is non-empty.
+        app.world_mut().send_event(DrawRequestEvent);
+        app.update();
+        // Clear events from the draw so we start with a clean slate.
+        app.world_mut().resource_mut::<Events<InfoToastEvent>>().clear();
+
+        app.world_mut().send_event(UndoRequestEvent);
+        app.update();
+
+        let events = app.world().resource::<Events<InfoToastEvent>>();
+        let mut reader = events.get_cursor();
+        let fired: Vec<_> = reader.read(events).collect();
+        assert!(
+            fired.is_empty(),
+            "no InfoToastEvent must fire on a successful undo"
+        );
     }
 }

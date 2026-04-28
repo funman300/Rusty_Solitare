@@ -3,9 +3,9 @@ use solitaire_data::{load_settings_from, provider_for_backend, settings_file_pat
 use solitaire_engine::{
     AchievementPlugin, AnimationPlugin, AudioPlugin, AutoCompletePlugin, CardPlugin,
     ChallengePlugin, CursorPlugin, DailyChallengePlugin, FeedbackAnimPlugin, GamePlugin,
-    HelpPlugin, HudPlugin, InputPlugin, LeaderboardPlugin, OnboardingPlugin, PausePlugin,
-    ProgressPlugin, SettingsPlugin, StatsPlugin, SyncPlugin, TablePlugin, TimeAttackPlugin,
-    WeeklyGoalsPlugin,
+    HelpPlugin, HomePlugin, HudPlugin, InputPlugin, LeaderboardPlugin, OnboardingPlugin,
+    PausePlugin, ProfilePlugin, ProgressPlugin, SettingsPlugin, StatsPlugin, SyncPlugin,
+    TablePlugin, TimeAttackPlugin, WeeklyGoalsPlugin,
 };
 
 fn main() {
@@ -44,6 +44,8 @@ fn main() {
         .add_plugins(TimeAttackPlugin)
         .add_plugins(HudPlugin)
         .add_plugins(HelpPlugin)
+        .add_plugins(HomePlugin)
+        .add_plugins(ProfilePlugin)
         .add_plugins(PausePlugin)
         .add_plugins(SettingsPlugin::default())
         .add_plugins(AudioPlugin)

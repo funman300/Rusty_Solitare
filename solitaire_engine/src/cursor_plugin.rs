@@ -216,10 +216,6 @@ mod tests {
     use super::*;
     use solitaire_core::card::{Card, Rank};
 
-    fn face_up(suit: Suit, rank: Rank) -> Card {
-        Card { id: 0, suit, rank, face_up: true }
-    }
-
     #[test]
     fn point_in_rect_center_is_inside() {
         assert!(point_in_rect(Vec2::ZERO, Vec2::ZERO, Vec2::new(10.0, 10.0)));

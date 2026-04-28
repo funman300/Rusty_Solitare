@@ -15,6 +15,7 @@ use solitaire_data::{
     WEEKLY_GOALS,
 };
 
+use crate::auto_complete_plugin::AutoCompleteState;
 use crate::challenge_plugin::challenge_progress_label;
 use crate::events::{ForfeitEvent, GameWonEvent, InfoToastEvent, NewGameRequestEvent};
 use crate::game_plugin::GameMutation;
@@ -128,17 +129,25 @@ fn update_stats_on_new_game(
     game: Res<GameStateResource>,
     mut stats: ResMut<StatsResource>,
     path: Res<StatsStoragePath>,
+    mut toast: EventWriter<InfoToastEvent>,
 ) {
     for _ in events.read() {
         if game.0.move_count > 0 && !game.0.is_won {
+            let streak = stats.0.win_streak_current;
             stats.0.record_abandoned();
             persist(&path, &stats.0, "abandoned game");
+            if streak > 1 {
+                toast.send(InfoToastEvent(format!("Streak of {streak} broken!")));
+            }
         }
     }
 }
 
 /// When the player presses G to forfeit, record the game as abandoned, save
 /// stats, fire an informational toast, and start a new game.
+///
+/// `AutoCompleteState` is reset here so the "AUTO" badge and chime do not bleed
+/// into the new deal (task #41).
 fn handle_forfeit(
     mut events: EventReader<ForfeitEvent>,
     game: Res<GameStateResource>,
@@ -146,11 +155,21 @@ fn handle_forfeit(
     path: Res<StatsStoragePath>,
     mut new_game: EventWriter<NewGameRequestEvent>,
     mut toast: EventWriter<InfoToastEvent>,
+    mut auto_complete: Option<ResMut<AutoCompleteState>>,
 ) {
     for _ in events.read() {
         if game.0.move_count > 0 && !game.0.is_won {
+            let streak = stats.0.win_streak_current;
             stats.0.record_abandoned();
             persist(&path, &stats.0, "forfeit");
+            if streak > 1 {
+                toast.send(InfoToastEvent(format!("Streak of {streak} broken!")));
+            }
+        }
+        // Reset auto-complete so the badge and chime don't carry over to the
+        // new game that is about to start.
+        if let Some(ref mut ac) = auto_complete {
+            **ac = AutoCompleteState::default();
         }
         toast.send(InfoToastEvent("Game forfeited".to_string()));
         new_game.send(NewGameRequestEvent::default());
@@ -186,12 +205,13 @@ fn spawn_stats_screen(
     progress: Option<&PlayerProgress>,
     time_attack: Option<&TimeAttackResource>,
 ) {
-    // --- primary stat cells (tasks #65 and #66) ---
+    // --- primary stat cells (tasks #65, #66, and #38) ---
     let win_rate_str  = format_win_rate(stats);
     let played_str    = format_stat_value(stats.games_played);
     let won_str       = format_stat_value(stats.games_won);
     let lost_str      = format_stat_value(stats.games_lost);
     let fastest_str   = format_fastest_win(stats.fastest_win_seconds);
+    let avg_time_str  = format_avg_time(stats);
     let best_score_str = format_optional_u32(stats.best_single_score);
     let best_streak_str = format_stat_value(stats.win_streak_best);
 
@@ -241,6 +261,7 @@ fn spawn_stats_screen(
                 spawn_stat_cell(grid, &won_str,         "Games Won");
                 spawn_stat_cell(grid, &lost_str,        "Games Lost");
                 spawn_stat_cell(grid, &fastest_str,     "Fastest Win");
+                spawn_stat_cell(grid, &avg_time_str,    "Avg Time");
                 spawn_stat_cell(grid, &best_score_str,  "Best Score");
                 spawn_stat_cell(grid, &best_streak_str, "Best Streak");
             });
@@ -380,6 +401,18 @@ pub fn format_fastest_win(fastest_win_seconds: u64) -> String {
     }
 }
 
+/// Format `avg_time_seconds` for display.
+///
+/// Returns `"—"` when no games have been won yet (`games_won == 0`), otherwise
+/// delegates to [`format_duration`].
+pub fn format_avg_time(stats: &StatsSnapshot) -> String {
+    if stats.games_won == 0 {
+        "\u{2014}".to_string()
+    } else {
+        format_duration(stats.avg_time_seconds)
+    }
+}
+
 /// Format an optional `u32` statistic.
 ///
 /// Returns `"—"` when `value` is `0`, otherwise the decimal representation.
@@ -417,13 +450,13 @@ fn xp_to_next_level_label(total_xp: u64, level: u32) -> String {
     format!("{remaining} XP ({pct}%)")
 }
 
-/// Format a duration given in whole seconds as `"Mm SSs"`.
+/// Format a duration given in whole seconds as `"M:SS"`.
 ///
-/// Example: `90` → `"1m 30s"`.
+/// Example: `90` → `"1:30"`.
 pub fn format_duration(secs: u64) -> String {
     let m = secs / 60;
     let s = secs % 60;
-    format!("{m}m {s:02}s")
+    format!("{m}:{s:02}")
 }
 
 /// Renders a sorted, comma-separated list of unlock indexes for the overlay.
@@ -630,22 +663,22 @@ mod tests {
 
     #[test]
     fn format_duration_zero_seconds() {
-        assert_eq!(format_duration(0), "0m 00s");
+        assert_eq!(format_duration(0), "0:00");
     }
 
     #[test]
     fn format_duration_pads_seconds_to_two_digits() {
-        assert_eq!(format_duration(65), "1m 05s");
+        assert_eq!(format_duration(65), "1:05");
     }
 
     #[test]
     fn format_duration_exactly_one_hour() {
-        assert_eq!(format_duration(3600), "60m 00s");
+        assert_eq!(format_duration(3600), "60:00");
     }
 
     #[test]
     fn format_duration_handles_sub_minute() {
-        assert_eq!(format_duration(59), "0m 59s");
+        assert_eq!(format_duration(59), "0:59");
     }
 
     // -----------------------------------------------------------------------
@@ -687,13 +720,109 @@ mod tests {
 
     #[test]
     fn format_fastest_win_90s() {
-        // 90 seconds → "1m 30s"
-        assert_eq!(format_fastest_win(90), "1m 30s");
+        // 90 seconds → "1:30"
+        assert_eq!(format_fastest_win(90), "1:30");
     }
 
     #[test]
     fn best_score_display_zero() {
         // best_single_score == 0 → "—"
         assert_eq!(format_optional_u32(0), "\u{2014}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Task #38 — avg time pure-function tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn format_avg_time_no_wins_shows_dash() {
+        // games_won == 0 → "—"
+        let s = StatsSnapshot::default();
+        assert_eq!(format_avg_time(&s), "\u{2014}");
+    }
+
+    #[test]
+    fn format_avg_time_after_single_win() {
+        // After one win of 90 s avg should be "1:30"
+        let s = StatsSnapshot {
+            games_won: 1,
+            avg_time_seconds: 90,
+            ..StatsSnapshot::default()
+        };
+        assert_eq!(format_avg_time(&s), "1:30");
+    }
+
+    #[test]
+    fn format_avg_time_after_multiple_wins() {
+        // avg_time_seconds = 200 s → "3:20"
+        let s = StatsSnapshot {
+            games_won: 3,
+            avg_time_seconds: 200,
+            ..StatsSnapshot::default()
+        };
+        assert_eq!(format_avg_time(&s), "3:20");
+    }
+
+    // -----------------------------------------------------------------------
+    // Task #49 — streak-broken toast on forfeit
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn forfeit_with_streak_fires_streak_broken_toast() {
+        let mut app = headless_app();
+
+        // Set up a streak of 3 and at least one move so forfeit counts.
+        {
+            let mut stats = app.world_mut().resource_mut::<StatsResource>();
+            stats.0.win_streak_current = 3;
+        }
+        app.world_mut()
+            .resource_mut::<crate::resources::GameStateResource>()
+            .0
+            .move_count = 1;
+
+        app.world_mut().send_event(ForfeitEvent);
+        app.update();
+
+        let events = app.world().resource::<Events<InfoToastEvent>>();
+        let mut reader = events.get_cursor();
+        let messages: Vec<&str> = reader
+            .read(events)
+            .map(|e| e.0.as_str())
+            .collect();
+
+        assert!(
+            messages.iter().any(|m| *m == "Streak of 3 broken!"),
+            "expected 'Streak of 3 broken!' in toasts, got: {messages:?}"
+        );
+    }
+
+    #[test]
+    fn forfeit_with_streak_of_one_does_not_fire_streak_broken_toast() {
+        let mut app = headless_app();
+
+        {
+            let mut stats = app.world_mut().resource_mut::<StatsResource>();
+            stats.0.win_streak_current = 1;
+        }
+        app.world_mut()
+            .resource_mut::<crate::resources::GameStateResource>()
+            .0
+            .move_count = 1;
+
+        app.world_mut().send_event(ForfeitEvent);
+        app.update();
+
+        let events = app.world().resource::<Events<InfoToastEvent>>();
+        let mut reader = events.get_cursor();
+        let messages: Vec<&str> = reader
+            .read(events)
+            .map(|e| e.0.as_str())
+            .collect();
+
+        assert!(
+            !messages.iter().any(|m| m.contains("broken")),
+            "expected no streak-broken toast for streak of 1, got: {messages:?}"
+        );
     }
 }

@@ -44,6 +44,7 @@ fn advance_on_challenge_win(
     mut progress: ResMut<ProgressResource>,
     path: Res<ProgressStoragePath>,
     mut advanced: EventWriter<ChallengeAdvancedEvent>,
+    mut toast: EventWriter<InfoToastEvent>,
 ) {
     for _ in wins.read() {
         if game.0.mode != GameMode::Challenge {
@@ -56,6 +57,9 @@ fn advance_on_challenge_win(
                 warn!("failed to save progress after challenge advance: {e}");
             }
         }
+        // Human-readable level is 1-based (index 0 → "Challenge 1").
+        let level_number = prev.saturating_add(1);
+        toast.send(InfoToastEvent(format!("Challenge {level_number} complete!")));
         advanced.send(ChallengeAdvancedEvent {
             previous_index: prev,
             new_index: progress.0.challenge_index,
@@ -197,6 +201,48 @@ mod tests {
         let total = challenge_count();
         assert_eq!(challenge_progress_label(0), format!("1 / {total}"));
         assert_eq!(challenge_progress_label(2), format!("3 / {total}"));
+    }
+
+    #[test]
+    fn challenge_win_fires_complete_toast_with_level_number() {
+        let mut app = headless_app();
+        // Set challenge_index to 2 so the completed level is "Challenge 3".
+        app.world_mut().resource_mut::<ProgressResource>().0.challenge_index = 2;
+        app.world_mut().resource_mut::<GameStateResource>().0 =
+            GameState::new_with_mode(1, DrawMode::DrawOne, GameMode::Challenge);
+
+        app.world_mut().send_event(GameWonEvent {
+            score: 500,
+            time_seconds: 100,
+        });
+        app.update();
+
+        let events = app.world().resource::<Events<InfoToastEvent>>();
+        let mut cursor = events.get_cursor();
+        let fired: Vec<_> = cursor.read(events).collect();
+        assert_eq!(fired.len(), 1, "exactly one toast must fire on challenge win");
+        assert!(
+            fired[0].0.contains("Challenge 3"),
+            "toast must name the 1-based level that was just completed"
+        );
+    }
+
+    #[test]
+    fn classic_win_does_not_fire_challenge_complete_toast() {
+        let mut app = headless_app();
+        // Default mode is Classic.
+        app.world_mut().send_event(GameWonEvent {
+            score: 500,
+            time_seconds: 100,
+        });
+        app.update();
+
+        let events = app.world().resource::<Events<InfoToastEvent>>();
+        let mut cursor = events.get_cursor();
+        assert!(
+            cursor.read(events).next().is_none(),
+            "no challenge toast should fire for non-Challenge wins"
+        );
     }
 
     #[test]

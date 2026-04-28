@@ -9,14 +9,20 @@
 //! input (drag, keyboard hotkeys) is **not** blocked — pause is purely a
 //! "stop the clock" screen for now. A future polish slice can layer
 //! input-blocking on top if desired.
+//!
+//! **Drag cancellation:** when Esc is pressed while a mouse drag is in
+//! progress, the drag is cancelled (cards snap back to their origin) and
+//! the pause overlay is **not** opened. Pressing Esc again with no drag
+//! active opens the overlay as normal.
 
 use bevy::prelude::*;
 use solitaire_core::game_state::DrawMode;
 use solitaire_data::save_game_state_to;
 
-use crate::game_plugin::GameStatePath;
+use crate::events::StateChangedEvent;
+use crate::game_plugin::{GameOverScreen, GameStatePath};
 use crate::progress_plugin::ProgressResource;
-use crate::resources::GameStateResource;
+use crate::resources::{DragState, GameStateResource};
 use crate::settings_plugin::{SettingsChangedEvent, SettingsResource, SettingsStoragePath};
 use crate::stats_plugin::StatsResource;
 
@@ -46,9 +52,10 @@ pub struct PausePlugin;
 
 impl Plugin for PausePlugin {
     fn build(&self, app: &mut App) {
-        // SettingsChangedEvent may already be registered by SettingsPlugin;
-        // add_event is idempotent so this is safe in either order.
+        // Both add_event calls are idempotent — other plugins may register these
+        // events first, but calling add_event again is always safe.
         app.add_event::<SettingsChangedEvent>()
+            .add_event::<StateChangedEvent>()
             .init_resource::<PausedResource>()
             .add_systems(Update, (toggle_pause, handle_pause_draw_toggle));
     }
@@ -60,14 +67,32 @@ fn toggle_pause(
     keys: Res<ButtonInput<KeyCode>>,
     mut paused: ResMut<PausedResource>,
     screens: Query<Entity, With<PauseScreen>>,
+    game_over_screens: Query<Entity, With<GameOverScreen>>,
     game: Option<Res<GameStateResource>>,
     path: Option<Res<GameStatePath>>,
     progress: Option<Res<ProgressResource>>,
     stats: Option<Res<StatsResource>>,
     settings: Option<Res<SettingsResource>>,
+    mut drag: Option<ResMut<DragState>>,
+    mut changed: EventWriter<StateChangedEvent>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
+    }
+    // If the game-over overlay is visible, let handle_game_over_input consume
+    // the Escape key (to start a new game). Do not open the pause overlay.
+    if !game_over_screens.is_empty() {
+        return;
+    }
+    // If a drag is in progress, cancel it instead of opening the pause overlay.
+    // Clearing DragState and emitting StateChangedEvent snaps the dragged cards
+    // back to their resting positions exactly as a rejected drop does.
+    if let Some(ref mut d) = drag {
+        if !d.is_idle() {
+            d.clear();
+            changed.send(StateChangedEvent);
+            return;
+        }
     }
     if let Ok(entity) = screens.get_single() {
         commands.entity(entity).despawn_recursive();

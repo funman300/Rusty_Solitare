@@ -56,6 +56,15 @@ pub struct GameWonEvent {
 #[derive(Event, Debug, Clone, Copy)]
 pub struct CardFlippedEvent(pub u32);
 
+/// Fired by the flip animation at its midpoint — the instant the card face
+/// becomes visible (scale.x crosses zero and the phase switches to ScalingUp).
+///
+/// Audio systems should listen to this event rather than `CardFlippedEvent`
+/// so the flip sound is synchronised with the visual reveal, not the move
+/// that triggered the animation.
+#[derive(Event, Debug, Clone, Copy)]
+pub struct CardFaceRevealedEvent(pub u32);
+
 /// Achievement unlocked notification carrying the full `AchievementRecord` for
 /// the newly unlocked achievement. Consumed by the toast renderer and any
 /// persistence/UI systems that need unlock metadata.

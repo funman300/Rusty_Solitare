@@ -10,9 +10,16 @@
 
 use bevy::prelude::*;
 
+use crate::audio_plugin::{AudioState, SoundLibrary};
 use crate::events::{MoveRequestEvent, StateChangedEvent};
 use crate::game_plugin::GameMutation;
 use crate::resources::GameStateResource;
+
+/// Volume amplitude used for the auto-complete activation chime.
+///
+/// Plays the win fanfare at half volume so it is clearly distinguishable from
+/// both normal card-place sounds and the full win fanfare that fires later.
+const AUTO_COMPLETE_CHIME_VOLUME: f64 = 0.5;
 
 /// Seconds between consecutive auto-complete moves.
 const STEP_INTERVAL: f32 = 0.12;
@@ -34,7 +41,11 @@ impl Plugin for AutoCompletePlugin {
         app.init_resource::<AutoCompleteState>()
             .add_systems(
                 Update,
-                (detect_auto_complete, drive_auto_complete)
+                (
+                    detect_auto_complete,
+                    on_auto_complete_start,
+                    drive_auto_complete,
+                )
                     .chain()
                     .after(GameMutation),
             );
@@ -64,6 +75,30 @@ fn detect_auto_complete(
     } else if !game.0.is_auto_completable {
         state.active = false;
     }
+}
+
+/// Plays a distinct chime the moment auto-complete first activates.
+///
+/// Uses a `Local<bool>` to remember the previous `active` state and fires
+/// exactly once on the `false → true` edge. The win fanfare is played at half
+/// volume (`AUTO_COMPLETE_CHIME_VOLUME`) so it is clearly recognisable but does
+/// not overwhelm the card-place sounds that follow immediately.
+fn on_auto_complete_start(
+    state: Res<AutoCompleteState>,
+    mut was_active: Local<bool>,
+    mut audio: Option<NonSendMut<AudioState>>,
+    lib: Option<Res<SoundLibrary>>,
+) {
+    let now_active = state.active;
+    let edge = now_active && !*was_active;
+    *was_active = now_active;
+
+    if !edge {
+        return;
+    }
+
+    let (Some(audio), Some(lib)) = (audio.as_mut(), lib) else { return };
+    audio.play_sfx_at_volume(&lib.fanfare, AUTO_COMPLETE_CHIME_VOLUME);
 }
 
 /// Fires one `MoveRequestEvent` per `STEP_INTERVAL` while auto-complete is active.

@@ -24,6 +24,7 @@ use crate::events::{InfoToastEvent, NewGameConfirmEvent, XpAwardedEvent};
 use crate::events::{AchievementUnlockedEvent, GameWonEvent};
 use crate::game_plugin::GameMutation;
 use crate::layout::LayoutResource;
+use crate::pause_plugin::PausedResource;
 use crate::progress_plugin::LevelUpEvent;
 use crate::settings_plugin::{SettingsChangedEvent, SettingsResource};
 use crate::time_attack_plugin::TimeAttackEndedEvent;
@@ -60,8 +61,41 @@ const WEEKLY_TOAST_SECS: f32 = 3.0;
 const TIME_ATTACK_TOAST_SECS: f32 = 5.0;
 const CHALLENGE_TOAST_SECS: f32 = 3.0;
 const VOLUME_TOAST_SECS: f32 = 1.4;
-const CASCADE_STAGGER: f32 = 0.05;
-const CASCADE_DURATION: f32 = 0.5;
+
+/// Per-card stagger interval for the win cascade at Normal speed (seconds).
+const CASCADE_STAGGER_NORMAL: f32 = 0.05;
+/// Duration of each card's cascade slide at Normal speed (seconds).
+const CASCADE_DURATION_NORMAL: f32 = 0.5;
+
+/// Returns the per-card stagger delay for the win cascade at the given `AnimSpeed`.
+///
+/// | `AnimSpeed` | Returned value |
+/// |-------------|----------------|
+/// | `Normal`    | 0.05 s         |
+/// | `Fast`      | 0.025 s        |
+/// | `Instant`   | 0.0 s          |
+pub fn cascade_step_secs(speed: AnimSpeed) -> f32 {
+    match speed {
+        AnimSpeed::Normal => CASCADE_STAGGER_NORMAL,
+        AnimSpeed::Fast => CASCADE_STAGGER_NORMAL / 2.0,
+        AnimSpeed::Instant => 0.0,
+    }
+}
+
+/// Returns the slide duration for each card in the win cascade at the given `AnimSpeed`.
+///
+/// | `AnimSpeed` | Returned value |
+/// |-------------|----------------|
+/// | `Normal`    | 0.5 s          |
+/// | `Fast`      | 0.25 s         |
+/// | `Instant`   | 0.0 s          |
+pub fn cascade_duration_secs(speed: AnimSpeed) -> f32 {
+    match speed {
+        AnimSpeed::Normal => CASCADE_DURATION_NORMAL,
+        AnimSpeed::Fast => CASCADE_DURATION_NORMAL / 2.0,
+        AnimSpeed::Instant => 0.0,
+    }
+}
 
 /// Linear-lerp slide animation.
 ///
@@ -181,11 +215,19 @@ fn sync_slide_duration(
     }
 }
 
+/// Advances all in-flight `CardAnim` slide animations.
+///
+/// Skipped while the game is paused so cards do not move while the pause
+/// overlay is open.
 fn advance_card_anims(
     mut commands: Commands,
     time: Res<Time>,
+    paused: Option<Res<PausedResource>>,
     mut anims: Query<(Entity, &mut Transform, &mut CardAnim)>,
 ) {
+    if paused.is_some_and(|p| p.0) {
+        return;
+    }
     let dt = time.delta_secs();
     for (entity, mut transform, mut anim) in &mut anims {
         if anim.delay > 0.0 {
@@ -206,6 +248,7 @@ fn handle_win_cascade(
     mut events: EventReader<GameWonEvent>,
     cards: Query<(Entity, &Transform), With<CardEntity>>,
     layout: Option<Res<LayoutResource>>,
+    settings: Option<Res<SettingsResource>>,
 ) {
     let Some(ev) = events.read().next() else {
         return;
@@ -230,13 +273,17 @@ fn handle_win_cascade(
     let win_msg = format!("You Win!  Score: {}  Time: {m}:{s:02}", ev.score);
     spawn_toast(&mut commands, win_msg, WIN_TOAST_SECS);
 
+    let speed = settings.as_ref().map(|s| s.0.animation_speed.clone());
+    let step = speed.clone().map(cascade_step_secs).unwrap_or(CASCADE_STAGGER_NORMAL);
+    let duration = speed.map(cascade_duration_secs).unwrap_or(CASCADE_DURATION_NORMAL);
+
     for (i, (entity, transform)) in cards.iter().enumerate() {
         commands.entity(entity).insert(CardAnim {
             start: transform.translation,
             target: targets[i % 8],
             elapsed: 0.0,
-            duration: CASCADE_DURATION,
-            delay: i as f32 * CASCADE_STAGGER,
+            duration,
+            delay: i as f32 * step,
         });
     }
 }
@@ -396,12 +443,21 @@ fn enqueue_toasts(
 /// This is the second half of the two-system toast queue (Task #67). When the
 /// active toast's timer reaches zero the entity is despawned and the next
 /// message in `ToastQueue` is shown.
+/// Pops and displays queued toasts one at a time, despawning each after
+/// `QUEUED_TOAST_SECS`.
+///
+/// Skipped while the game is paused so the active toast timer freezes and no
+/// new messages are dequeued.
 fn drive_toast_display(
     mut commands: Commands,
     time: Res<Time>,
+    paused: Option<Res<PausedResource>>,
     mut queue: ResMut<ToastQueue>,
     mut active: ResMut<ActiveToast>,
 ) {
+    if paused.is_some_and(|p| p.0) {
+        return;
+    }
     let dt = time.delta_secs();
 
     // Tick down the active toast timer.
@@ -459,11 +515,19 @@ fn handle_xp_awarded_toast(mut commands: Commands, mut events: EventReader<XpAwa
     }
 }
 
+/// Ticks down `ToastTimer` on each toast and despawns it when the timer expires.
+///
+/// Skipped while the game is paused so toast countdowns freeze along with the
+/// rest of the animation systems.
 fn tick_toasts(
     mut commands: Commands,
     time: Res<Time>,
+    paused: Option<Res<PausedResource>>,
     mut toasts: Query<(Entity, &mut ToastTimer)>,
 ) {
+    if paused.is_some_and(|p| p.0) {
+        return;
+    }
     let dt = time.delta_secs();
     for (entity, mut timer) in &mut toasts {
         timer.0 -= dt;
@@ -741,5 +805,49 @@ mod tests {
             .iter(app.world())
             .count();
         assert_eq!(after, 52, "all 52 cards should have cascade animations");
+    }
+
+    // -----------------------------------------------------------------------
+    // Task #52 — cascade timing helper tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn cascade_step_normal_is_expected_value() {
+        assert!((cascade_step_secs(AnimSpeed::Normal) - 0.05).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cascade_step_fast_is_half_normal() {
+        let normal = cascade_step_secs(AnimSpeed::Normal);
+        let fast = cascade_step_secs(AnimSpeed::Fast);
+        assert!(
+            (fast - normal / 2.0).abs() < 1e-6,
+            "Fast cascade step must be half of Normal; normal={normal} fast={fast}"
+        );
+    }
+
+    #[test]
+    fn cascade_step_instant_is_zero() {
+        assert_eq!(cascade_step_secs(AnimSpeed::Instant), 0.0);
+    }
+
+    #[test]
+    fn cascade_duration_normal_is_expected_value() {
+        assert!((cascade_duration_secs(AnimSpeed::Normal) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn cascade_duration_fast_is_half_normal() {
+        let normal = cascade_duration_secs(AnimSpeed::Normal);
+        let fast = cascade_duration_secs(AnimSpeed::Fast);
+        assert!(
+            (fast - normal / 2.0).abs() < 1e-6,
+            "Fast cascade duration must be half of Normal; normal={normal} fast={fast}"
+        );
+    }
+
+    #[test]
+    fn cascade_duration_instant_is_zero() {
+        assert_eq!(cascade_duration_secs(AnimSpeed::Instant), 0.0);
     }
 }

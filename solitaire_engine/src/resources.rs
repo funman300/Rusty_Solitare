@@ -53,3 +53,17 @@ pub enum SyncStatus {
 /// Bevy resource wrapping the current `SyncStatus`.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SyncStatusResource(pub SyncStatus);
+
+/// Tracks which hint the player is currently cycling through.
+///
+/// Incremented on each H press so repeated presses reveal different moves.
+/// Reset to `0` whenever the game state changes (move, draw, undo, new game).
+#[derive(Resource, Debug, Clone, Default)]
+pub struct HintCycleIndex(pub usize);
+
+/// Remembers the vertical scroll offset of the Settings panel between open/close cycles.
+///
+/// Saved when the panel is despawned and restored on next spawn so the player
+/// returns to the same position in the list without re-scrolling.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct SettingsScrollPos(pub f32);
