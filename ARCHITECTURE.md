@@ -851,16 +851,16 @@ Levels 11+:   level = 10 + floor((total_xp - 5000) / 1000)
 
 ## 14. Audio System
 
-Audio uses `bevy_kira_audio`. All sound files are `.ogg` (good compression, cross-platform, royalty-free).
+Audio uses `bevy_kira_audio`. All sound files are `.wav`.
 
 | File | Trigger |
 |---|---|
-| `card_deal.ogg` | New game deal animation |
-| `card_flip.ogg` | Card flips face-up |
-| `card_place.ogg` | Valid card placement |
-| `card_invalid.ogg` | Invalid move attempt |
-| `win_fanfare.ogg` | Game won |
-| `ambient_loop.ogg` | Looping background music (restarts seamlessly) |
+| `card_deal.wav` | New game deal animation |
+| `card_flip.wav` | Card flips face-up |
+| `card_place.wav` | Valid card placement |
+| `card_invalid.wav` | Invalid move attempt |
+| `win_fanfare.wav` | Game won |
+| `ambient_loop.wav` | Looping background music (restarts seamlessly) |
 
 Volume is controlled by two independent sliders in Settings (`sfx_volume`, `music_volume`), each stored in `Settings` and applied as `bevy_kira_audio` channel volumes.
 

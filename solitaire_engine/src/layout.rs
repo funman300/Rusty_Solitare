@@ -27,9 +27,16 @@ pub const TABLE_COLOUR: [f32; 3] = [0.059, 0.322, 0.196];
 /// Computed board layout for a given window size.
 #[derive(Debug, Clone)]
 pub struct Layout {
-    /// Width/height of a single card, in world units.
+    /// Width and height of a single card, in world units (Bevy 2D world-space).
+    ///
+    /// `x` is the card width; `y` is the card height (always `x * 1.4`).
+    /// All pile positions and fan offsets are derived from this value.
     pub card_size: Vec2,
-    /// Centre position of each pile, in world coordinates.
+    /// Centre position of each pile, in 2D world coordinates.
+    ///
+    /// World origin `(0, 0)` is the window centre; `+x` is right, `+y` is up.
+    /// Every `PileType` (Stock, Waste, four Foundations, seven Tableaux) has an
+    /// entry. The map always contains exactly 13 entries after `compute_layout`.
     pub pile_positions: HashMap<PileType, Vec2>,
 }
 

@@ -37,6 +37,11 @@ pub struct LevelUpEvent {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProgressUpdate;
 
+/// Bevy plugin that awards XP on `GameWonEvent`, persists `PlayerProgress`,
+/// and emits `LevelUpEvent` whenever a win crosses a level boundary.
+///
+/// Use `ProgressPlugin::default()` in the main app (reads/writes the platform
+/// data directory) and `ProgressPlugin::headless()` in tests (no I/O).
 pub struct ProgressPlugin {
     pub storage_path: Option<PathBuf>,
 }
