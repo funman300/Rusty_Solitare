@@ -23,13 +23,10 @@
 use std::io::Cursor;
 
 use bevy::prelude::*;
-use kira::manager::backend::DefaultBackend;
-use kira::manager::{AudioManager, AudioManagerSettings};
 use kira::sound::static_sound::{StaticSoundData, StaticSoundHandle};
 use kira::sound::Region;
 use kira::track::{TrackBuilder, TrackHandle};
-use kira::tween::Tween;
-use kira::Volume;
+use kira::{AudioManager, AudioManagerSettings, Decibels, DefaultBackend, Tween, Value};
 
 use crate::events::{
     CardFaceRevealedEvent, CardFlippedEvent, DrawRequestEvent, GameWonEvent, MoveRejectedEvent,
@@ -46,6 +43,16 @@ const RECYCLE_VOLUME: f64 = 0.5;
 /// Volume amplitude for the ambient music loop placeholder.
 const AMBIENT_VOLUME: f64 = 0.05;
 
+/// Converts a linear amplitude (0.0–1.0+) to the `Decibels` type used by
+/// kira 0.12. Clamps to `Decibels::SILENCE` for non-positive amplitudes.
+fn amplitude_to_decibels(amplitude: f32) -> Decibels {
+    if amplitude <= 0.0 {
+        Decibels::SILENCE
+    } else {
+        Decibels(20.0 * amplitude.log10())
+    }
+}
+
 /// Returns `true` when a `DrawRequestEvent` will recycle the waste pile back
 /// to stock rather than drawing a new card.
 ///
@@ -56,7 +63,7 @@ fn is_recycle(stock_len: usize) -> bool {
 }
 
 /// Pre-decoded sound effects. Cheap to clone (frames are an `Arc<[Frame]>`),
-/// so we hand a fresh handle to `manager.play()` on every event.
+/// so we hand a fresh handle to `track.play()` on every event.
 #[derive(Resource, Clone)]
 pub struct SoundLibrary {
     pub deal: StaticSoundData,
@@ -104,7 +111,7 @@ impl Plugin for AudioPlugin {
             warn!("failed to decode embedded SFX assets; SFX disabled");
         }
 
-        let (sfx_track, music_track) = match manager.as_mut() {
+        let (sfx_track, mut music_track) = match manager.as_mut() {
             Some(mgr) => {
                 let sfx = mgr.add_sub_track(TrackBuilder::default()).ok();
                 let music = mgr.add_sub_track(TrackBuilder::default()).ok();
@@ -116,7 +123,7 @@ impl Plugin for AudioPlugin {
         // Start the ambient loop placeholder (card_flip.wav looped at very low
         // volume through music_track).
         let ambient_handle =
-            start_ambient_loop(manager.as_mut(), library.as_ref(), &music_track);
+            start_ambient_loop(manager.as_mut(), library.as_ref(), &mut music_track);
 
         app.insert_non_send_resource(AudioState {
             manager,
@@ -190,20 +197,22 @@ fn decode(bytes: &'static [u8]) -> Option<StaticSoundData> {
 fn start_ambient_loop(
     manager: Option<&mut AudioManager<DefaultBackend>>,
     library: Option<&SoundLibrary>,
-    music_track: &Option<TrackHandle>,
+    music_track: &mut Option<TrackHandle>,
 ) -> Option<StaticSoundHandle> {
     let manager = manager?;
     let lib = library?;
 
     let mut data = lib.flip.clone();
-    // Loop the entire file from start to end.
     data.settings.loop_region = Some(Region::default());
-    data.settings.volume = Volume::Amplitude(AMBIENT_VOLUME).into();
-    if let Some(track) = music_track {
-        data.settings.output_destination = track.id().into();
-    }
+    data.settings.volume = Value::Fixed(amplitude_to_decibels(AMBIENT_VOLUME as f32));
 
-    match manager.play(data) {
+    let result = if let Some(track) = music_track.as_mut() {
+        track.play(data)
+    } else {
+        manager.play(data)
+    };
+
+    match result {
         Ok(handle) => Some(handle),
         Err(e) => {
             warn!("failed to start ambient loop: {e}");
@@ -213,16 +222,17 @@ fn start_ambient_loop(
 }
 
 fn play(audio: &mut AudioState, sound: &StaticSoundData) {
-    let Some(manager) = audio.manager.as_mut() else {
-        return;
-    };
+    let data = sound.clone();
     // Route SFX through the dedicated sfx_track so its volume is independent
     // of the music_track volume.
-    let mut data = sound.clone();
-    if let Some(track) = &audio.sfx_track {
-        data.settings.output_destination = track.id().into();
-    }
-    if let Err(e) = manager.play(data) {
+    let result = if let Some(track) = audio.sfx_track.as_mut() {
+        track.play(data)
+    } else if let Some(manager) = audio.manager.as_mut() {
+        manager.play(data)
+    } else {
+        return;
+    };
+    if let Err(e) = result {
         warn!("failed to play SFX: {e}");
     }
 }
@@ -234,15 +244,17 @@ impl AudioState {
     /// explicit volume override so callers can play sounds at a fraction of their
     /// normal level. Silently does nothing when audio is unavailable.
     pub fn play_sfx_at_volume(&mut self, sound: &StaticSoundData, volume: f64) {
-        let Some(manager) = self.manager.as_mut() else {
+        let mut data = sound.clone();
+        data.settings.volume = Value::Fixed(amplitude_to_decibels(volume as f32));
+
+        let result = if let Some(track) = self.sfx_track.as_mut() {
+            track.play(data)
+        } else if let Some(manager) = self.manager.as_mut() {
+            manager.play(data)
+        } else {
             return;
         };
-        let mut data = sound.clone();
-        data.settings.volume = Volume::Amplitude(volume).into();
-        if let Some(track) = &self.sfx_track {
-            data.settings.output_destination = track.id().into();
-        }
-        if let Err(e) = manager.play(data) {
+        if let Err(e) = result {
             warn!("failed to play SFX at volume {volume}: {e}");
         }
     }
@@ -250,13 +262,13 @@ impl AudioState {
 
 fn set_sfx_volume(audio: &mut AudioState, volume: f32) {
     if let Some(track) = audio.sfx_track.as_mut() {
-        track.set_volume(volume.clamp(0.0, 1.0) as f64, Tween::default());
+        track.set_volume(amplitude_to_decibels(volume.clamp(0.0, 1.0)), Tween::default());
     }
 }
 
 fn set_music_volume(audio: &mut AudioState, volume: f32) {
     if let Some(track) = audio.music_track.as_mut() {
-        track.set_volume(volume.clamp(0.0, 1.0) as f64, Tween::default());
+        track.set_volume(amplitude_to_decibels(volume.clamp(0.0, 1.0)), Tween::default());
     }
 }
 
@@ -345,14 +357,17 @@ fn play_on_draw(
 
         if is_recycle(stock_len) {
             let mut data = lib.flip.clone();
-            data.settings.volume = Volume::Amplitude(RECYCLE_VOLUME).into();
-            if let Some(track) = &audio.sfx_track {
-                data.settings.output_destination = track.id().into();
-            }
-            if let Some(manager) = audio.manager.as_mut() {
-                if let Err(e) = manager.play(data) {
-                    warn!("failed to play recycle SFX: {e}");
-                }
+            data.settings.volume =
+                Value::Fixed(amplitude_to_decibels(RECYCLE_VOLUME as f32));
+            let result = if let Some(track) = audio.sfx_track.as_mut() {
+                track.play(data)
+            } else if let Some(manager) = audio.manager.as_mut() {
+                manager.play(data)
+            } else {
+                continue;
+            };
+            if let Err(e) = result {
+                warn!("failed to play recycle SFX: {e}");
             }
         } else {
             play(&mut audio, &lib.flip);
