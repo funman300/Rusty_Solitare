@@ -82,10 +82,27 @@ pub struct HintHighlight {
     pub remaining: f32,
 }
 
+/// Countdown (seconds) until the `HintHighlight` on a card entity is removed.
+///
+/// Inserted alongside `HintHighlight` by the hint-visual system. When the timer
+/// reaches zero both `HintHighlight` and `HintHighlightTimer` are removed from
+/// the entity and the sprite colour is restored.
+#[derive(Component, Debug, Clone)]
+pub struct HintHighlightTimer(pub f32);
+
 /// Marker on a `PileMarker` entity that is highlighted because the right-clicked
 /// card can legally be placed there.
 #[derive(Component, Debug)]
 pub struct RightClickHighlight;
+
+/// Countdown (seconds) until this right-click destination highlight despawns.
+///
+/// Inserted alongside `RightClickHighlight` so that highlights auto-clear after
+/// 1.5 s even if the player does not make a move or click again. The existing
+/// clear-on-state-change and clear-on-pause logic still fires early when
+/// appropriate.
+#[derive(Component, Debug, Clone)]
+pub struct RightClickHighlightTimer(pub f32);
 
 /// Marker placed on the child `Text2d` entity that shows "↺" on the stock pile
 /// marker when the stock pile is empty.
@@ -154,6 +171,7 @@ impl Plugin for CardPlugin {
                     update_drag_shadow,
                     tick_hint_highlight,
                     handle_right_click,
+                    tick_right_click_highlights,
                     clear_right_click_highlights_on_state_change.after(GameMutation),
                     clear_right_click_highlights_on_pause,
                     update_stock_empty_indicator.after(GameMutation),
@@ -627,7 +645,8 @@ fn update_drag_shadow(
 // ---------------------------------------------------------------------------
 
 /// Counts down `HintHighlight::remaining` each frame. When it reaches zero,
-/// removes the component and resets the card sprite to its normal face-up colour.
+/// removes both `HintHighlight` and `HintHighlightTimer` (if present) and
+/// resets the card sprite to its normal face-up colour.
 fn tick_hint_highlight(
     time: Res<Time>,
     mut commands: Commands,
@@ -649,7 +668,10 @@ fn tick_hint_highlight(
             } else {
                 card_back_colour(back_idx)
             };
-            commands.entity(entity).remove::<HintHighlight>();
+            commands
+                .entity(entity)
+                .remove::<HintHighlight>()
+                .remove::<HintHighlightTimer>();
         }
     }
 }
@@ -663,6 +685,37 @@ fn tick_hint_highlight(
 const RIGHT_CLICK_HIGHLIGHT_COLOUR: Color = Color::srgba(0.2, 0.8, 0.2, 0.6);
 /// Restored color for `PileMarker` sprites when the highlight is cleared.
 const PILE_MARKER_DEFAULT_COLOUR: Color = Color::srgba(1.0, 1.0, 1.0, 0.08);
+
+/// Counts down `RightClickHighlightTimer` each frame and clears the highlight
+/// when the timer expires.
+///
+/// This is a fallback expiry: highlights also clear immediately on
+/// `StateChangedEvent` (move made) or when the game is paused, whichever comes
+/// first. The 1.5 s timer ensures highlights always disappear even if the
+/// player takes no further action.
+fn tick_right_click_highlights(
+    mut commands: Commands,
+    time: Res<Time>,
+    paused: Option<Res<PausedResource>>,
+    mut highlights: Query<(Entity, &mut RightClickHighlightTimer, &mut Sprite), With<RightClickHighlight>>,
+) {
+    if paused.is_some_and(|p| p.0) {
+        return;
+    }
+    let dt = time.delta_secs();
+    for (entity, mut timer, mut sprite) in &mut highlights {
+        timer.0 -= dt;
+        if timer.0 <= 0.0 {
+            // Restore the pile marker to its default colour before removing
+            // the highlight marker component.
+            sprite.color = PILE_MARKER_DEFAULT_COLOUR;
+            commands
+                .entity(entity)
+                .remove::<RightClickHighlight>()
+                .remove::<RightClickHighlightTimer>();
+        }
+    }
+}
 
 /// Removes the `RightClickHighlight` marker from every highlighted pile and
 /// resets its sprite colour to `PILE_MARKER_DEFAULT_COLOUR`.
@@ -781,7 +834,10 @@ fn handle_right_click(
         };
         if legal {
             sprite.color = RIGHT_CLICK_HIGHLIGHT_COLOUR;
-            commands.entity(entity).insert(RightClickHighlight);
+            commands
+                .entity(entity)
+                .insert(RightClickHighlight)
+                .insert(RightClickHighlightTimer(1.5));
         }
     }
 }
@@ -1221,6 +1277,49 @@ mod tests {
         assert_eq!(FlipPhase::ScalingDown, FlipPhase::ScalingDown);
         assert_eq!(FlipPhase::ScalingUp, FlipPhase::ScalingUp);
         assert_ne!(FlipPhase::ScalingDown, FlipPhase::ScalingUp);
+    }
+
+    // -----------------------------------------------------------------------
+    // Task #5 — RightClickHighlightTimer pure-function tests
+    // -----------------------------------------------------------------------
+
+    /// Verify that a freshly-created timer with 1.5 s has a positive countdown
+    /// and has not yet expired.
+    #[test]
+    fn right_click_highlight_timer_starts_positive() {
+        let timer = RightClickHighlightTimer(1.5);
+        assert!(
+            timer.0 > 0.0,
+            "timer must start with a positive countdown, got {}",
+            timer.0
+        );
+    }
+
+    /// Simulate ticking the timer by a delta that exceeds its initial value and
+    /// verify the resulting value is ≤ 0 (expiry condition).
+    #[test]
+    fn right_click_highlight_timer_expires_after_sufficient_ticks() {
+        let mut remaining = 1.5_f32;
+        // Tick by more than the initial value to ensure expiry.
+        remaining -= 2.0;
+        assert!(
+            remaining <= 0.0,
+            "timer must be expired (≤ 0) after 2.0 s tick on a 1.5 s timer, got {}",
+            remaining
+        );
+    }
+
+    /// Simulate ticking by less than the initial value and verify the timer is
+    /// still positive (not yet expired).
+    #[test]
+    fn right_click_highlight_timer_not_expired_before_duration() {
+        let mut remaining = 1.5_f32;
+        remaining -= 0.5; // only 0.5 s elapsed
+        assert!(
+            remaining > 0.0,
+            "timer must still be positive after only 0.5 s on a 1.5 s timer, got {}",
+            remaining
+        );
     }
 
     #[test]

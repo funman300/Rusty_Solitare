@@ -28,13 +28,13 @@ use solitaire_core::game_state::GameState;
 use solitaire_core::pile::PileType;
 use solitaire_core::rules::{can_place_on_foundation, can_place_on_tableau};
 
-use crate::card_plugin::{CardEntity, HintHighlight, TABLEAU_FAN_FRAC};
+use crate::card_plugin::{CardEntity, HintHighlight, HintHighlightTimer, TABLEAU_FAN_FRAC};
 use crate::feedback_anim_plugin::ShakeAnim;
 use solitaire_core::game_state::DrawMode;
 use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
 use crate::events::{
-    DrawRequestEvent, ForfeitEvent, InfoToastEvent, MoveRejectedEvent, MoveRequestEvent,
-    NewGameConfirmEvent, NewGameRequestEvent, StateChangedEvent, UndoRequestEvent,
+    DrawRequestEvent, ForfeitEvent, HintVisualEvent, InfoToastEvent, MoveRejectedEvent,
+    MoveRequestEvent, NewGameConfirmEvent, NewGameRequestEvent, StateChangedEvent, UndoRequestEvent,
 };
 use crate::game_plugin::GameMutation;
 use crate::pause_plugin::PausedResource;
@@ -61,6 +61,7 @@ impl Plugin for InputPlugin {
             .add_event::<NewGameConfirmEvent>()
             .add_event::<InfoToastEvent>()
             .add_event::<ForfeitEvent>()
+            .add_event::<HintVisualEvent>()
             .add_systems(
                 Update,
                 (
@@ -94,6 +95,7 @@ struct KeyboardEvents<'w> {
     info_toast: EventWriter<'w, InfoToastEvent>,
     draw: EventWriter<'w, DrawRequestEvent>,
     forfeit: EventWriter<'w, ForfeitEvent>,
+    hint_visual: EventWriter<'w, HintVisualEvent>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -237,7 +239,8 @@ fn handle_keyboard(
                                 for (entity, card_entity, _sprite) in card_entities.iter() {
                                     if card_entity.card_id == card_id {
                                         commands.entity(entity)
-                                            .insert(HintHighlight { remaining: 1.5 })
+                                            .insert(HintHighlight { remaining: 2.0 })
+                                            .insert(HintHighlightTimer(2.0))
                                             .insert(Sprite {
                                                 color: Color::srgba(1.0, 1.0, 0.4, 1.0),
                                                 custom_size: Some(layout_res.0.card_size),
@@ -246,6 +249,12 @@ fn handle_keyboard(
                                         break;
                                     }
                                 }
+                                // Emit HintVisualEvent so the destination pile
+                                // marker is also tinted gold for 2 s.
+                                ev.hint_visual.send(HintVisualEvent {
+                                    source_card_id: card_id,
+                                    dest_pile: to.clone(),
+                                });
                             }
                             // Fire an informational toast describing where the hinted card
                             // should move so the player always sees the suggestion in text.

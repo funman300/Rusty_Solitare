@@ -1,5 +1,6 @@
 //! Bevy integration layer for Solitaire Quest.
 
+pub mod card_animation;
 pub mod achievement_plugin;
 pub mod animation_plugin;
 pub mod auto_complete_plugin;
@@ -41,17 +42,27 @@ pub use daily_challenge_plugin::{
 pub use progress_plugin::{LevelUpEvent, ProgressPlugin, ProgressResource, ProgressUpdate};
 pub use weekly_goals_plugin::{WeeklyGoalCompletedEvent, WeeklyGoalsPlugin};
 pub use animation_plugin::{ActiveToast, AnimationPlugin, CardAnim, ToastEntity, ToastQueue};
+pub use card_animation::{
+    CardAnimation, CardAnimationPlugin, MotionCurve, WinCascadePlugin,
+    retarget_animation, sample_curve, compute_duration, cascade_delay, micro_vary,
+    HoverState, InputBuffer, BufferedInput,
+    win_scatter_targets, WIN_CASCADE_INTERVAL_SECS, DEAL_INTERVAL_SECS,
+    MIN_DURATION_SECS, MAX_DURATION_SECS,
+};
 pub use feedback_anim_plugin::{
     deal_stagger_delay, deal_stagger_secs_for_speed, shake_offset, settle_scale,
     FeedbackAnimPlugin, SettleAnim, ShakeAnim,
 };
 pub use auto_complete_plugin::AutoCompletePlugin;
 pub use audio_plugin::{AudioPlugin, AudioState, SoundLibrary};
-pub use card_plugin::{CardEntity, CardLabel, CardPlugin, HintHighlight, RightClickHighlight};
+pub use card_plugin::{
+    CardEntity, CardLabel, CardPlugin, HintHighlight, HintHighlightTimer, RightClickHighlight,
+    RightClickHighlightTimer,
+};
 pub use cursor_plugin::CursorPlugin;
 pub use events::{
     AchievementUnlockedEvent, CardFlippedEvent, DrawRequestEvent, ForfeitEvent, GameWonEvent,
-    InfoToastEvent, ManualSyncRequestEvent, MoveRejectedEvent, MoveRequestEvent,
+    HintVisualEvent, InfoToastEvent, ManualSyncRequestEvent, MoveRejectedEvent, MoveRequestEvent,
     NewGameConfirmEvent, NewGameRequestEvent, StateChangedEvent, UndoRequestEvent, XpAwardedEvent,
 };
 pub use game_plugin::{ConfirmNewGameScreen, GameMutation, GameOverScreen, GamePlugin, GameStatePath};
@@ -71,7 +82,7 @@ pub use resources::{DragState, GameStateResource, HintCycleIndex, SettingsScroll
 pub use selection_plugin::{SelectionHighlight, SelectionPlugin, SelectionState};
 pub use stats_plugin::{StatsPlugin, StatsResource, StatsScreen, StatsUpdate};
 pub use sync_plugin::{SyncPlugin, SyncProviderResource};
-pub use table_plugin::{PileMarker, TableBackground, TablePlugin};
+pub use table_plugin::{HintPileHighlight, PileMarker, TableBackground, TablePlugin};
 pub use time_attack_plugin::{
     TimeAttackEndedEvent, TimeAttackPlugin, TimeAttackResource, TIME_ATTACK_DURATION_SECS,
 };

@@ -102,3 +102,16 @@ pub struct XpAwardedEvent {
 /// persists stats, and starts a fresh deal.
 #[derive(Event, Debug, Clone, Copy, Default)]
 pub struct ForfeitEvent;
+
+/// Fired when the player requests a hint (H key). Carries the source card ID
+/// and destination pile for visual highlighting.
+///
+/// Consumed by `CardPlugin` (to apply `HintHighlight` on the card entity) and
+/// `TablePlugin` (to tint the destination `PileMarker` gold for 2 s).
+#[derive(Event, Debug, Clone)]
+pub struct HintVisualEvent {
+    /// The `Card::id` of the source card to be highlighted.
+    pub source_card_id: u32,
+    /// The destination pile whose `PileMarker` should be tinted gold.
+    pub dest_pile: solitaire_core::pile::PileType,
+}

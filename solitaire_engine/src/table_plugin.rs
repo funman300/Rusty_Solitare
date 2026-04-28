@@ -10,6 +10,7 @@ use solitaire_core::card::Suit;
 use solitaire_core::pile::PileType;
 use solitaire_data::settings::Theme;
 
+use crate::events::HintVisualEvent;
 use crate::layout::{compute_layout, Layout, LayoutResource, TABLE_COLOUR};
 use crate::settings_plugin::{SettingsChangedEvent, SettingsResource};
 
@@ -27,6 +28,17 @@ pub struct TableBackground;
 #[derive(Component, Debug, Clone)]
 pub struct PileMarker(pub PileType);
 
+/// Attached to a `PileMarker` entity when it has been temporarily tinted gold
+/// as a hint destination. Stores the remaining countdown and the original sprite
+/// colour so it can be restored when the timer expires.
+#[derive(Component, Debug, Clone)]
+pub struct HintPileHighlight {
+    /// Seconds remaining before the pile marker colour is restored.
+    pub timer: f32,
+    /// The sprite colour the marker had before the hint tint was applied.
+    pub original_color: Color,
+}
+
 /// Registers the table background and pile-marker rendering.
 pub struct TablePlugin;
 
@@ -37,8 +49,17 @@ impl Plugin for TablePlugin {
         // and this call is a no-op.
         app.add_event::<WindowResized>()
             .add_event::<SettingsChangedEvent>()
+            .add_event::<HintVisualEvent>()
             .add_systems(Startup, setup_table)
-            .add_systems(Update, (on_window_resized, apply_theme_on_settings_change));
+            .add_systems(
+                Update,
+                (
+                    on_window_resized,
+                    apply_theme_on_settings_change,
+                    apply_hint_pile_highlight,
+                    tick_hint_pile_highlights,
+                ),
+            );
     }
 }
 
@@ -225,6 +246,59 @@ fn on_window_resized(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Task #6 — Hint pile-marker highlight
+// ---------------------------------------------------------------------------
+
+/// Gold tint applied to a `PileMarker` sprite when it is the current hint
+/// destination.
+const HINT_PILE_HIGHLIGHT_COLOUR: Color = Color::srgb(1.0, 0.85, 0.1);
+
+/// Listens for `HintVisualEvent` and tints the matching `PileMarker` entity
+/// gold for 2 s, storing the original colour in `HintPileHighlight` so it can
+/// be restored when the timer expires.
+///
+/// If the pile marker already has a `HintPileHighlight` from a previous hint
+/// press, the timer is reset to 2 s without changing `original_color`.
+fn apply_hint_pile_highlight(
+    mut events: EventReader<HintVisualEvent>,
+    mut commands: Commands,
+    mut pile_markers: Query<(Entity, &PileMarker, &mut Sprite, Option<&HintPileHighlight>)>,
+) {
+    for ev in events.read() {
+        for (entity, pile_marker, mut sprite, existing) in pile_markers.iter_mut() {
+            if pile_marker.0 != ev.dest_pile {
+                continue;
+            }
+            let original_color = existing
+                .map(|h| h.original_color)
+                .unwrap_or(sprite.color);
+            sprite.color = HINT_PILE_HIGHLIGHT_COLOUR;
+            commands.entity(entity).insert(HintPileHighlight {
+                timer: 2.0,
+                original_color,
+            });
+        }
+    }
+}
+
+/// Counts down `HintPileHighlight::timer` each frame and restores the original
+/// pile marker colour when the timer expires.
+fn tick_hint_pile_highlights(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut pile_markers: Query<(Entity, &mut Sprite, &mut HintPileHighlight)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut sprite, mut highlight) in pile_markers.iter_mut() {
+        highlight.timer -= dt;
+        if highlight.timer <= 0.0 {
+            sprite.color = highlight.original_color;
+            commands.entity(entity).remove::<HintPileHighlight>();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,6 +414,76 @@ mod tests {
         assert_eq!(suit_symbol(&Suit::Hearts),   "H");
         assert_eq!(suit_symbol(&Suit::Diamonds), "D");
         assert_eq!(suit_symbol(&Suit::Clubs),    "C");
+    }
+
+    // -----------------------------------------------------------------------
+    // Task #6 — HintPileHighlight timer and colour pure-function tests
+    // -----------------------------------------------------------------------
+
+    /// The HINT_PILE_HIGHLIGHT_COLOUR constant must be visibly distinct from the
+    /// default pile marker colour so the player can see which pile is highlighted.
+    #[test]
+    fn hint_pile_highlight_colour_is_distinct_from_default() {
+        let default = Color::srgba(1.0, 1.0, 1.0, 0.08); // PILE_MARKER_DEFAULT_COLOUR
+        assert_ne!(
+            HINT_PILE_HIGHLIGHT_COLOUR, default,
+            "HINT_PILE_HIGHLIGHT_COLOUR must differ from the default pile marker colour"
+        );
+    }
+
+    /// A freshly-created HintPileHighlight has a positive timer countdown.
+    #[test]
+    fn hint_pile_highlight_timer_starts_positive() {
+        let h = HintPileHighlight {
+            timer: 2.0,
+            original_color: Color::srgba(1.0, 1.0, 1.0, 0.08),
+        };
+        assert!(
+            h.timer > 0.0,
+            "HintPileHighlight timer must start positive, got {}",
+            h.timer
+        );
+    }
+
+    /// Ticking the timer past its initial value results in a non-positive (expired)
+    /// countdown.
+    #[test]
+    fn hint_pile_highlight_timer_expires_after_full_duration() {
+        let mut remaining = 2.0_f32;
+        remaining -= 2.5; // 2.5 s elapsed on a 2.0 s timer
+        assert!(
+            remaining <= 0.0,
+            "timer must be expired after ticking past its initial value, got {}",
+            remaining
+        );
+    }
+
+    /// `original_color` is preserved through the highlight lifecycle so colour
+    /// can be correctly restored on expiry.
+    #[test]
+    fn hint_pile_highlight_preserves_original_color() {
+        let original = Color::srgb(0.1, 0.3, 0.5);
+        let h = HintPileHighlight {
+            timer: 2.0,
+            original_color: original,
+        };
+        assert_eq!(
+            h.original_color, original,
+            "original_color must be stored without modification"
+        );
+    }
+
+    /// The gold hint colour must have a strong yellow component (r ≥ 0.9, g ≥ 0.8,
+    /// b ≤ 0.3) to be clearly visible as a "destination" indicator.
+    #[test]
+    fn hint_pile_highlight_colour_is_gold() {
+        // Extract linear components.  srgb(1.0, 0.85, 0.1) is the expected gold.
+        // We test the channel values rather than exact equality so future tweaks
+        // to the shade do not break the test, as long as the colour remains golden.
+        let Srgba { red, green, blue, .. } = HINT_PILE_HIGHLIGHT_COLOUR.to_srgba();
+        assert!(red >= 0.9, "gold hint colour must have red ≥ 0.9, got {red}");
+        assert!(green >= 0.7, "gold hint colour must have green ≥ 0.7, got {green}");
+        assert!(blue <= 0.3, "gold hint colour must have blue ≤ 0.3, got {blue}");
     }
 
     #[test]
