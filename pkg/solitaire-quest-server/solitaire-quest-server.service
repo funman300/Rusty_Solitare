@@ -1,0 +1,23 @@
+[Unit]
+Description=Solitaire Quest Sync Server
+Documentation=https://github.com/funman300/solitaire-quest/blob/main/README_SERVER.md
+After=network.target
+
+[Service]
+Type=simple
+User=solitaire-quest
+Group=solitaire-quest
+EnvironmentFile=/etc/solitaire-quest-server/server.env
+ExecStart=/usr/bin/solitaire_server
+Restart=on-failure
+RestartSec=5s
+
+# Harden the service
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/solitaire-quest-server
+
+[Install]
+WantedBy=multi-user.target

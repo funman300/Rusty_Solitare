@@ -1,0 +1,63 @@
+# Maintainer: funman300 <funman300@gmail.com>
+
+pkgname=solitaire-quest-server
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Self-hosted sync server for Solitaire Quest (stats, achievements, leaderboards)'
+url='https://github.com/funman300/solitaire-quest'
+license=('MIT')
+arch=('x86_64')
+makedepends=('cargo' 'rust')
+depends=(
+    'gcc-libs'
+    'glibc'
+)
+backup=('etc/solitaire-quest-server/server.env')
+source=(
+    "$pkgname-$pkgver.tar.gz::https://github.com/funman300/solitaire-quest/archive/v$pkgver.tar.gz"
+    'solitaire-quest-server.service'
+    'server.env'
+)
+b2sums=('SKIP'
+        'SKIP'
+        'SKIP')
+
+prepare() {
+    cd "solitaire-quest-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo fetch --locked --target "$(rustc -Vv | grep host | cut -d' ' -f2)"
+}
+
+build() {
+    cd "solitaire-quest-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    export CARGO_TARGET_DIR=target
+    cargo build --frozen --release -p solitaire_server
+}
+
+check() {
+    cd "solitaire-quest-$pkgver"
+    export RUSTUP_TOOLCHAIN=stable
+    cargo test --frozen -p solitaire_server -p solitaire_sync
+}
+
+package() {
+    cd "solitaire-quest-$pkgver"
+    # Binary
+    install -Dm0755 -t "$pkgdir/usr/bin/" "target/release/solitaire_server"
+
+    # systemd service
+    install -Dm0644 "$srcdir/solitaire-quest-server.service" \
+        "$pkgdir/usr/lib/systemd/system/solitaire-quest-server.service"
+
+    # Environment file (contains JWT_SECRET, DATABASE_URL, SERVER_PORT)
+    install -Dm0640 "$srcdir/server.env" \
+        "$pkgdir/etc/solitaire-quest-server/server.env"
+
+    # License
+    install -Dm0644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+    # Self-hosting guide
+    install -Dm0644 README_SERVER.md \
+        "$pkgdir/usr/share/doc/$pkgname/README_SERVER.md"
+}
