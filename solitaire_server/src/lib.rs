@@ -21,23 +21,41 @@ use sqlx::SqlitePool;
 use std::sync::Arc;
 use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
 
+/// Shared application state injected into every Axum handler via [`axum::extract::State`].
+///
+/// Loaded once at startup so a missing `JWT_SECRET` causes an immediate startup
+/// failure rather than a 500 error on the first request.
+#[derive(Clone)]
+pub struct AppState {
+    /// SQLite connection pool.
+    pub pool: SqlitePool,
+    /// HS256 signing secret for JWT access and refresh tokens.
+    pub jwt_secret: String,
+}
+
 /// Construct the full Axum [`Router`].
 ///
 /// Separated from `main` so it can be instantiated in integration tests without
 /// starting a real TCP listener.
-pub fn build_router(pool: SqlitePool) -> Router {
-    build_router_inner(pool, true)
+pub fn build_router(state: AppState) -> Router {
+    build_router_inner(state, true)
 }
 
 /// Construct the router without rate limiting.
 ///
 /// Intended for integration tests only — do not use in production.
+/// Uses a fixed test JWT secret (`"test_secret_32_chars_minimum_ok!"`) so
+/// integration tests do not need to set `JWT_SECRET` in the environment.
 #[doc(hidden)]
 pub fn build_test_router(pool: SqlitePool) -> Router {
-    build_router_inner(pool, false)
+    let state = AppState {
+        pool,
+        jwt_secret: "test_secret_32_chars_minimum_ok!".to_string(),
+    };
+    build_router_inner(state, false)
 }
 
-fn build_router_inner(pool: SqlitePool, rate_limit: bool) -> Router {
+fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
     // Protected routes require a valid JWT (injected by require_auth middleware).
     let protected = Router::new()
         .route("/api/sync/pull", get(sync::pull))
@@ -46,7 +64,10 @@ fn build_router_inner(pool: SqlitePool, rate_limit: bool) -> Router {
         .route("/api/leaderboard/opt-in", post(leaderboard::opt_in))
         .route("/api/leaderboard/opt-in", delete(leaderboard::opt_out))
         .route("/api/account", delete(auth::delete_account))
-        .layer(axum_middleware::from_fn(middleware::require_auth));
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            middleware::require_auth,
+        ));
 
     // Auth endpoints — rate-limited in production, unrestricted in tests.
     let auth_routes = Router::new()
@@ -80,7 +101,7 @@ fn build_router_inner(pool: SqlitePool, rate_limit: bool) -> Router {
         .merge(public)
         // Reject request bodies larger than 1 MB.
         .layer(DefaultBodyLimit::max(1024 * 1024))
-        .with_state(pool)
+        .with_state(state)
 }
 
 /// `GET /health` — simple liveness probe, no auth required.

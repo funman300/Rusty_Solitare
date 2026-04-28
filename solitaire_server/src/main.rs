@@ -16,7 +16,7 @@
 //! |---------------|---------|-------------------------------|
 //! | `SERVER_PORT` | `8080`  | TCP port to listen on         |
 
-use solitaire_server::build_router;
+use solitaire_server::{build_router, AppState};
 use sqlx::SqlitePool;
 use std::net::SocketAddr;
 
@@ -29,6 +29,8 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    // Load JWT_SECRET once at startup — a missing secret is a fatal configuration error.
+    let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
     let port: u16 = std::env::var("SERVER_PORT")
         .unwrap_or_else(|_| "8080".into())
         .parse()
@@ -46,7 +48,8 @@ async fn main() {
 
     tracing::info!("database ready at {db_url}");
 
-    let app = build_router(pool);
+    let state = AppState { pool, jwt_secret };
+    let app = build_router(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("listening on {addr}");

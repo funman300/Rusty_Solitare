@@ -11,7 +11,7 @@ use solitaire_sync::{
     merge, AchievementRecord, PlayerProgress, StatsSnapshot, SyncPayload, SyncResponse,
 };
 
-use crate::{error::AppError, middleware::AuthenticatedUser};
+use crate::{error::AppError, middleware::AuthenticatedUser, AppState};
 
 // ---------------------------------------------------------------------------
 // Database row helpers
@@ -99,10 +99,10 @@ async fn store_payload(
 ///
 /// If the user has never pushed any data, returns a default payload.
 pub async fn pull(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
     user: AuthenticatedUser,
 ) -> Result<Json<SyncResponse>, AppError> {
-    let stored_payload = match load_sync_row(&pool, &user.user_id).await? {
+    let stored_payload = match load_sync_row(&state.pool, &user.user_id).await? {
         Some(row) => row_to_payload(&row, &user.user_id)?,
         None => {
             // First pull — no server data yet; return an empty default payload.
@@ -134,7 +134,7 @@ pub async fn pull(
 /// updated with the merged `best_single_score` and `fastest_win_seconds` so
 /// scores stay in sync without a separate submission step.
 pub async fn push(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
     user: AuthenticatedUser,
     Json(client_payload): Json<SyncPayload>,
 ) -> Result<Json<SyncResponse>, AppError> {
@@ -143,12 +143,12 @@ pub async fn push(
         return Err(AppError::BadRequest("user_id mismatch".into()));
     }
 
-    let server_payload = match load_sync_row(&pool, &user.user_id).await? {
+    let server_payload = match load_sync_row(&state.pool, &user.user_id).await? {
         Some(row) => row_to_payload(&row, &user.user_id)?,
         None => {
             // First push — nothing to merge against; store directly.
-            store_payload(&pool, &user.user_id, &client_payload).await?;
-            update_leaderboard_if_opted_in(&pool, &user.user_id, &client_payload).await?;
+            store_payload(&state.pool, &user.user_id, &client_payload).await?;
+            update_leaderboard_if_opted_in(&state.pool, &user.user_id, &client_payload).await?;
             return Ok(Json(SyncResponse {
                 merged: client_payload,
                 server_time: Utc::now(),
@@ -159,8 +159,8 @@ pub async fn push(
 
     let (merged, conflicts) = merge(&client_payload, &server_payload);
 
-    store_payload(&pool, &user.user_id, &merged).await?;
-    update_leaderboard_if_opted_in(&pool, &user.user_id, &merged).await?;
+    store_payload(&state.pool, &user.user_id, &merged).await?;
+    update_leaderboard_if_opted_in(&state.pool, &user.user_id, &merged).await?;
 
     Ok(Json(SyncResponse {
         merged,

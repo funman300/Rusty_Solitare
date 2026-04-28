@@ -8,11 +8,10 @@
 
 use axum::{extract::State, Json};
 use chrono::Utc;
-use sqlx::SqlitePool;
 
 use solitaire_sync::ChallengeGoal;
 
-use crate::error::AppError;
+use crate::{error::AppError, AppState};
 
 // ---------------------------------------------------------------------------
 // Seed generation
@@ -97,18 +96,22 @@ struct ChallengeRow {
 ///
 /// Looks up today's challenge in the database. If none exists yet, generates
 /// one deterministically and stores it before returning.
+///
+/// The `INSERT OR IGNORE` followed by a re-SELECT ensures that concurrent
+/// requests racing to create today's row all return the same persisted value
+/// rather than each returning their own locally-generated copy.
 pub async fn daily_challenge(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
 ) -> Result<Json<ChallengeGoal>, AppError> {
     let today = Utc::now().format("%Y-%m-%d").to_string();
 
-    // Try to load an existing row.
+    // Try to load an existing row first (fast path — no generation needed).
     let row = sqlx::query_as!(
         ChallengeRow,
         "SELECT goal_json FROM daily_challenges WHERE date = ?",
         today
     )
-    .fetch_optional(&pool)
+    .fetch_optional(&state.pool)
     .await?;
 
     if let Some(r) = row {
@@ -117,7 +120,10 @@ pub async fn daily_challenge(
         return Ok(Json(goal));
     }
 
-    // No row yet — generate and store.
+    // No row yet — generate the goal locally and attempt to store it.
+    // `INSERT OR IGNORE` means a concurrent request that wins the race will
+    // silently ignore our insert.  We then re-SELECT to ensure both requests
+    // return the same persisted row regardless of which one won.
     let seed = hash_date_to_u64(&today);
     let goal = generate_goal(&today, seed);
     let goal_json = serde_json::to_string(&goal)?;
@@ -129,10 +135,22 @@ pub async fn daily_challenge(
         seed_i64,
         goal_json
     )
-    .execute(&pool)
+    .execute(&state.pool)
     .await?;
 
-    Ok(Json(goal))
+    // Re-SELECT to return exactly what is stored — handles the race where
+    // another request inserted a row between our initial SELECT and INSERT.
+    let stored = sqlx::query_as!(
+        ChallengeRow,
+        "SELECT goal_json FROM daily_challenges WHERE date = ?",
+        today
+    )
+    .fetch_one(&state.pool)
+    .await?;
+
+    let stored_json = stored.goal_json.ok_or_else(|| AppError::Internal("missing goal_json after insert".into()))?;
+    let stored_goal: ChallengeGoal = serde_json::from_str(&stored_json)?;
+    Ok(Json(stored_goal))
 }
 
 #[cfg(test)]

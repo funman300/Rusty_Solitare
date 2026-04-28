@@ -5,7 +5,7 @@
 //! can access it via `Extension<AuthenticatedUser>`.
 
 use axum::{
-    extract::{FromRequestParts, Request},
+    extract::{FromRequestParts, Request, State},
     http::request::Parts,
     middleware::Next,
     response::Response,
@@ -13,7 +13,7 @@ use axum::{
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 
-use crate::error::AppError;
+use crate::{error::AppError, AppState};
 
 /// The claims encoded in our JWT access tokens.
 #[derive(Debug, Serialize, Deserialize)]
@@ -37,18 +37,19 @@ pub struct AuthenticatedUser {
 /// Axum middleware function that validates the Bearer JWT and injects
 /// [`AuthenticatedUser`] into request extensions.
 ///
+/// Reads the JWT secret from [`AppState`] rather than the environment, so a
+/// missing secret causes a startup failure rather than a per-request 500.
+///
 /// Returns `401 Unauthorized` if the token is missing, expired, or invalid.
 pub async fn require_auth(
+    State(state): State<AppState>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, AppError> {
-    let secret = std::env::var("JWT_SECRET")
-        .map_err(|_| AppError::Internal("JWT_SECRET not set".into()))?;
-
     let token = extract_bearer_token(req.headers())
         .ok_or(AppError::Unauthorized)?;
 
-    let claims = validate_access_token(&token, &secret)?;
+    let claims = validate_access_token(&token, &state.jwt_secret)?;
 
     req.extensions_mut().insert(AuthenticatedUser {
         user_id: claims.sub,
