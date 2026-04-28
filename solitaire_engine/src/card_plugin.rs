@@ -1322,6 +1322,129 @@ mod tests {
         );
     }
 
+    // -----------------------------------------------------------------------
+    // Constant sanity bounds (pure)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tableau_fan_frac_is_in_unit_interval() {
+        assert!(
+            TABLEAU_FAN_FRAC > 0.0 && TABLEAU_FAN_FRAC < 1.0,
+            "TABLEAU_FAN_FRAC must be in (0, 1), got {TABLEAU_FAN_FRAC}"
+        );
+    }
+
+    #[test]
+    fn flip_half_secs_is_positive() {
+        assert!(
+            FLIP_HALF_SECS > 0.0,
+            "FLIP_HALF_SECS must be positive, got {FLIP_HALF_SECS}"
+        );
+    }
+
+    #[test]
+    fn font_size_frac_is_positive_and_reasonable() {
+        assert!(
+            FONT_SIZE_FRAC > 0.0 && FONT_SIZE_FRAC <= 1.0,
+            "FONT_SIZE_FRAC should be in (0, 1], got {FONT_SIZE_FRAC}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // face_colour (pure) — color-blind mode
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn face_colour_normal_mode_returns_card_face_colour_for_red_suit() {
+        let card = Card { id: 0, suit: Suit::Hearts, rank: Rank::King, face_up: true };
+        assert_eq!(face_colour(&card, false), CARD_FACE_COLOUR);
+    }
+
+    #[test]
+    fn face_colour_normal_mode_returns_card_face_colour_for_black_suit() {
+        let card = Card { id: 0, suit: Suit::Spades, rank: Rank::King, face_up: true };
+        assert_eq!(face_colour(&card, false), CARD_FACE_COLOUR);
+    }
+
+    #[test]
+    fn face_colour_color_blind_mode_gives_red_suits_a_different_tint() {
+        let red_card = Card { id: 0, suit: Suit::Diamonds, rank: Rank::Queen, face_up: true };
+        let cbm_colour = face_colour(&red_card, true);
+        assert_ne!(
+            cbm_colour, CARD_FACE_COLOUR,
+            "color-blind mode must tint red-suit cards differently from the standard face colour"
+        );
+    }
+
+    #[test]
+    fn face_colour_color_blind_mode_does_not_change_black_suits() {
+        let black_card = Card { id: 0, suit: Suit::Clubs, rank: Rank::Jack, face_up: true };
+        assert_eq!(
+            face_colour(&black_card, true),
+            CARD_FACE_COLOUR,
+            "color-blind mode must not alter black-suit card face colour"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // label_visibility (pure)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn label_visibility_face_up_is_inherited() {
+        let card = Card { id: 0, suit: Suit::Clubs, rank: Rank::Ace, face_up: true };
+        assert_eq!(label_visibility(&card), Visibility::Inherited);
+    }
+
+    #[test]
+    fn label_visibility_face_down_is_hidden() {
+        let card = Card { id: 0, suit: Suit::Clubs, rank: Rank::Ace, face_up: false };
+        assert_eq!(label_visibility(&card), Visibility::Hidden);
+    }
+
+    // -----------------------------------------------------------------------
+    // label_for — remaining ranks not yet covered
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn label_for_all_ranks_contain_suit_letter() {
+        let suits = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
+        let letters = ["C", "D", "H", "S"];
+        for (suit, letter) in suits.iter().zip(letters.iter()) {
+            let card = Card { id: 0, suit: *suit, rank: Rank::King, face_up: true };
+            assert!(
+                label_for(&card).ends_with(letter),
+                "label for {suit:?} must end with '{letter}'"
+            );
+        }
+    }
+
+    #[test]
+    fn label_for_face_cards_use_letter_prefix() {
+        let make = |rank| Card { id: 0, suit: Suit::Spades, rank, face_up: true };
+        assert!(label_for(&make(Rank::Jack)).starts_with('J'));
+        assert!(label_for(&make(Rank::Queen)).starts_with('Q'));
+        assert!(label_for(&make(Rank::King)).starts_with('K'));
+    }
+
+    #[test]
+    fn label_for_numeric_ranks_two_through_nine() {
+        let make = |rank| Card { id: 0, suit: Suit::Clubs, rank, face_up: true };
+        let expected = [
+            (Rank::Two,   "2C"),
+            (Rank::Three, "3C"),
+            (Rank::Four,  "4C"),
+            (Rank::Five,  "5C"),
+            (Rank::Six,   "6C"),
+            (Rank::Seven, "7C"),
+            (Rank::Eight, "8C"),
+            (Rank::Nine,  "9C"),
+        ];
+        for (rank, label) in expected {
+            assert_eq!(label_for(&make(rank)), label, "rank {rank:?}");
+        }
+    }
+
     #[test]
     fn facedown_cards_use_tighter_fan_than_uniform_faceup_fan() {
         let g = GameState::new(42, solitaire_core::game_state::DrawMode::DrawOne);

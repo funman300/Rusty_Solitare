@@ -23,6 +23,7 @@ use crate::events::StateChangedEvent;
 use crate::game_plugin::{GameOverScreen, GameStatePath};
 use crate::progress_plugin::ProgressResource;
 use crate::resources::{DragState, GameStateResource};
+use crate::selection_plugin::{SelectionKeySet, SelectionState};
 use crate::settings_plugin::{SettingsChangedEvent, SettingsResource, SettingsStoragePath};
 use crate::stats_plugin::StatsResource;
 
@@ -58,7 +59,15 @@ impl Plugin for PausePlugin {
         app.add_message::<SettingsChangedEvent>()
             .add_message::<StateChangedEvent>()
             .init_resource::<PausedResource>()
-            .add_systems(Update, (toggle_pause, handle_pause_draw_toggle));
+            .add_systems(
+                Update,
+                (
+                    // toggle_pause must see SelectionState *before* handle_selection_keys
+                    // clears it, so it can skip Escape when a card is selected.
+                    toggle_pause.before(SelectionKeySet),
+                    handle_pause_draw_toggle,
+                ),
+            );
     }
 }
 
@@ -76,8 +85,14 @@ fn toggle_pause(
     settings: Option<Res<SettingsResource>>,
     mut drag: Option<ResMut<DragState>>,
     mut changed: MessageWriter<StateChangedEvent>,
+    selection: Option<Res<SelectionState>>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
+        return;
+    }
+    // If a card is currently selected, let SelectionPlugin handle this Escape
+    // (it will clear the selection). Pause must not also open in the same frame.
+    if selection.is_some_and(|s| s.selected_pile.is_some()) {
         return;
     }
     // If the game-over overlay is visible, let handle_game_over_input consume
@@ -416,6 +431,16 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // PausedResource default (pure)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn paused_resource_default_is_unpaused() {
+        let p = PausedResource::default();
+        assert!(!p.0, "game must start unpaused");
+    }
+
+    // -----------------------------------------------------------------------
     // draw_mode_label (pure function) — Task #64
     // -----------------------------------------------------------------------
 
@@ -427,6 +452,17 @@ mod tests {
     #[test]
     fn draw_mode_label_draw_three() {
         assert_eq!(draw_mode_label(DrawMode::DrawThree), "Draw 3");
+    }
+
+    /// Both variants are covered so the match is exhaustive — this test would
+    /// fail to compile if a new DrawMode variant were added without updating
+    /// `draw_mode_label`.
+    #[test]
+    fn draw_mode_label_covers_all_variants() {
+        for mode in [DrawMode::DrawOne, DrawMode::DrawThree] {
+            let label = draw_mode_label(mode);
+            assert!(!label.is_empty(), "draw_mode_label must never return an empty string");
+        }
     }
 
     // -----------------------------------------------------------------------

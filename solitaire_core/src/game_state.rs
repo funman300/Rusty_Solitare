@@ -361,6 +361,15 @@ impl GameState {
     /// Scans tableau piles 0–6 in order, returning the first top card that
     /// can be placed on any foundation pile. The scan order ensures Aces are
     /// resolved before higher ranks that depend on them.
+    ///
+    /// # Precondition
+    ///
+    /// This function is only called when `is_auto_completable` is `true`.
+    /// Auto-completability requires the waste pile to be empty, as enforced by
+    /// [`check_auto_complete`](Self::check_auto_complete) — it returns `false`
+    /// whenever `piles[Waste]` is non-empty. Therefore, skipping the waste pile
+    /// in this scan is intentional and correct: by the time this function is
+    /// reached, there are guaranteed to be no cards there to move.
     pub fn next_auto_complete_move(&self) -> Option<(PileType, PileType)> {
         if !self.is_auto_completable || self.is_won {
             return None;

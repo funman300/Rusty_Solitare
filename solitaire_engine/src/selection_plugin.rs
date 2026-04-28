@@ -22,7 +22,7 @@ use solitaire_core::card::Suit;
 use solitaire_core::pile::PileType;
 
 use crate::card_plugin::CardEntity;
-use crate::events::{InfoToastEvent, MoveRequestEvent};
+use crate::events::{InfoToastEvent, MoveRequestEvent, StateChangedEvent};
 use crate::game_plugin::GameMutation;
 use crate::input_plugin::{best_destination, best_tableau_destination_for_stack};
 use crate::layout::LayoutResource;
@@ -42,6 +42,13 @@ pub struct SelectionState {
     pub selected_pile: Option<PileType>,
 }
 
+/// System set label for the key-handling system.
+///
+/// `PausePlugin` registers `toggle_pause` before this set so it can read
+/// [`SelectionState`] before `handle_selection_keys` clears it on Escape.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SelectionKeySet;
+
 /// Marker component placed on the outline sprite used as the keyboard-selection
 /// highlight.
 ///
@@ -59,7 +66,10 @@ impl Plugin for SelectionPlugin {
             .add_systems(
                 Update,
                 (
-                    handle_selection_keys.before(GameMutation),
+                    handle_selection_keys
+                        .in_set(SelectionKeySet)
+                        .before(GameMutation),
+                    clear_selection_on_state_change.after(GameMutation),
                     update_selection_highlight.after(GameMutation),
                 ),
             );
@@ -327,6 +337,20 @@ fn try_foundation_dest(
         }
     }
     None
+}
+
+/// Clears the selection whenever the game state changes.
+///
+/// Without this, an undo or a rejected move could leave `selected_pile`
+/// pointing at a pile whose top card changed, causing the highlight to
+/// trail a different card than the player expects.
+fn clear_selection_on_state_change(
+    mut state_events: MessageReader<StateChangedEvent>,
+    mut selection: ResMut<SelectionState>,
+) {
+    if state_events.read().next().is_some() {
+        selection.selected_pile = None;
+    }
 }
 
 /// Maintains the `SelectionHighlight` outline sprite.

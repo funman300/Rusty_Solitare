@@ -22,6 +22,11 @@ fn main() {
                 primary_window: Some(Window {
                     title: "Solitaire Quest".into(),
                     resolution: (1280u32, 800u32).into(),
+                    resize_constraints: bevy::window::WindowResizeConstraints {
+                        min_width: 800.0,
+                        min_height: 600.0,
+                        ..default()
+                    },
                     ..default()
                 }),
                 ..default()

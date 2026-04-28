@@ -43,6 +43,7 @@ use crate::pause_plugin::PausedResource;
 use crate::progress_plugin::ProgressResource;
 use crate::layout::{Layout, LayoutResource};
 use crate::resources::{DragState, GameStateResource, HintCycleIndex};
+use crate::selection_plugin::SelectionState;
 use crate::time_attack_plugin::TimeAttackResource;
 
 /// Z-depth used for cards while being dragged — above all resting cards.
@@ -144,6 +145,7 @@ fn handle_keyboard_core(
     mut confirm: ResMut<KeyboardConfirmState>,
     mut ev: CoreKeyboardMessages<'_>,
     mut time_attack: Option<ResMut<TimeAttackResource>>,
+    selection: Option<Res<SelectionState>>,
 ) {
     if paused.is_some_and(|p| p.0) {
         return;
@@ -224,7 +226,11 @@ fn handle_keyboard_core(
         }
     }
 
-    if keys.just_pressed(KeyCode::KeyD) || keys.just_pressed(KeyCode::Space) {
+    // Space draws only when no card is keyboard-selected; when a card IS selected,
+    // SelectionPlugin handles Space to execute the move.
+    let space_draws = keys.just_pressed(KeyCode::Space)
+        && selection.as_ref().is_none_or(|s| s.selected_pile.is_none());
+    if keys.just_pressed(KeyCode::KeyD) || space_draws {
         // Cancel any pending forfeit when the player takes another action.
         confirm.forfeit_countdown = 0.0;
         ev.draw.write(DrawRequestEvent);
