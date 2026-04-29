@@ -54,8 +54,11 @@ pub const BLACK_SUIT_COLOUR: Color = Color::srgb(0.08, 0.08, 0.08);
 /// solid-colour sprites (used in tests with `MinimalPlugins`).
 #[derive(Resource)]
 pub struct CardImageSet {
-    /// Shared face image used for all face-up cards.
-    pub face: Handle<Image>,
+    /// Per-card face images indexed by `[suit][rank]`.
+    ///
+    /// Suit order: Clubs=0, Diamonds=1, Hearts=2, Spades=3.
+    /// Rank order: Ace=0, Two=1 … King=12.
+    pub faces: [[Handle<Image>; 13]; 4],
     /// One handle per unlockable card-back design (indices 0–4).
     pub backs: [Handle<Image>; 5],
 }
@@ -202,8 +205,6 @@ impl Plugin for CardPlugin {
 /// so it does nothing and the plugin falls back to solid-colour sprites.
 fn load_card_images(images: Option<ResMut<Assets<Image>>>, mut commands: Commands) {
     let Some(mut images) = images else {
-        // Assets<Image> is absent (e.g. MinimalPlugins in tests) — skip so
-        // tests can still run.  The plugin falls back to solid-colour sprites.
         return;
     };
     use bevy::asset::RenderAssetUsages;
@@ -221,7 +222,79 @@ fn load_card_images(images: Option<ResMut<Assets<Image>>>, mut commands: Command
         .expect("valid card PNG")
     };
 
-    let face = images.add(load(include_bytes!("../../assets/cards/faces/face.png")));
+    // 52 face images: faces[suit][rank]
+    // Suit: Clubs=0, Diamonds=1, Hearts=2, Spades=3
+    // Rank: Ace=0 … King=12
+    const FACE_BYTES: [[&[u8]; 13]; 4] = [
+        // Clubs
+        [
+            include_bytes!("../../assets/cards/faces/a_c.png"),
+            include_bytes!("../../assets/cards/faces/2_c.png"),
+            include_bytes!("../../assets/cards/faces/3_c.png"),
+            include_bytes!("../../assets/cards/faces/4_c.png"),
+            include_bytes!("../../assets/cards/faces/5_c.png"),
+            include_bytes!("../../assets/cards/faces/6_c.png"),
+            include_bytes!("../../assets/cards/faces/7_c.png"),
+            include_bytes!("../../assets/cards/faces/8_c.png"),
+            include_bytes!("../../assets/cards/faces/9_c.png"),
+            include_bytes!("../../assets/cards/faces/10_c.png"),
+            include_bytes!("../../assets/cards/faces/j_c.png"),
+            include_bytes!("../../assets/cards/faces/q_c.png"),
+            include_bytes!("../../assets/cards/faces/k_c.png"),
+        ],
+        // Diamonds
+        [
+            include_bytes!("../../assets/cards/faces/a_d.png"),
+            include_bytes!("../../assets/cards/faces/2_d.png"),
+            include_bytes!("../../assets/cards/faces/3_d.png"),
+            include_bytes!("../../assets/cards/faces/4_d.png"),
+            include_bytes!("../../assets/cards/faces/5_d.png"),
+            include_bytes!("../../assets/cards/faces/6_d.png"),
+            include_bytes!("../../assets/cards/faces/7_d.png"),
+            include_bytes!("../../assets/cards/faces/8_d.png"),
+            include_bytes!("../../assets/cards/faces/9_d.png"),
+            include_bytes!("../../assets/cards/faces/10_d.png"),
+            include_bytes!("../../assets/cards/faces/j_d.png"),
+            include_bytes!("../../assets/cards/faces/q_d.png"),
+            include_bytes!("../../assets/cards/faces/k_d.png"),
+        ],
+        // Hearts
+        [
+            include_bytes!("../../assets/cards/faces/a_h.png"),
+            include_bytes!("../../assets/cards/faces/2_h.png"),
+            include_bytes!("../../assets/cards/faces/3_h.png"),
+            include_bytes!("../../assets/cards/faces/4_h.png"),
+            include_bytes!("../../assets/cards/faces/5_h.png"),
+            include_bytes!("../../assets/cards/faces/6_h.png"),
+            include_bytes!("../../assets/cards/faces/7_h.png"),
+            include_bytes!("../../assets/cards/faces/8_h.png"),
+            include_bytes!("../../assets/cards/faces/9_h.png"),
+            include_bytes!("../../assets/cards/faces/10_h.png"),
+            include_bytes!("../../assets/cards/faces/j_h.png"),
+            include_bytes!("../../assets/cards/faces/q_h.png"),
+            include_bytes!("../../assets/cards/faces/k_h.png"),
+        ],
+        // Spades
+        [
+            include_bytes!("../../assets/cards/faces/a_s.png"),
+            include_bytes!("../../assets/cards/faces/2_s.png"),
+            include_bytes!("../../assets/cards/faces/3_s.png"),
+            include_bytes!("../../assets/cards/faces/4_s.png"),
+            include_bytes!("../../assets/cards/faces/5_s.png"),
+            include_bytes!("../../assets/cards/faces/6_s.png"),
+            include_bytes!("../../assets/cards/faces/7_s.png"),
+            include_bytes!("../../assets/cards/faces/8_s.png"),
+            include_bytes!("../../assets/cards/faces/9_s.png"),
+            include_bytes!("../../assets/cards/faces/10_s.png"),
+            include_bytes!("../../assets/cards/faces/j_s.png"),
+            include_bytes!("../../assets/cards/faces/q_s.png"),
+            include_bytes!("../../assets/cards/faces/k_s.png"),
+        ],
+    ];
+
+    let faces: [[Handle<Image>; 13]; 4] = std::array::from_fn(|suit| {
+        std::array::from_fn(|rank| images.add(load(FACE_BYTES[suit][rank])))
+    });
     let backs = [
         images.add(load(include_bytes!("../../assets/cards/backs/back_0.png"))),
         images.add(load(include_bytes!("../../assets/cards/backs/back_1.png"))),
@@ -229,7 +302,7 @@ fn load_card_images(images: Option<ResMut<Assets<Image>>>, mut commands: Command
         images.add(load(include_bytes!("../../assets/cards/backs/back_3.png"))),
         images.add(load(include_bytes!("../../assets/cards/backs/back_4.png"))),
     ];
-    commands.insert_resource(CardImageSet { face, backs });
+    commands.insert_resource(CardImageSet { faces, backs });
 }
 
 /// Builds the [`Sprite`] for a card, using PNG artwork when [`CardImageSet`] is
@@ -244,7 +317,28 @@ fn card_sprite(
 ) -> Sprite {
     if let Some(set) = card_images {
         let image = if card.face_up {
-            set.face.clone()
+            let suit_idx = match card.suit {
+                Suit::Clubs => 0,
+                Suit::Diamonds => 1,
+                Suit::Hearts => 2,
+                Suit::Spades => 3,
+            };
+            let rank_idx = match card.rank {
+                Rank::Ace => 0,
+                Rank::Two => 1,
+                Rank::Three => 2,
+                Rank::Four => 3,
+                Rank::Five => 4,
+                Rank::Six => 5,
+                Rank::Seven => 6,
+                Rank::Eight => 7,
+                Rank::Nine => 8,
+                Rank::Ten => 9,
+                Rank::Jack => 10,
+                Rank::Queen => 11,
+                Rank::King => 12,
+            };
+            set.faces[suit_idx][rank_idx].clone()
         } else {
             let idx = selected_back.min(set.backs.len() - 1);
             set.backs[idx].clone()
@@ -462,14 +556,16 @@ fn spawn_card_entity(
 ) {
     let sprite = card_sprite(card, layout.card_size, back_colour, color_blind, card_images, selected_back);
 
-    commands
-        .spawn((
-            CardEntity { card_id: card.id },
-            sprite,
-            Transform::from_xyz(pos.x, pos.y, z),
-            Visibility::default(),
-        ))
-        .with_children(|b| {
+    let mut entity = commands.spawn((
+        CardEntity { card_id: card.id },
+        sprite,
+        Transform::from_xyz(pos.x, pos.y, z),
+        Visibility::default(),
+    ));
+    // When PNG faces are loaded the rank/suit are baked into the image.
+    // Only spawn the Text2d overlay in the solid-colour fallback (tests).
+    if card_images.is_none() {
+        entity.with_children(|b| {
             b.spawn((
                 CardLabel,
                 Text2d::new(label_for(card)),
@@ -478,12 +574,11 @@ fn spawn_card_entity(
                     ..default()
                 },
                 TextColor(text_colour(card)),
-                // Above the card body on z so it doesn't get occluded by the
-                // parent sprite in back-to-front rendering.
                 Transform::from_xyz(0.0, 0.0, 0.01),
                 label_visibility(card),
             ));
         });
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -526,22 +621,25 @@ fn update_card_entity(
             .insert(Transform::from_xyz(pos.x, pos.y, z));
     }
 
-    // Despawn the old label child and respawn a fresh one, so rank/suit/
-    // colour/visibility all stay in sync with the card's current state.
+    // Despawn any stale children and re-add the label overlay only when
+    // operating in solid-colour mode (no PNG faces).  In image mode the
+    // rank/suit are baked into the PNG, so no Text2d overlay is needed.
     commands.entity(entity).despawn_related::<Children>();
-    commands.entity(entity).with_children(|b| {
-        b.spawn((
-            CardLabel,
-            Text2d::new(label_for(card)),
-            TextFont {
-                font_size: layout.card_size.x * FONT_SIZE_FRAC,
-                ..default()
-            },
-            TextColor(text_colour(card)),
-            Transform::from_xyz(0.0, 0.0, 0.01),
-            label_visibility(card),
-        ));
-    });
+    if card_images.is_none() {
+        commands.entity(entity).with_children(|b| {
+            b.spawn((
+                CardLabel,
+                Text2d::new(label_for(card)),
+                TextFont {
+                    font_size: layout.card_size.x * FONT_SIZE_FRAC,
+                    ..default()
+                },
+                TextColor(text_colour(card)),
+                Transform::from_xyz(0.0, 0.0, 0.01),
+                label_visibility(card),
+            ));
+        });
+    }
 }
 
 fn label_for(card: &Card) -> String {

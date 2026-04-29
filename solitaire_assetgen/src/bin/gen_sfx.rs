@@ -25,8 +25,8 @@ fn main() -> io::Result<()> {
         ("ambient_loop.wav", ambient_loop),
     ];
 
-    for (name, gen) in &effects {
-        let samples = gen();
+    for (name, make) in &effects {
+        let samples = make();
         let path = out_dir.join(name);
         write_wav_mono_pcm16(&path, SAMPLE_RATE, &samples)?;
         println!("wrote {} ({} samples)", path.display(), samples.len());
