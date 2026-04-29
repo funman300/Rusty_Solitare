@@ -136,6 +136,7 @@ struct CoreKeyboardMessages<'w> {
 ///
 /// Also resets `forfeit_countdown` whenever U, D, Z, or N are pressed so that
 /// an in-flight forfeit confirmation is cancelled by any other action.
+#[allow(clippy::too_many_arguments)]
 fn handle_keyboard_core(
     keys: Res<ButtonInput<KeyCode>>,
     paused: Option<Res<PausedResource>>,
@@ -174,8 +175,8 @@ fn handle_keyboard_core(
         confirm.forfeit_countdown = 0.0;
 
         // If a Time Attack session is running, cancel it and start a Classic game.
-        if let Some(ref mut session) = time_attack {
-            if session.active {
+        if let Some(ref mut session) = time_attack
+            && session.active {
                 session.active = false;
                 session.remaining_secs = 0.0;
                 ev.info_toast.write(InfoToastEvent("Time Attack ended".to_string()));
@@ -186,7 +187,6 @@ fn handle_keyboard_core(
                 confirm.new_game_countdown = 0.0;
                 return;
             }
-        }
 
         let active_game = game.as_ref().is_some_and(|g| g.0.move_count > 0 && !g.0.is_won);
         let shift_held = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
@@ -244,6 +244,7 @@ fn handle_keyboard_core(
 ///
 /// The hint index wraps around once all hints have been cycled through. When no
 /// moves are available a "No hints available" toast is shown instead.
+#[allow(clippy::too_many_arguments)]
 fn handle_keyboard_hint(
     keys: Res<ButtonInput<KeyCode>>,
     paused: Option<Res<PausedResource>>,
@@ -273,7 +274,7 @@ fn handle_keyboard_hint(
         return;
     }
 
-    let Some(ref layout_res) = layout else { return };
+    let Some(_layout_res) = layout else { return };
 
     let hints = all_hints(&g.0);
     if hints.is_empty() {
@@ -661,8 +662,8 @@ fn end_drag(
     // the placement is illegal, fire MoveRejectedEvent so AudioPlugin can
     // play card_invalid.wav.
     let mut fired = false;
-    if let Some(target) = target {
-        if target != origin {
+    if let Some(target) = target
+        && target != origin {
             let bottom_card_id = drag.cards[0];
             if let Some(bottom_card) = card_by_id(&game.0, bottom_card_id) {
                 let ok = match &target {
@@ -708,7 +709,6 @@ fn end_drag(
                 }
             }
         }
-    }
 
     drag.clear();
 
@@ -892,8 +892,8 @@ fn touch_end_drag(
             world.and_then(|w| find_drop_target(w, &game.0, &layout.0, &origin));
 
         let mut fired = false;
-        if let Some(target) = target {
-            if target != origin {
+        if let Some(target) = target
+            && target != origin {
                 let bottom_card_id = drag.cards[0];
                 if let Some(bottom_card) = card_by_id(&game.0, bottom_card_id) {
                     let ok = match &target {
@@ -924,7 +924,6 @@ fn touch_end_drag(
                     }
                 }
             }
-        }
 
         drag.clear();
         changed.write(StateChangedEvent);
@@ -1132,20 +1131,18 @@ pub fn best_destination(card: &Card, game: &GameState) -> Option<PileType> {
     // Try all four foundations first.
     for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
         let dest = PileType::Foundation(suit);
-        if let Some(pile) = game.piles.get(&dest) {
-            if can_place_on_foundation(card, pile, suit) {
+        if let Some(pile) = game.piles.get(&dest)
+            && can_place_on_foundation(card, pile, suit) {
                 return Some(dest);
             }
-        }
     }
     // Then try all seven tableau piles.
     for i in 0..7_usize {
         let dest = PileType::Tableau(i);
-        if let Some(pile) = game.piles.get(&dest) {
-            if can_place_on_tableau(card, pile) {
+        if let Some(pile) = game.piles.get(&dest)
+            && can_place_on_tableau(card, pile) {
                 return Some(dest);
             }
-        }
     }
     None
 }
@@ -1167,11 +1164,10 @@ pub fn best_tableau_destination_for_stack(
         if dest == *from {
             continue;
         }
-        if let Some(pile) = game.piles.get(&dest) {
-            if can_place_on_tableau(bottom_card, pile) {
+        if let Some(pile) = game.piles.get(&dest)
+            && can_place_on_tableau(bottom_card, pile) {
                 return Some((dest, stack_count));
             }
-        }
     }
     None
 }
@@ -1309,14 +1305,13 @@ pub fn all_hints(game: &GameState) -> Vec<(PileType, PileType, usize)> {
         let Some(card) = from_pile.cards.last().filter(|c| c.face_up) else { continue };
         for &suit in &suits {
             let dest = PileType::Foundation(suit);
-            if let Some(dest_pile) = game.piles.get(&dest) {
-                if can_place_on_foundation(card, dest_pile, suit) {
+            if let Some(dest_pile) = game.piles.get(&dest)
+                && can_place_on_foundation(card, dest_pile, suit) {
                     hints.push((from.clone(), dest, 1));
                     // Each source card can go to at most one foundation suit;
                     // no need to check the remaining three for this card.
                     break;
                 }
-            }
         }
     }
 
@@ -1338,15 +1333,14 @@ pub fn all_hints(game: &GameState) -> Vec<(PileType, PileType, usize)> {
             if dest == *from {
                 continue;
             }
-            if let Some(dest_pile) = game.piles.get(&dest) {
-                if can_place_on_tableau(card, dest_pile) {
+            if let Some(dest_pile) = game.piles.get(&dest)
+                && can_place_on_tableau(card, dest_pile) {
                     hints.push((from.clone(), dest, 1));
                     // One tableau destination per source card is enough for the
                     // hint list — the player can see where else a card can go
                     // via the right-click destination highlights.
                     break;
                 }
-            }
         }
     }
 

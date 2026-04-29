@@ -123,15 +123,14 @@ fn toggle_leaderboard_screen(
     spawn_leaderboard_screen(&mut commands, data.0.as_deref());
 
     // Start a background fetch if not already in flight.
-    if task_res.0.is_none() {
-        if let Some(p) = provider {
+    if task_res.0.is_none()
+        && let Some(p) = provider {
             let provider = p.0.clone();
             let task = AsyncComputeTaskPool::get().spawn(async move {
                 provider.fetch_leaderboard().await.map_err(|e| e.to_string())
             });
             task_res.0 = Some(task);
         }
-    }
 }
 
 /// Poll the background fetch task; store results when complete.

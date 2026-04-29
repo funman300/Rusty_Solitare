@@ -8,13 +8,14 @@ use bevy::prelude::*;
 use bevy::window::WindowResized;
 use solitaire_core::card::Suit;
 use solitaire_core::pile::PileType;
-use solitaire_data::settings::Theme;
 
 use crate::events::HintVisualEvent;
 use crate::layout::{compute_layout, Layout, LayoutResource};
 #[cfg(test)]
 use crate::layout::TABLE_COLOUR;
 use crate::settings_plugin::{SettingsChangedEvent, SettingsResource};
+#[cfg(test)]
+use solitaire_data::Theme;
 
 /// Holds pre-loaded [`Handle<Image>`]s for the 5 selectable table backgrounds.
 ///

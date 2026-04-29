@@ -394,6 +394,7 @@ fn sync_cards_startup(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sync_cards_on_change(
     mut events: MessageReader<StateChangedEvent>,
     commands: Commands,
@@ -416,6 +417,7 @@ fn sync_cards_on_change(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sync_cards(
     mut commands: Commands,
     game: &GameState,
@@ -542,6 +544,7 @@ fn face_colour(card: &Card, color_blind: bool) -> Color {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_card_entity(
     commands: &mut Commands,
     card: &Card,

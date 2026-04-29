@@ -49,13 +49,11 @@ fn roll_weekly_goals_on_startup(
     path: Res<ProgressStoragePath>,
 ) {
     let week_key = current_iso_week_key(Local::now().date_naive());
-    if progress.0.roll_weekly_goals_if_new_week(&week_key) {
-        if let Some(target) = &path.0 {
-            if let Err(e) = save_progress_to(target, &progress.0) {
+    if progress.0.roll_weekly_goals_if_new_week(&week_key)
+        && let Some(target) = &path.0
+            && let Err(e) = save_progress_to(target, &progress.0) {
                 warn!("failed to save progress after weekly reset on startup: {e}");
             }
-        }
-    }
 }
 
 fn evaluate_weekly_goals(
@@ -114,13 +112,11 @@ fn evaluate_weekly_goals(
         }
     }
 
-    if any_change {
-        if let Some(target) = &path.0 {
-            if let Err(e) = save_progress_to(target, &progress.0) {
+    if any_change
+        && let Some(target) = &path.0
+            && let Err(e) = save_progress_to(target, &progress.0) {
                 warn!("failed to save progress after weekly goal update: {e}");
             }
-        }
-    }
 }
 
 /// Resolve a goal id to its description (used for toasts).

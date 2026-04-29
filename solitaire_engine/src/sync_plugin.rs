@@ -176,21 +176,18 @@ fn poll_pull_result(
             let (merged, _conflicts) = merge(&local, &remote);
 
             // Persist merged state atomically.
-            if let Some(p) = &stats_path.0 {
-                if let Err(e) = save_stats_to(p, &merged.stats) {
+            if let Some(p) = &stats_path.0
+                && let Err(e) = save_stats_to(p, &merged.stats) {
                     warn!("sync: failed to persist stats: {e}");
                 }
-            }
-            if let Some(p) = &achievements_path.0 {
-                if let Err(e) = save_achievements_to(p, &merged.achievements) {
+            if let Some(p) = &achievements_path.0
+                && let Err(e) = save_achievements_to(p, &merged.achievements) {
                     warn!("sync: failed to persist achievements: {e}");
                 }
-            }
-            if let Some(p) = &progress_path.0 {
-                if let Err(e) = save_progress_to(p, &merged.progress) {
+            if let Some(p) = &progress_path.0
+                && let Err(e) = save_progress_to(p, &merged.progress) {
                     warn!("sync: failed to persist progress: {e}");
                 }
-            }
 
             // Update in-world resources.
             stats.0 = merged.stats;

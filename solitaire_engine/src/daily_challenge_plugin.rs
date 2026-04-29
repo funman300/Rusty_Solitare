@@ -161,27 +161,24 @@ fn handle_daily_completion(
             continue;
         }
         // Enforce server-supplied goal constraints when present.
-        if let Some(target) = daily.target_score {
-            if ev.score < target {
+        if let Some(target) = daily.target_score
+            && ev.score < target {
                 continue; // score goal not met
             }
-        }
-        if let Some(max_secs) = daily.max_time_secs {
-            if ev.time_seconds > max_secs {
+        if let Some(max_secs) = daily.max_time_secs
+            && ev.time_seconds > max_secs {
                 continue; // time limit exceeded
             }
-        }
         if !progress.0.record_daily_completion(daily.date) {
             // Already counted today — no-op.
             continue;
         }
         progress.0.add_xp(DAILY_BONUS_XP);
         xp_awarded.write(XpAwardedEvent { amount: DAILY_BONUS_XP });
-        if let Some(target) = &path.0 {
-            if let Err(e) = save_progress_to(target, &progress.0) {
+        if let Some(target) = &path.0
+            && let Err(e) = save_progress_to(target, &progress.0) {
                 warn!("failed to save progress after daily completion: {e}");
             }
-        }
         completed.write(DailyChallengeCompletedEvent {
             date: daily.date,
             streak: progress.0.daily_challenge_streak,

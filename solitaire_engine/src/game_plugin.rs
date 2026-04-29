@@ -194,11 +194,10 @@ fn handle_new_game(
         let mode = ev.mode.unwrap_or(game.0.mode);
         game.0 = GameState::new_with_mode(seed, draw_mode, mode);
         // Delete any previously saved in-progress state — this is a fresh game.
-        if let Some(p) = path.as_ref().and_then(|r| r.0.as_deref()) {
-            if let Err(e) = delete_game_state_at(p) {
+        if let Some(p) = path.as_ref().and_then(|r| r.0.as_deref())
+            && let Err(e) = delete_game_state_at(p) {
                 warn!("game_state: failed to delete saved game: {e}");
             }
-        }
         changed.write(StateChangedEvent);
     }
 }
@@ -380,14 +379,13 @@ fn handle_move(
         match game.0.move_cards(ev.from.clone(), ev.to.clone(), ev.count) {
             Ok(()) => {
                 // Fire flip event if the candidate card is now face-up.
-                if let Some(fid) = flip_candidate_id {
-                    if game.0.piles.get(&ev.from)
+                if let Some(fid) = flip_candidate_id
+                    && game.0.piles.get(&ev.from)
                         .and_then(|p| p.cards.last())
                         .is_some_and(|c| c.id == fid && c.face_up)
                     {
                         flipped.write(crate::events::CardFlippedEvent(fid));
                     }
-                }
                 changed.write(StateChangedEvent);
                 if !was_won && game.0.is_won {
                     won.write(GameWonEvent {
@@ -395,11 +393,10 @@ fn handle_move(
                         time_seconds: game.0.elapsed_seconds,
                     });
                     // Delete the saved state — a won game should not be resumed.
-                    if let Some(p) = path.as_ref().and_then(|r| r.0.as_deref()) {
-                        if let Err(e) = delete_game_state_at(p) {
+                    if let Some(p) = path.as_ref().and_then(|r| r.0.as_deref())
+                        && let Err(e) = delete_game_state_at(p) {
                             warn!("game_state: failed to delete on win: {e}");
                         }
-                    }
                 }
             }
             Err(e) => warn!("move rejected {:?} -> {:?} x{}: {e}", ev.from, ev.to, ev.count),
@@ -468,11 +465,10 @@ pub fn has_legal_moves(game: &GameState) -> bool {
         // Check foundations.
         for &suit in &suits {
             let dest = PileType::Foundation(suit);
-            if let Some(dest_pile) = game.piles.get(&dest) {
-                if can_place_on_foundation(card, dest_pile, suit) {
+            if let Some(dest_pile) = game.piles.get(&dest)
+                && can_place_on_foundation(card, dest_pile, suit) {
                     return true;
                 }
-            }
         }
 
         // Check tableau piles.
@@ -481,11 +477,10 @@ pub fn has_legal_moves(game: &GameState) -> bool {
             if dest == *from {
                 continue;
             }
-            if let Some(dest_pile) = game.piles.get(&dest) {
-                if can_place_on_tableau(card, dest_pile) {
+            if let Some(dest_pile) = game.piles.get(&dest)
+                && can_place_on_tableau(card, dest_pile) {
                     return true;
                 }
-            }
         }
     }
 

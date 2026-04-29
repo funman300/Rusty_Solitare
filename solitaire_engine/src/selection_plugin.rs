@@ -234,9 +234,9 @@ fn handle_selection_keys(
     //   2. Tableau stack move — count = full face-up run length from the source.
     let activate =
         keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::Space);
-    if activate {
-        if let Some(ref pile) = selection.selected_pile.clone() {
-            if let Some(card) = game
+    if activate
+        && let Some(ref pile) = selection.selected_pile.clone()
+            && let Some(card) = game
                 .0
                 .piles
                 .get(pile)
@@ -266,8 +266,8 @@ fn handle_selection_keys(
                         let start = p.cards.len().saturating_sub(run_len);
                         p.cards.get(start)
                     });
-                if let Some(bottom) = bottom_card {
-                    if let Some((dest, count)) =
+                if let Some(bottom) = bottom_card
+                    && let Some((dest, count)) =
                         best_tableau_destination_for_stack(bottom, pile, &game.0, run_len)
                     {
                         moves.write(MoveRequestEvent {
@@ -278,7 +278,6 @@ fn handle_selection_keys(
                         selection.selected_pile = None;
                         return;
                     }
-                }
 
                 // --- Fallback: single-card move to any destination ---
                 // Covers non-tableau sources (Waste, Foundation) that have no
@@ -292,8 +291,6 @@ fn handle_selection_keys(
                     selection.selected_pile = None;
                 }
             }
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -330,11 +327,10 @@ fn try_foundation_dest(
     use solitaire_core::rules::can_place_on_foundation;
     for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
         let dest = PileType::Foundation(suit);
-        if let Some(pile) = game.piles.get(&dest) {
-            if can_place_on_foundation(card, pile, suit) {
+        if let Some(pile) = game.piles.get(&dest)
+            && can_place_on_foundation(card, pile, suit) {
                 return Some(dest);
             }
-        }
     }
     None
 }

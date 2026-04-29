@@ -472,13 +472,12 @@ fn drive_toast_display(
     }
 
     // If no active toast and the queue has messages, show the next one.
-    if active.entity.is_none() {
-        if let Some(message) = queue.0.pop_front() {
+    if active.entity.is_none()
+        && let Some(message) = queue.0.pop_front() {
             let entity = spawn_queued_toast(&mut commands, message);
             active.entity = Some(entity);
             active.timer = QUEUED_TOAST_SECS;
         }
-    }
 }
 
 /// Spawns a centered top-of-screen `ToastEntity` for the queued toast system.

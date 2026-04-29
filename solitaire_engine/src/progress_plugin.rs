@@ -101,11 +101,10 @@ fn award_xp_on_win(
                 total_xp: progress.0.total_xp,
             });
         }
-        if let Some(target) = &path.0 {
-            if let Err(e) = save_progress_to(target, &progress.0) {
+        if let Some(target) = &path.0
+            && let Err(e) = save_progress_to(target, &progress.0) {
                 warn!("failed to save progress: {e}");
             }
-        }
     }
 }
 

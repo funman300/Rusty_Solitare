@@ -148,7 +148,7 @@ impl Default for AnimationTuning {
 /// running under `MinimalPlugins` (which does not register the touch subsystem).
 pub(crate) fn update_input_platform(
     touches: Option<Res<Touches>>,
-    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
     mut tuning: ResMut<AnimationTuning>,
 ) {
     let touch_active = touches.as_ref().is_some_and(|t| {
@@ -157,8 +157,9 @@ pub(crate) fn update_input_platform(
             || t.iter_just_released().next().is_some()
     });
 
-    let mouse_active = mouse_buttons.get_just_pressed().next().is_some()
-        || mouse_buttons.get_pressed().next().is_some();
+    let mouse_active = mouse_buttons.as_ref().is_some_and(|mb| {
+        mb.get_just_pressed().next().is_some() || mb.get_pressed().next().is_some()
+    });
 
     if touch_active && tuning.platform != InputPlatform::Touch {
         *tuning = AnimationTuning::mobile();

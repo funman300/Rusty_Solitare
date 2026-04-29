@@ -103,13 +103,12 @@ fn toggle_pause(
     // If a drag is in progress, cancel it instead of opening the pause overlay.
     // Clearing DragState and emitting StateChangedEvent snaps the dragged cards
     // back to their resting positions exactly as a rejected drop does.
-    if let Some(ref mut d) = drag {
-        if !d.is_idle() {
+    if let Some(ref mut d) = drag
+        && !d.is_idle() {
             d.clear();
             changed.write(StateChangedEvent);
             return;
         }
-    }
     if let Ok(entity) = screens.single() {
         commands.entity(entity).despawn();
         paused.0 = false;
@@ -122,13 +121,11 @@ fn toggle_pause(
         paused.0 = true;
         // Persist the current game state whenever the player opens the pause
         // overlay so an OS-level kill still leaves a resumable save.
-        if let (Some(g), Some(p)) = (game, path) {
-            if let Some(disk_path) = p.0.as_deref() {
-                if let Err(e) = save_game_state_to(disk_path, &g.0) {
+        if let (Some(g), Some(p)) = (game, path)
+            && let Some(disk_path) = p.0.as_deref()
+                && let Err(e) = save_game_state_to(disk_path, &g.0) {
                     warn!("game_state: failed to save on pause: {e}");
                 }
-            }
-        }
     }
 }
 
@@ -155,13 +152,11 @@ fn handle_pause_draw_toggle(
             DrawMode::DrawOne => DrawMode::DrawThree,
             DrawMode::DrawThree => DrawMode::DrawOne,
         };
-        if let Some(p) = &path {
-            if let Some(target) = &p.0 {
-                if let Err(e) = solitaire_data::save_settings_to(target, &settings.0) {
+        if let Some(p) = &path
+            && let Some(target) = &p.0
+                && let Err(e) = solitaire_data::save_settings_to(target, &settings.0) {
                     warn!("failed to save settings after draw-mode toggle: {e}");
                 }
-            }
-        }
         changed.write(SettingsChangedEvent(settings.0.clone()));
     }
 }

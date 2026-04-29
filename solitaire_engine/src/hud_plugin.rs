@@ -437,15 +437,14 @@ fn update_hud(
     // Reflects the AutoCompleteState resource; update whenever it changes or game changes.
     let ac_active = auto_complete.as_ref().is_some_and(|ac| ac.active);
     let ac_changed = auto_complete.as_ref().is_some_and(|ac| ac.is_changed());
-    if ac_changed || game.is_changed() {
-        if let Ok(mut t) = auto_q.single_mut() {
+    if (ac_changed || game.is_changed())
+        && let Ok(mut t) = auto_q.single_mut() {
             **t = if ac_active {
                 "AUTO".to_string()
             } else {
                 String::new()
             };
         }
-    }
 }
 
 /// Updates the `HudSelection` text node to show which pile is Tab-selected.

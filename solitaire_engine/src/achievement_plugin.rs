@@ -176,21 +176,17 @@ fn evaluate_on_win(
         unlocks.write(AchievementUnlockedEvent(record.clone()));
     }
 
-    if achievements_changed {
-        if let Some(target) = &path.0 {
-            if let Err(e) = save_achievements_to(target, &achievements.0) {
+    if achievements_changed
+        && let Some(target) = &path.0
+            && let Err(e) = save_achievements_to(target, &achievements.0) {
                 warn!("failed to save achievements: {e}");
             }
-        }
-    }
 
-    if progress_changed {
-        if let Some(target) = &progress_path.0 {
-            if let Err(e) = save_progress_to(target, &progress.0) {
+    if progress_changed
+        && let Some(target) = &progress_path.0
+            && let Err(e) = save_progress_to(target, &progress.0) {
                 warn!("failed to save progress after reward: {e}");
             }
-        }
-    }
 }
 
 /// Convenience: resolve an achievement ID to its human-readable name.

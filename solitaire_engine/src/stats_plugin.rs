@@ -326,8 +326,8 @@ fn spawn_stats_screen(
             }
 
             // Time Attack section
-            if let Some(ta) = time_attack {
-                if ta.active {
+            if let Some(ta) = time_attack
+                && ta.active {
                     let mins = (ta.remaining_secs / 60.0).floor() as u64;
                     let secs = (ta.remaining_secs % 60.0).floor() as u64;
                     root.spawn((
@@ -336,7 +336,6 @@ fn spawn_stats_screen(
                         TextColor(Color::srgb(1.0, 0.6, 0.2)),
                     ));
                 }
-            }
 
             // Dismiss hint
             root.spawn((

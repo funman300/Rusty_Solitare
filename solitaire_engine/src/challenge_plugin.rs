@@ -54,11 +54,10 @@ fn advance_on_challenge_win(
         }
         let prev = progress.0.challenge_index;
         progress.0.challenge_index = prev.saturating_add(1);
-        if let Some(target) = &path.0 {
-            if let Err(e) = save_progress_to(target, &progress.0) {
+        if let Some(target) = &path.0
+            && let Err(e) = save_progress_to(target, &progress.0) {
                 warn!("failed to save progress after challenge advance: {e}");
             }
-        }
         // Human-readable level is 1-based (index 0 → "Challenge 1").
         let level_number = prev.saturating_add(1);
         toast.write(InfoToastEvent(format!("Challenge {level_number} complete!")));
