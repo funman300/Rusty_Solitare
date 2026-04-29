@@ -1250,6 +1250,144 @@ async fn refresh_token_rejected_on_protected_routes() {
 }
 
 // ---------------------------------------------------------------------------
+// Additional auth refresh edge-case tests
+// ---------------------------------------------------------------------------
+
+/// `POST /api/auth/refresh` with a completely invalid (non-JWT) string must
+/// return 401 — the token cannot be decoded at all.
+#[tokio::test]
+async fn refresh_with_garbage_token_returns_401() {
+    let app = build_test_router(test_pool().await);
+
+    let resp = post_json(
+        app,
+        "/api/auth/refresh",
+        serde_json::json!({ "refresh_token": "this.is.not.a.jwt" }),
+    )
+    .await;
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "garbage refresh token must return 401"
+    );
+}
+
+/// `POST /api/auth/refresh` with an expired (but correctly signed) refresh
+/// token must return 401 — `exp` is in the past.
+#[tokio::test]
+async fn refresh_with_expired_refresh_token_returns_401() {
+    let app = build_test_router(test_pool().await);
+
+    // Craft a refresh token that expired 2 hours ago, signed with the same
+    // secret that `build_test_router` uses, so the signature is valid but the
+    // expiry check must still reject it.
+    #[derive(serde::Serialize)]
+    struct ExpiredRefreshClaims {
+        sub: String,
+        exp: usize,
+        kind: String,
+    }
+    let exp = (chrono::Utc::now() - chrono::Duration::hours(2)).timestamp() as usize;
+    let expired_token = encode(
+        &Header::default(),
+        &ExpiredRefreshClaims {
+            sub: "00000000-0000-0000-0000-000000000000".into(),
+            exp,
+            kind: "refresh".into(),
+        },
+        &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
+    )
+    .unwrap();
+
+    let resp = post_json(
+        app,
+        "/api/auth/refresh",
+        serde_json::json!({ "refresh_token": expired_token }),
+    )
+    .await;
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "expired refresh token must return 401"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Additional no-auth / missing-token tests
+// ---------------------------------------------------------------------------
+
+/// Accessing `POST /api/sync/push` with no Authorization header must return 401.
+#[tokio::test]
+async fn push_without_token_returns_401() {
+    let app = build_test_router(test_pool().await);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/sync/push")
+        .header("content-type", "application/json")
+        .header("x-forwarded-for", TEST_CLIENT_IP)
+        .body(Body::from(b"{}".as_ref()))
+        .expect("failed to build unauthenticated POST request");
+
+    let resp = app.oneshot(req).await.expect("oneshot failed");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "missing token on push must return 401"
+    );
+}
+
+/// Accessing `DELETE /api/account` with no Authorization header must return 401.
+#[tokio::test]
+async fn delete_account_without_token_returns_401() {
+    let app = build_test_router(test_pool().await);
+
+    let req = Request::builder()
+        .method("DELETE")
+        .uri("/api/account")
+        .header("x-forwarded-for", TEST_CLIENT_IP)
+        .body(Body::empty())
+        .expect("failed to build unauthenticated DELETE request");
+
+    let resp = app.oneshot(req).await.expect("oneshot failed");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "missing token on DELETE /api/account must return 401"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Leaderboard — authenticated empty-array test
+// ---------------------------------------------------------------------------
+
+/// `GET /api/leaderboard` with a valid JWT but no opted-in players returns 200
+/// with an empty JSON array.
+#[tokio::test]
+async fn leaderboard_with_valid_token_returns_empty_array_when_no_opts() {
+    let app = build_test_router(test_pool().await);
+
+    // Register a user to get a valid token — do NOT opt in to the leaderboard.
+    let (access, _) = register_user(app.clone(), "no_opt_user", "password1!").await;
+
+    let resp = get_authed(app, "/api/leaderboard", &access).await;
+    assert_eq!(resp.status(), StatusCode::OK, "leaderboard must return 200");
+
+    let body = body_json(resp).await;
+    assert!(
+        body.is_array(),
+        "leaderboard body must be a JSON array even when empty"
+    );
+    assert_eq!(
+        body.as_array().unwrap().len(),
+        0,
+        "leaderboard must be empty when no players have opted in"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Rate-limiting test (uses the production router with rate limiting enabled)
 // ---------------------------------------------------------------------------
 

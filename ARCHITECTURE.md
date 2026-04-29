@@ -1,7 +1,7 @@
 # Solitaire Quest — Architecture Document
 
 > **Version:** 1.1  
-> **Language:** Rust (Edition 2021)  
+> **Language:** Rust (Edition 2024)  
 > **Engine:** Bevy (latest stable)  
 > **Last Updated:** 2026-04-29
 
