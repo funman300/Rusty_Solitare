@@ -1,15 +1,14 @@
-//! Procedural card rendering.
+//! PNG-based card rendering.
 //!
-//! Each card is a parent entity with a coloured body `Sprite` and a child
-//! `Text2d` showing rank+suit. Entities are synced with `GameStateResource`
-//! on every `StateChangedEvent`: missing cards are spawned, present cards
-//! are repositioned/updated in place, and stale cards are despawned.
+//! Card entities are synced with [`GameStateResource`] on every
+//! [`StateChangedEvent`]: missing cards are spawned, present cards are
+//! repositioned/updated in place, and stale cards are despawned.
 //!
-//! Phase 3 uses ASCII rank letters ("A", "2"…"10", "J", "Q", "K") and ASCII
-//! suit letters ("C", "D", "H", "S") so rendering does not depend on the
-//! bundled font carrying Unicode suit glyphs. When real card art lands in a
-//! later phase, this plugin is replaced — the `CardEntity` marker and the
-//! "sync on StateChangedEvent" contract stay the same.
+//! When [`CardImageSet`] is available, each face-up card renders its own
+//! 120×168 px `Handle<Image>` chosen from the 52 per-card PNGs loaded from
+//! `assets/cards/faces/{rank}_{suit}.png`. A solid-colour `Sprite` with a
+//! `Text2d` rank+suit overlay is used as a fallback when `CardImageSet` is
+//! absent (e.g. in tests running under `MinimalPlugins`).
 
 use std::collections::{HashMap, HashSet};
 
