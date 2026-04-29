@@ -694,16 +694,31 @@ fn end_drag(
                         count,
                     });
                     // Shake each dragged card so the player gets immediate
-                    // visual feedback that the drop was rejected.
-                    for &card_id in &drag.cards {
-                        if let Some((entity, _, transform)) = card_entities
-                            .iter()
-                            .find(|(_, ce, _)| ce.card_id == card_id)
-                        {
-                            commands.entity(entity).insert(ShakeAnim {
-                                elapsed: 0.0,
-                                origin_x: transform.translation.x,
-                            });
+                    // visual feedback that the drop was rejected. ShakeAnim
+                    // restores translation.x to origin_x at the end of the
+                    // animation, so origin_x must be the target slot in the
+                    // origin pile — using the current drag transform would
+                    // pin the card at the drop location and fight the
+                    // sync_cards slide that StateChangedEvent triggers
+                    // (the symptom is "card lands beside the pile").
+                    if let Some(origin_pile) = game.0.piles.get(&origin) {
+                        for &card_id in &drag.cards {
+                            let Some(stack_index) =
+                                origin_pile.cards.iter().position(|c| c.id == card_id)
+                            else {
+                                continue;
+                            };
+                            let target_pos =
+                                card_position(&game.0, &layout.0, &origin, stack_index);
+                            if let Some((entity, _, _)) = card_entities
+                                .iter()
+                                .find(|(_, ce, _)| ce.card_id == card_id)
+                            {
+                                commands.entity(entity).insert(ShakeAnim {
+                                    elapsed: 0.0,
+                                    origin_x: target_pos.x,
+                                });
+                            }
                         }
                     }
                 }
@@ -911,14 +926,26 @@ fn touch_end_drag(
                         fired = true;
                     } else {
                         rejected.write(MoveRejectedEvent { from: origin.clone(), to: target, count });
-                        for &card_id in &drag.cards {
-                            if let Some((entity, _, transform)) =
-                                card_entities.iter().find(|(_, ce, _)| ce.card_id == card_id)
-                            {
-                                commands.entity(entity).insert(ShakeAnim {
-                                    elapsed: 0.0,
-                                    origin_x: transform.translation.x,
-                                });
+                        // See `end_drag` (mouse path) for the rationale: ShakeAnim
+                        // restores translation.x to origin_x, so origin_x must be
+                        // the origin pile's slot, not the drop location.
+                        if let Some(origin_pile) = game.0.piles.get(&origin) {
+                            for &card_id in &drag.cards {
+                                let Some(stack_index) =
+                                    origin_pile.cards.iter().position(|c| c.id == card_id)
+                                else {
+                                    continue;
+                                };
+                                let target_pos =
+                                    card_position(&game.0, &layout.0, &origin, stack_index);
+                                if let Some((entity, _, _)) =
+                                    card_entities.iter().find(|(_, ce, _)| ce.card_id == card_id)
+                                {
+                                    commands.entity(entity).insert(ShakeAnim {
+                                        elapsed: 0.0,
+                                        origin_x: target_pos.x,
+                                    });
+                                }
                             }
                         }
                     }
@@ -2025,7 +2052,11 @@ mod tests {
 
     /// Verifies that `ShakeAnim` constructed for a rejected drag has the
     /// correct initial values: `elapsed` starts at 0.0 and `origin_x` matches
-    /// the card's current transform X position.
+    /// the **target slot in the origin pile** (where the card will rest after
+    /// the rejection). Saving the drop-location X here was the root cause of
+    /// the "card lands beside the pile" bug — `tick_shake_anim` restores
+    /// `translation.x` to `origin_x` at the end of the shake, fighting the
+    /// `sync_cards` slide that `StateChangedEvent` triggers.
     ///
     /// The Bevy ECS part (Commands + Query) is exercised at runtime; this test
     /// covers the data path — that we build the component with the right values
@@ -2034,14 +2065,18 @@ mod tests {
     fn shake_anim_for_rejected_drag_has_correct_initial_values() {
         use crate::feedback_anim_plugin::ShakeAnim;
 
-        // Simulate the transform X that a dragged card would have at the
-        // moment the drag is released (could be anywhere on screen).
-        let current_x = 123.5_f32;
+        // Simulate the X coordinate of the card's slot in its origin pile —
+        // computed by `card_position(game, layout, &origin, stack_index)` at
+        // rejection time, not the drop-location transform X.
+        let target_slot_x = 123.5_f32;
 
-        // This mirrors the ShakeAnim construction in `end_drag`.
+        // This mirrors the ShakeAnim construction in `end_drag` and
+        // `touch_end_drag` after the bugfix: origin_x is the origin pile's
+        // slot X, so the shake ends with the card at its correct resting
+        // position.
         let anim = ShakeAnim {
             elapsed: 0.0,
-            origin_x: current_x,
+            origin_x: target_slot_x,
         };
 
         assert_eq!(
@@ -2049,9 +2084,10 @@ mod tests {
             "ShakeAnim must start with elapsed=0.0 so the animation plays from the beginning"
         );
         assert!(
-            (anim.origin_x - current_x).abs() < 1e-6,
-            "ShakeAnim origin_x must match the card's transform X at drop time, \
-             expected {current_x}, got {}",
+            (anim.origin_x - target_slot_x).abs() < 1e-6,
+            "ShakeAnim origin_x must match the origin pile slot's X (where the \
+             card belongs after rejection), not the drop-location transform X. \
+             Expected {target_slot_x}, got {}",
             anim.origin_x
         );
     }
