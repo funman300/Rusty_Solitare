@@ -82,12 +82,14 @@ impl Plugin for StatsPlugin {
             .add_message::<ForfeitEvent>()
             .add_message::<InfoToastEvent>()
             // record_abandoned must read `move_count` BEFORE handle_new_game
-            // clobbers it with a fresh game.
+            // clobbers it with a fresh game. These are NOT in StatsUpdate because
+            // StatsUpdate (as a set) is ordered after GameMutation by external
+            // constraints (win_summary_plugin: cache_win_data.before(StatsUpdate)),
+            // and a system cannot be both inside a set and individually before a
+            // set-level ordering constraint.
             .add_systems(
                 Update,
-                update_stats_on_new_game
-                    .before(GameMutation)
-                    .in_set(StatsUpdate),
+                update_stats_on_new_game.before(GameMutation),
             )
             .add_systems(
                 Update,
@@ -95,7 +97,7 @@ impl Plugin for StatsPlugin {
             )
             .add_systems(
                 Update,
-                handle_forfeit.before(GameMutation).in_set(StatsUpdate),
+                handle_forfeit.before(GameMutation),
             )
             .add_systems(Update, toggle_stats_screen.after(GameMutation));
     }
