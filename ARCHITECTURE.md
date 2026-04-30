@@ -133,7 +133,7 @@ Owns:
 - `SyncProvider` trait — implemented by `SolitaireServerClient`
 
 ### `solitaire_engine`
-**Dependencies:** `bevy`, `bevy_kira_audio`, `solitaire_core`, `solitaire_data`.
+**Dependencies:** `bevy`, `kira`, `solitaire_core`, `solitaire_data`.
 
 All Bevy-specific code. Structured as a collection of Plugins that `solitaire_app` registers.
 
@@ -246,7 +246,7 @@ The "Shortcut" column lists optional keyboard accelerators. Every action in this
 | `AnimationPlugin` | — | Slide, flip, win cascade, toast animations |
 | `FeedbackAnimPlugin` | — | Shake, settle, and deal-stagger animations |
 | `AutoCompletePlugin` | Enter | Executes auto-complete when the HUD badge is lit |
-| `AudioPlugin` | — | Sound effect and music playback via bevy_kira_audio |
+| `AudioPlugin` | — | Sound effect and music playback via kira |
 | `InputPlugin` | — | Keyboard and mouse input routing |
 | `CursorPlugin` | — | Custom cursor sprite during drag |
 | `SelectionPlugin` | — | Keyboard-driven card selection |
@@ -754,7 +754,7 @@ Levels 11+:   level = 10 + floor((total_xp - 5000) / 1000)
 
 ## 13. Audio System
 
-Audio uses `bevy_kira_audio`. All sound files are `.wav`.
+Audio uses `kira`. All sound files are `.wav`.
 
 | File | Trigger |
 |---|---|
@@ -765,7 +765,7 @@ Audio uses `bevy_kira_audio`. All sound files are `.wav`.
 | `win_fanfare.wav` | Game won |
 | `ambient_loop.wav` | Looping background music |
 
-Volume is controlled by two independent sliders in Settings (`sfx_volume`, `music_volume`), each stored in `Settings` and applied as `bevy_kira_audio` channel volumes.
+Volume is controlled by two independent sliders in Settings (`sfx_volume`, `music_volume`), each stored in `Settings` and applied as `kira` channel volumes.
 
 Audio systems listen for Bevy events and never block the game thread.
 
