@@ -36,6 +36,10 @@ pub const BG_ELEVATED: Color = Color::srgb(0.176, 0.106, 0.412);
 /// currently-active row of a popover. `#3A2580`.
 pub const BG_ELEVATED_HI: Color = Color::srgb(0.227, 0.145, 0.502);
 
+/// Top elevation step — Secondary button hover, popover currently-
+/// hovered row. One rung above `BG_ELEVATED_HI`. `#482F97`.
+pub const BG_ELEVATED_TOP: Color = Color::srgb(0.282, 0.184, 0.592);
+
 /// Pressed-button surface — `BG_ELEVATED` darkened ~15%. `#26155B`.
 pub const BG_ELEVATED_PRESSED: Color = Color::srgb(0.149, 0.082, 0.357);
 
@@ -60,6 +64,10 @@ pub const TEXT_DISABLED: Color = Color::srgb(0.420, 0.373, 0.522);
 /// "look here" callouts. `BG_BASE` text on top of this colour passes
 /// AAA contrast. `#FFD23F`.
 pub const ACCENT_PRIMARY: Color = Color::srgb(1.000, 0.824, 0.247);
+
+/// Brightened `ACCENT_PRIMARY` for hover states on primary buttons.
+/// Picks up saturation while keeping the same hue. `#FFE36B`.
+pub const ACCENT_PRIMARY_HOVER: Color = Color::srgb(1.000, 0.890, 0.420);
 
 /// Warm magenta secondary accent — celebratory states (achievement
 /// unlocked, streak milestones). Used sparingly so it stays special.

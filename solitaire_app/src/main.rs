@@ -5,7 +5,8 @@ use solitaire_engine::{
     CardPlugin, ChallengePlugin, CursorPlugin, DailyChallengePlugin, FeedbackAnimPlugin,
     FontPlugin, GamePlugin, HelpPlugin, HomePlugin, HudPlugin, InputPlugin, LeaderboardPlugin,
     OnboardingPlugin, PausePlugin, ProfilePlugin, ProgressPlugin, SelectionPlugin, SettingsPlugin,
-    StatsPlugin, SyncPlugin, TablePlugin, TimeAttackPlugin, WeeklyGoalsPlugin, WinSummaryPlugin,
+    StatsPlugin, SyncPlugin, TablePlugin, TimeAttackPlugin, UiModalPlugin, WeeklyGoalsPlugin,
+    WinSummaryPlugin,
 };
 
 fn main() {
@@ -83,5 +84,6 @@ fn main() {
         .add_plugins(SyncPlugin::new(sync_provider))
         .add_plugins(LeaderboardPlugin)
         .add_plugins(WinSummaryPlugin)
+        .add_plugins(UiModalPlugin)
         .run();
 }

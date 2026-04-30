@@ -30,6 +30,7 @@ pub mod stats_plugin;
 pub mod sync_plugin;
 pub mod table_plugin;
 pub mod time_attack_plugin;
+pub mod ui_modal;
 pub mod ui_theme;
 pub mod weekly_goals_plugin;
 pub mod win_summary_plugin;
@@ -96,6 +97,11 @@ pub use resources::{DragState, GameStateResource, HintCycleIndex, SettingsScroll
 pub use selection_plugin::{SelectionHighlight, SelectionPlugin, SelectionState};
 pub use stats_plugin::{StatsPlugin, StatsResource, StatsScreen, StatsUpdate};
 pub use sync_plugin::{SyncPlugin, SyncProviderResource};
+pub use ui_modal::{
+    spawn_modal, spawn_modal_actions, spawn_modal_body_text, spawn_modal_button,
+    spawn_modal_header, ButtonVariant, ModalActions, ModalBody, ModalButton, ModalCard,
+    ModalHeader, ModalScrim, UiModalPlugin,
+};
 pub use table_plugin::{
     BackgroundImageSet, HintPileHighlight, PileMarker, TableBackground, TablePlugin,
 };
