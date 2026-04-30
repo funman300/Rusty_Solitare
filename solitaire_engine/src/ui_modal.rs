@@ -144,6 +144,13 @@ where
                 ..default()
             },
             BackgroundColor(SCRIM),
+            // GlobalZIndex pins this root modal at `z_panel` regardless
+            // of any sibling stacking-context quirks in Bevy 0.18 — the
+            // ordinary `ZIndex` is preserved as a fallback for nested
+            // contexts. Without GlobalZIndex, a confirmation modal at
+            // `Z_PAUSE_DIALOG` (225) was rendering *behind* the pause
+            // modal at `Z_PAUSE` (220) in some scenes.
+            GlobalZIndex(z_panel),
             ZIndex(z_panel),
         ))
         .with_children(|root| {

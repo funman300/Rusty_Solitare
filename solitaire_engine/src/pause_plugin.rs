@@ -24,7 +24,9 @@ use bevy::prelude::*;
 use solitaire_core::game_state::DrawMode;
 use solitaire_data::save_game_state_to;
 
-use crate::events::{ForfeitEvent, ForfeitRequestEvent, PauseRequestEvent, StateChangedEvent};
+use crate::events::{
+    ForfeitEvent, ForfeitRequestEvent, InfoToastEvent, PauseRequestEvent, StateChangedEvent,
+};
 use crate::font_plugin::FontResource;
 use crate::game_plugin::{GameOverScreen, GameStatePath};
 use crate::progress_plugin::ProgressResource;
@@ -98,6 +100,7 @@ impl Plugin for PausePlugin {
             .add_message::<PauseRequestEvent>()
             .add_message::<ForfeitRequestEvent>()
             .add_message::<ForfeitEvent>()
+            .add_message::<InfoToastEvent>()
             .init_resource::<PausedResource>()
             .add_systems(
                 Update,
@@ -262,14 +265,17 @@ fn handle_pause_forfeit_button(
 /// Spawns `ForfeitConfirmScreen` in response to a `ForfeitRequestEvent`
 /// (from the `G` accelerator or the Pause modal's Forfeit button).
 ///
-/// Bails when no game is in progress so a stray request never opens
-/// the modal on the home screen / game-over screen.
+/// Surfaces a toast and bails when there is no game to forfeit (won
+/// state, or no `GameStateResource` at all) so the request is never
+/// silently dropped — the prior implementation's silent no-op made the
+/// pause modal's Forfeit button feel broken.
 fn handle_forfeit_request(
     mut commands: Commands,
     mut requests: MessageReader<ForfeitRequestEvent>,
     forfeit_screens: Query<Entity, With<ForfeitConfirmScreen>>,
     game: Option<Res<GameStateResource>>,
     font_res: Option<Res<FontResource>>,
+    mut toast: MessageWriter<InfoToastEvent>,
 ) {
     let requested = requests.read().count() > 0;
     if !requested {
@@ -278,10 +284,9 @@ fn handle_forfeit_request(
     if !forfeit_screens.is_empty() {
         return;
     }
-    let active_game = game
-        .as_ref()
-        .is_some_and(|g| g.0.move_count > 0 && !g.0.is_won);
-    if !active_game {
+    let game_in_progress = game.as_ref().is_some_and(|g| !g.0.is_won);
+    if !game_in_progress {
+        toast.write(InfoToastEvent("No game to forfeit".to_string()));
         return;
     }
     spawn_forfeit_confirm_screen(&mut commands, font_res.as_deref());
@@ -854,17 +859,14 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// Test app with the resources `handle_forfeit_request` reads.
-    /// Provides a `GameStateResource` with one move so `active_game` is true.
+    /// Provides a fresh `GameStateResource` (not won) so the modal can
+    /// open. `move_count` doesn't matter — the gate is just `!is_won`.
     fn forfeit_app() -> App {
         use solitaire_core::game_state::{DrawMode, GameState};
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).add_plugins(PausePlugin);
         app.init_resource::<ButtonInput<KeyCode>>();
-
-        // Build an "active" game: move_count > 0 and not won.
-        let mut game = GameState::new(1, DrawMode::DrawOne);
-        game.move_count = 1;
-        app.insert_resource(GameStateResource(game));
+        app.insert_resource(GameStateResource(GameState::new(1, DrawMode::DrawOne)));
         app.update();
         app
     }
@@ -909,14 +911,19 @@ mod tests {
         );
     }
 
+    /// When the game is already won, a `ForfeitRequestEvent` must not
+    /// open the modal (you can't forfeit a finished game) and instead
+    /// surface an `InfoToastEvent` so the user gets feedback that the
+    /// hotkey was received but is currently a no-op.
     #[test]
-    fn forfeit_request_does_nothing_when_no_active_game() {
+    fn forfeit_request_emits_toast_and_skips_modal_when_game_is_won() {
         use solitaire_core::game_state::{DrawMode, GameState};
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).add_plugins(PausePlugin);
         app.init_resource::<ButtonInput<KeyCode>>();
-        // GameState with move_count == 0 — not an active game.
-        app.insert_resource(GameStateResource(GameState::new(1, DrawMode::DrawOne)));
+        let mut game = GameState::new(1, DrawMode::DrawOne);
+        game.is_won = true;
+        app.insert_resource(GameStateResource(game));
         app.update();
 
         app.world_mut()
@@ -930,7 +937,13 @@ mod tests {
                 .iter(app.world())
                 .count(),
             0,
-            "ForfeitRequestEvent must be ignored when no game is in progress"
+            "the forfeit modal must not open when the current game is already won"
+        );
+        let events = app.world().resource::<Messages<InfoToastEvent>>();
+        let mut cursor = events.get_cursor();
+        assert!(
+            cursor.read(events).any(|t| t.0 == "No game to forfeit"),
+            "an InfoToastEvent must be fired so the player gets feedback"
         );
     }
 
