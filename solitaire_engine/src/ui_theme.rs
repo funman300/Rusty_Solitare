@@ -94,6 +94,11 @@ pub const BORDER_SUBTLE: Color = Color::srgba(0.647, 0.549, 1.000, 0.12);
 /// Strong border — hover outline, focused button, active popover.
 pub const BORDER_STRONG: Color = Color::srgba(0.647, 0.549, 1.000, 0.30);
 
+/// 2 px ring drawn around the focused interactive element. Balatro yellow
+/// (matches `ACCENT_PRIMARY`) at 85% alpha so the ring stays legible
+/// against both elevated surfaces and the modal scrim backdrop.
+pub const FOCUS_RING: Color = Color::srgba(1.0, 0.823, 0.247, 0.85);
+
 // ---------------------------------------------------------------------------
 // Typography scale (px) — 5 rungs replace the prior
 // 14/15/16/17/18/22/26/28/30/32/40/48 jungle. All UI uses FiraMono via
@@ -187,6 +192,11 @@ pub const Z_PAUSE: i32 = 220;
 /// `Z_PAUSE` so the dialog is always visible over the paused state.
 pub const Z_PAUSE_DIALOG: i32 = 225;
 pub const Z_ONBOARDING: i32 = 230;
+/// Z-layer for the keyboard focus indicator. Sits one rung above the
+/// topmost modal layer (`Z_ONBOARDING`) so the ring is never occluded by
+/// a modal card's hover state, while staying below the win cascade and
+/// transient toasts that are allowed to overlay everything else.
+pub const Z_FOCUS_RING: i32 = 240;
 /// Win cascade sits between modals and toasts so the celebration plays
 /// over a paused / mid-modal screen.
 pub const Z_WIN_CASCADE: i32 = 300;
@@ -331,6 +341,7 @@ mod tests {
             Z_PAUSE,
             Z_PAUSE_DIALOG,
             Z_ONBOARDING,
+            Z_FOCUS_RING,
             Z_WIN_CASCADE,
             Z_TOAST,
         ];
