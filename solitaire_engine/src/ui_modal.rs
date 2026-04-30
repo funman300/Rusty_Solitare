@@ -49,13 +49,15 @@
 //! ```
 
 use bevy::prelude::*;
+use solitaire_data::AnimSpeed;
 
 use crate::font_plugin::FontResource;
+use crate::settings_plugin::SettingsResource;
 use crate::ui_theme::{
-    ACCENT_PRIMARY, ACCENT_PRIMARY_HOVER, ACCENT_SECONDARY, BG_BASE, BG_ELEVATED, BG_ELEVATED_HI,
-    BG_ELEVATED_PRESSED, BG_ELEVATED_TOP, BORDER_STRONG, BORDER_SUBTLE, RADIUS_LG, RADIUS_MD,
-    SCRIM, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY_LG, TYPE_CAPTION, TYPE_HEADLINE, VAL_SPACE_2,
-    VAL_SPACE_3, VAL_SPACE_4, VAL_SPACE_5,
+    scaled_duration, ACCENT_PRIMARY, ACCENT_PRIMARY_HOVER, ACCENT_SECONDARY, BG_BASE, BG_ELEVATED,
+    BG_ELEVATED_HI, BG_ELEVATED_PRESSED, BG_ELEVATED_TOP, BORDER_STRONG, BORDER_SUBTLE,
+    MOTION_MODAL_SECS, RADIUS_LG, RADIUS_MD, SCRIM, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY_LG,
+    TYPE_CAPTION, TYPE_HEADLINE, VAL_SPACE_2, VAL_SPACE_3, VAL_SPACE_4, VAL_SPACE_5,
 };
 
 // ---------------------------------------------------------------------------
@@ -89,6 +91,27 @@ pub struct ModalActions;
 #[derive(Component, Debug, Clone, Copy)]
 pub struct ModalButton(pub ButtonVariant);
 
+/// Drives the modal open animation. Inserted on the scrim entity by
+/// [`spawn_modal`]; advanced and removed by [`advance_modal_enter`] once
+/// `elapsed >= duration`.
+///
+/// During the animation the scrim's `BackgroundColor` alpha lerps from
+/// 0 → `SCRIM`'s native alpha and the card's `Transform` scale lerps from
+/// `MODAL_ENTER_START_SCALE` → 1.0. Under `AnimSpeed::Instant`,
+/// `duration == 0.0` and the system snaps everything to the final state on
+/// the first tick so no half-state is ever shown.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ModalEntering {
+    /// Seconds elapsed since the animation started.
+    pub elapsed: f32,
+    /// Total duration in seconds. May be zero (`AnimSpeed::Instant`).
+    pub duration: f32,
+}
+
+/// Initial card scale at `t = 0` for the modal open animation. The card
+/// grows from this value to `1.0` over `MOTION_MODAL_SECS`.
+pub const MODAL_ENTER_START_SCALE: f32 = 0.96;
+
 // ---------------------------------------------------------------------------
 // Button variants — three rungs of emphasis. A single overlay should have
 // at most one Primary; Secondary and Tertiary fill out the rest.
@@ -120,6 +143,16 @@ pub enum ButtonVariant {
 /// `plugin_marker` is the overlay's plugin-specific marker
 /// (`ConfirmNewGameScreen`, `HelpScreen`, etc.) so plugin click handlers
 /// can find their own modal.
+///
+/// **Open animation.** The scrim is spawned with alpha 0 and the card
+/// with `Transform::scale = MODAL_ENTER_START_SCALE`; a [`ModalEntering`]
+/// component on the scrim drives the scrim alpha → `SCRIM`'s native
+/// alpha and the card scale → 1.0 lerps via [`advance_modal_enter`]. The
+/// duration is `scaled_duration(MOTION_MODAL_SECS, settings.animation_speed)`
+/// so the open animation respects the player's `AnimSpeed` preference;
+/// under `AnimSpeed::Instant` the duration is zero and the very first
+/// tick snaps to the final state. The animate-OUT path is intentionally
+/// out of scope — modals despawn instantly.
 pub fn spawn_modal<M: Component, F>(
     commands: &mut Commands,
     plugin_marker: M,
@@ -129,10 +162,19 @@ pub fn spawn_modal<M: Component, F>(
 where
     F: FnOnce(&mut ChildSpawnerCommands),
 {
+    // The duration here is the `AnimSpeed::Normal` baseline; the
+    // `apply_modal_enter_speed` system rescales it (or zeroes it for
+    // `AnimSpeed::Instant`) on the first frame after spawn by reading
+    // `SettingsResource`. Doing it that way keeps `spawn_modal` a free
+    // function with no resource dependencies — every existing call site
+    // (~11 plugins) continues to work without a signature change.
+    let duration = MOTION_MODAL_SECS;
+    let initial_scrim = scrim_with_alpha(0.0);
     commands
         .spawn((
             plugin_marker,
             ModalScrim,
+            ModalEntering { elapsed: 0.0, duration },
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -143,7 +185,7 @@ where
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(SCRIM),
+            BackgroundColor(initial_scrim),
             // GlobalZIndex pins this root modal at `z_panel` regardless
             // of any sibling stacking-context quirks in Bevy 0.18 — the
             // ordinary `ZIndex` is preserved as a fallback for nested
@@ -167,12 +209,25 @@ where
                     align_items: AlignItems::Stretch,
                     ..default()
                 },
+                // Card UI nodes carry a Transform; the open animation
+                // lerps `scale` from MODAL_ENTER_START_SCALE → 1.0.
+                Transform::from_scale(Vec3::splat(MODAL_ENTER_START_SCALE)),
                 BackgroundColor(BG_ELEVATED),
                 BorderColor::all(BORDER_STRONG),
             ))
             .with_children(build_card);
         })
         .id()
+}
+
+/// Returns `SCRIM` with its alpha multiplied by `factor` (0.0–1.0). The
+/// open animation lerps `factor` from 0 → 1 over the modal-enter
+/// duration so the scrim fades in instead of popping.
+fn scrim_with_alpha(factor: f32) -> Color {
+    let mut c = SCRIM;
+    let target = SCRIM.alpha();
+    c.set_alpha(target * factor.clamp(0.0, 1.0));
+    c
 }
 
 /// Spawns the standard modal header — `TYPE_HEADLINE` + `TEXT_PRIMARY`.
@@ -336,6 +391,90 @@ fn pressed_bg(variant: ButtonVariant) -> Color {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Modal open animation
+// ---------------------------------------------------------------------------
+
+/// Patches the `ModalEntering::duration` of newly-spawned modals against
+/// the player's `AnimSpeed` setting. Runs on `Added<ModalEntering>` so it
+/// only fires once per modal, immediately after [`spawn_modal`] inserts
+/// the component.
+///
+/// Under `AnimSpeed::Instant` this drops the duration to 0; the next
+/// frame [`advance_modal_enter`] sees `t >= 1.0` and snaps the modal to
+/// its final state, so no half-state is ever shown.
+pub fn apply_modal_enter_speed(
+    settings: Option<Res<SettingsResource>>,
+    mut q: Query<&mut ModalEntering, Added<ModalEntering>>,
+) {
+    let speed = settings
+        .as_ref()
+        .map(|s| s.0.animation_speed)
+        .unwrap_or(AnimSpeed::Normal);
+    for mut entering in &mut q {
+        entering.duration = scaled_duration(MOTION_MODAL_SECS, speed);
+    }
+}
+
+/// Drives the modal open animation. For each scrim entity carrying
+/// [`ModalEntering`] this system increments `elapsed`, computes
+/// `t = (elapsed / duration).clamp(0, 1)`, applies an ease-out
+/// (`t * (2 - t)`) curve to both the scrim alpha and the card scale,
+/// and removes the component plus any leftover transform offset once
+/// `t >= 1.0`.
+///
+/// The card scale is patched on the modal's `ModalCard` child rather
+/// than on the scrim — the scrim is full-window and any scale on it
+/// would visibly squash the layout. The card carries its own
+/// `Transform`, started at `Vec3::splat(MODAL_ENTER_START_SCALE)` by
+/// [`spawn_modal`].
+pub fn advance_modal_enter(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut scrims: Query<(Entity, &mut ModalEntering, &mut BackgroundColor, &Children), With<ModalScrim>>,
+    mut cards: Query<&mut Transform, With<ModalCard>>,
+) {
+    let dt = time.delta_secs();
+    for (scrim_entity, mut entering, mut bg, children) in &mut scrims {
+        // Zero-duration path (AnimSpeed::Instant): snap to the final
+        // state on the very first tick so the modal is fully visible
+        // immediately and we never expose the 0.96 / alpha-0 starting
+        // pose to the player.
+        let t = if entering.duration <= 0.0 {
+            1.0
+        } else {
+            entering.elapsed += dt;
+            (entering.elapsed / entering.duration).clamp(0.0, 1.0)
+        };
+
+        // Ease-out: t * (2 - t). Reaches 1.0 at t=1, derivative is 0
+        // at the endpoint so the animation settles instead of snapping.
+        let eased = t * (2.0 - t);
+
+        bg.0 = scrim_with_alpha(eased);
+
+        let scale = MODAL_ENTER_START_SCALE + (1.0 - MODAL_ENTER_START_SCALE) * eased;
+        for child in children.iter() {
+            if let Ok(mut transform) = cards.get_mut(child) {
+                transform.scale = Vec3::splat(scale);
+            }
+        }
+
+        if t >= 1.0 {
+            // Pin scrim and card to their final exact values so any
+            // float drift from the lerp doesn't survive into normal
+            // use (downstream paint systems read these later).
+            bg.0 = SCRIM;
+            for child in children.iter() {
+                if let Ok(mut transform) = cards.get_mut(child) {
+                    transform.scale = Vec3::ONE;
+                }
+            }
+            commands.entity(scrim_entity).remove::<ModalEntering>();
+        }
+    }
+}
+
 /// Repaints every `ModalButton` on `Changed<Interaction>` so hover and
 /// press states are visible without each overlay registering its own
 /// paint system.
@@ -366,7 +505,17 @@ pub struct UiModalPlugin;
 
 impl Plugin for UiModalPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, paint_modal_buttons);
+        // Order: `apply_modal_enter_speed` patches the duration on the
+        // first frame after spawn (Added<ModalEntering>), then
+        // `advance_modal_enter` ticks. Running them in a tuple keeps
+        // them in the same stage so a freshly-spawned modal lands on
+        // the correct duration before its first frame of advance —
+        // important for AnimSpeed::Instant where duration must be 0
+        // before advance computes `t`.
+        app.add_systems(
+            Update,
+            (apply_modal_enter_speed, advance_modal_enter, paint_modal_buttons).chain(),
+        );
     }
 }
 
@@ -399,6 +548,126 @@ mod tests {
         app.add_plugins(MinimalPlugins).add_plugins(UiModalPlugin);
         // App built without panic — paint_modal_buttons is registered.
         app.update();
+    }
+
+    // -----------------------------------------------------------------------
+    // Modal open animation (G1)
+    // -----------------------------------------------------------------------
+
+    /// Marker component for the test modal — `spawn_modal` requires a
+    /// `Component` so tests need their own dummy.
+    #[derive(Component, Debug)]
+    struct TestModal;
+
+    /// `spawn_modal` inserts `ModalEntering` carrying the full
+    /// `MOTION_MODAL_SECS` duration (`AnimSpeed::Normal` baseline) plus
+    /// a card child sized at the start scale. The
+    /// `apply_modal_enter_speed` system rescales later under
+    /// `SettingsResource`; absent that resource the baseline stands.
+    #[test]
+    fn spawn_modal_inserts_entering_with_full_duration_and_start_scale() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(UiModalPlugin);
+
+        let scrim = {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            let id = spawn_modal(&mut commands, TestModal, 0, |_| {});
+            world.flush();
+            id
+        };
+
+        let entering = app
+            .world()
+            .entity(scrim)
+            .get::<ModalEntering>()
+            .expect("ModalEntering should be inserted on spawn");
+        assert!(
+            (entering.duration - MOTION_MODAL_SECS).abs() < 1e-6,
+            "duration should be the AnimSpeed::Normal baseline before apply_modal_enter_speed runs; got {}",
+            entering.duration
+        );
+        assert_eq!(entering.elapsed, 0.0);
+
+        // The card child carries Transform with scale at the start value.
+        let card_scale = card_scale_of(&mut app, scrim);
+        assert!(
+            (card_scale - MODAL_ENTER_START_SCALE).abs() < 1e-6,
+            "card should spawn at MODAL_ENTER_START_SCALE; got {card_scale}"
+        );
+    }
+
+    /// After enough simulated ticks for `elapsed >= duration`, the
+    /// `ModalEntering` component is removed and the card scale is back
+    /// at 1.0. Uses `Time<Virtual>` advance to push elapsed past the
+    /// duration without waiting for real wall-clock time.
+    #[test]
+    fn advance_modal_enter_removes_component_and_settles_scale() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(UiModalPlugin);
+
+        let scrim = {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            let id = spawn_modal(&mut commands, TestModal, 0, |_| {});
+            world.flush();
+            id
+        };
+
+        // Tick once with delta well beyond MOTION_MODAL_SECS — the
+        // ease-out clamps t at 1.0 so a single oversized tick is enough
+        // to settle the animation. `ManualDuration` makes
+        // `Time::delta_secs()` deterministic inside the test.
+        set_manual_time_step(&mut app, MOTION_MODAL_SECS * 2.0 + 0.1);
+        // Two updates: the first sets up `Time` with the manual delta;
+        // the second runs the advance system with non-zero dt. The
+        // `Added<ModalEntering>` filter survives across these updates
+        // because `apply_modal_enter_speed` writes the duration on
+        // whichever frame the entity first appears.
+        app.update();
+        app.update();
+
+        assert!(
+            app.world().entity(scrim).get::<ModalEntering>().is_none(),
+            "ModalEntering should be removed once elapsed >= duration"
+        );
+        let card_scale = card_scale_of(&mut app, scrim);
+        assert!(
+            (card_scale - 1.0).abs() < 1e-3,
+            "card scale should settle at 1.0 after the open animation; got {card_scale}"
+        );
+    }
+
+    /// Returns the X-component of the first `ModalCard` child of the
+    /// given scrim's `Transform::scale`. All three components are kept
+    /// in sync by the system so reading X is sufficient.
+    fn card_scale_of(app: &mut App, scrim: Entity) -> f32 {
+        let world = app.world();
+        let children = world
+            .entity(scrim)
+            .get::<Children>()
+            .expect("scrim should have a card child");
+        for child in children.iter() {
+            if let Some(t) = world.entity(child).get::<Transform>()
+                && world.entity(child).get::<ModalCard>().is_some()
+            {
+                return t.scale.x;
+            }
+        }
+        panic!("no ModalCard child with a Transform under scrim {scrim:?}");
+    }
+
+    /// Tells `TimePlugin` to advance the clock by `secs` on the next
+    /// `app.update()`. Inside a unit test no real wall-clock time has
+    /// passed between ticks, so the default `Automatic` strategy gives
+    /// `delta_secs() == 0`. `ManualDuration` makes the next tick
+    /// observe exactly `secs` of elapsed time.
+    fn set_manual_time_step(app: &mut App, secs: f32) {
+        use bevy::time::TimeUpdateStrategy;
+        use std::time::Duration;
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(
+            Duration::from_secs_f32(secs),
+        ));
     }
 }
 
