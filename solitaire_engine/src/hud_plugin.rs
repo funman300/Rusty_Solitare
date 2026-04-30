@@ -35,6 +35,7 @@ use crate::resources::GameStateResource;
 use crate::selection_plugin::SelectionState;
 use crate::time_attack_plugin::TimeAttackResource;
 use crate::ui_focus::{FocusGroup, Focusable};
+use crate::ui_tooltip::Tooltip;
 
 /// Marker on the score text node.
 #[derive(Component, Debug)]
@@ -343,18 +344,23 @@ fn spawn_hud(font_res: Option<Res<FontResource>>, mut commands: Commands) {
             hud.spawn(row_node()).with_children(|t1| {
                 t1.spawn((
                     HudScore,
+                    Tooltip::new("Points earned this game. Hidden in Zen mode."),
                     Text::new("Score: 0"),
                     font_score.clone(),
                     TextColor(TEXT_PRIMARY),
                 ));
                 t1.spawn((
                     HudMoves,
+                    Tooltip::new(
+                        "Moves you've made this game. Counts placements and stock draws.",
+                    ),
                     Text::new("Moves: 0"),
                     font_lg.clone(),
                     TextColor(TEXT_SECONDARY),
                 ));
                 t1.spawn((
                     HudTime,
+                    Tooltip::new("Time on this game. Counts down in Time Attack."),
                     Text::new("0:00"),
                     font_lg.clone(),
                     TextColor(TEXT_SECONDARY),
@@ -367,18 +373,21 @@ fn spawn_hud(font_res: Option<Res<FontResource>>, mut commands: Commands) {
             hud.spawn(row_node()).with_children(|t2| {
                 t2.spawn((
                     HudMode,
+                    Tooltip::new("Active game mode. Click Modes to switch."),
                     Text::new(""),
                     font_body.clone(),
                     TextColor(ACCENT_PRIMARY),
                 ));
                 t2.spawn((
                     HudChallenge,
+                    Tooltip::new("Today's daily challenge target. Beat it for bonus XP."),
                     Text::new(""),
                     font_body.clone(),
                     TextColor(STATE_INFO),
                 ));
                 t2.spawn((
                     HudDrawCycle,
+                    Tooltip::new("Cards drawn on the next stock click in Draw-Three."),
                     Text::new(""),
                     font_body.clone(),
                     TextColor(STATE_INFO),
@@ -391,18 +400,25 @@ fn spawn_hud(font_res: Option<Res<FontResource>>, mut commands: Commands) {
             hud.spawn(row_node()).with_children(|t3| {
                 t3.spawn((
                     HudUndos,
+                    Tooltip::new(
+                        "Undos used this game. Any undo blocks the No Undo achievement.",
+                    ),
                     Text::new(""),
                     font_body.clone(),
                     TextColor(STATE_WARNING),
                 ));
                 t3.spawn((
                     HudRecycles,
+                    Tooltip::new(
+                        "Times you've recycled the stock. Three or more unlocks Comeback.",
+                    ),
                     Text::new(""),
                     font_body.clone(),
                     TextColor(STATE_WARNING),
                 ));
                 t3.spawn((
                     HudAutoComplete,
+                    Tooltip::new("Board is solvable from here. Press Enter to auto-finish."),
                     Text::new(""),
                     font_body.clone(),
                     TextColor(STATE_SUCCESS),
@@ -414,6 +430,7 @@ fn spawn_hud(font_res: Option<Res<FontResource>>, mut commands: Commands) {
             hud.spawn(row_node()).with_children(|t4| {
                 t4.spawn((
                     HudSelection,
+                    Tooltip::new("Pile selected with Tab. Use arrows or Enter to act."),
                     Text::new(""),
                     font_body,
                     TextColor(ACCENT_SECONDARY),
@@ -458,12 +475,60 @@ fn spawn_action_buttons(font_res: Option<Res<FontResource>>, mut commands: Comma
             // visual reading order (left → right). It feeds
             // `Focusable { group: Hud, order }` so Tab cycles the action
             // bar in the same order the eye scans it.
-            spawn_action_button(row, MenuButton, "Menu \u{25BE}", None, &font, 0);
-            spawn_action_button(row, UndoButton, "Undo", Some("U"), &font, 1);
-            spawn_action_button(row, PauseButton, "Pause", Some("Esc"), &font, 2);
-            spawn_action_button(row, HelpButton, "Help", Some("F1"), &font, 3);
-            spawn_action_button(row, ModesButton, "Modes \u{25BE}", None, &font, 4);
-            spawn_action_button(row, NewGameButton, "New Game", Some("N"), &font, 5);
+            spawn_action_button(
+                row,
+                MenuButton,
+                "Menu \u{25BE}",
+                None,
+                "Open Stats, Achievements, Profile, Settings, or Leaderboard.",
+                &font,
+                0,
+            );
+            spawn_action_button(
+                row,
+                UndoButton,
+                "Undo",
+                Some("U"),
+                "Take back your last move. Costs points and blocks No Undo.",
+                &font,
+                1,
+            );
+            spawn_action_button(
+                row,
+                PauseButton,
+                "Pause",
+                Some("Esc"),
+                "Pause the game and freeze the timer.",
+                &font,
+                2,
+            );
+            spawn_action_button(
+                row,
+                HelpButton,
+                "Help",
+                Some("F1"),
+                "Show controls, rules, and keyboard shortcuts.",
+                &font,
+                3,
+            );
+            spawn_action_button(
+                row,
+                ModesButton,
+                "Modes \u{25BE}",
+                None,
+                "Switch modes: Classic, Daily, Zen, Challenge, Time Attack.",
+                &font,
+                4,
+            );
+            spawn_action_button(
+                row,
+                NewGameButton,
+                "New Game",
+                Some("N"),
+                "Start a fresh deal. Confirms first if a game is in progress.",
+                &font,
+                5,
+            );
         });
 }
 
@@ -474,11 +539,18 @@ fn spawn_action_buttons(font_res: Option<Res<FontResource>>, mut commands: Comma
 /// `order` is the button's index inside the action bar (0 for the
 /// leftmost). It propagates into the [`Focusable`] this function inserts
 /// so Phase 2's keyboard focus ring cycles the HUD in visual order.
+///
+/// `tooltip` is the hover-reveal caption attached via [`Tooltip`]. Every
+/// action button ships with one — there is no opt-out — because each button
+/// represents a player-triggered action and benefits from a one-line
+/// reminder of what it does.
+#[allow(clippy::too_many_arguments)]
 fn spawn_action_button<M: Component>(
     row: &mut ChildSpawnerCommands,
     marker: M,
     label: &str,
     hotkey: Option<&'static str>,
+    tooltip: &'static str,
     font: &TextFont,
     order: i32,
 ) {
@@ -491,6 +563,7 @@ fn spawn_action_button<M: Component>(
         marker,
         ActionButton,
         Button,
+        Tooltip::new(tooltip),
         // Joins the `Hud` focus group at the supplied order so Tab
         // cycles HUD buttons left-to-right under Phase 2. The HUD focus
         // ring still only engages when a HUD button is hovered (or in
@@ -1858,6 +1931,113 @@ mod tests {
                 "every HUD action button must be in FocusGroup::Hud"
             );
         }
+    }
+
+    /// Returns the tooltip string carried by the unique entity matching
+    /// marker `M`. Panics if zero or more than one such entity exists,
+    /// which is the invariant we want to enforce for HUD readouts and
+    /// action buttons (each marker is spawned exactly once).
+    fn tooltip_for<M: Component>(app: &mut App) -> String {
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&Tooltip, With<M>>();
+        let world = app.world();
+        let mut iter = q.iter(world);
+        let first = iter
+            .next()
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected a Tooltip on the {} entity",
+                    std::any::type_name::<M>()
+                )
+            })
+            .0
+            .clone()
+            .into_owned();
+        assert!(
+            iter.next().is_none(),
+            "expected exactly one Tooltip-bearing entity for {}",
+            std::any::type_name::<M>()
+        );
+        first
+    }
+
+    /// Every HUD readout and action button must spawn with a `Tooltip`
+    /// carrying the approved canonical microcopy. Mirrors the structure
+    /// of `hud_buttons_get_focusable_marker` (Phase 2 focus test) so the
+    /// invariant — one marker entity, one tooltip, exact text — is
+    /// asserted consistently across every element.
+    #[test]
+    fn hud_elements_carry_expected_tooltip_strings() {
+        let mut app = headless_app();
+
+        // HUD readouts (left column, top to bottom).
+        assert_eq!(
+            tooltip_for::<HudScore>(&mut app),
+            "Points earned this game. Hidden in Zen mode."
+        );
+        assert_eq!(
+            tooltip_for::<HudMoves>(&mut app),
+            "Moves you've made this game. Counts placements and stock draws."
+        );
+        assert_eq!(
+            tooltip_for::<HudTime>(&mut app),
+            "Time on this game. Counts down in Time Attack."
+        );
+        assert_eq!(
+            tooltip_for::<HudMode>(&mut app),
+            "Active game mode. Click Modes to switch."
+        );
+        assert_eq!(
+            tooltip_for::<HudChallenge>(&mut app),
+            "Today's daily challenge target. Beat it for bonus XP."
+        );
+        assert_eq!(
+            tooltip_for::<HudDrawCycle>(&mut app),
+            "Cards drawn on the next stock click in Draw-Three."
+        );
+        assert_eq!(
+            tooltip_for::<HudUndos>(&mut app),
+            "Undos used this game. Any undo blocks the No Undo achievement."
+        );
+        assert_eq!(
+            tooltip_for::<HudRecycles>(&mut app),
+            "Times you've recycled the stock. Three or more unlocks Comeback."
+        );
+        assert_eq!(
+            tooltip_for::<HudAutoComplete>(&mut app),
+            "Board is solvable from here. Press Enter to auto-finish."
+        );
+        assert_eq!(
+            tooltip_for::<HudSelection>(&mut app),
+            "Pile selected with Tab. Use arrows or Enter to act."
+        );
+
+        // Action bar (left to right).
+        assert_eq!(
+            tooltip_for::<MenuButton>(&mut app),
+            "Open Stats, Achievements, Profile, Settings, or Leaderboard."
+        );
+        assert_eq!(
+            tooltip_for::<UndoButton>(&mut app),
+            "Take back your last move. Costs points and blocks No Undo."
+        );
+        assert_eq!(
+            tooltip_for::<PauseButton>(&mut app),
+            "Pause the game and freeze the timer."
+        );
+        assert_eq!(
+            tooltip_for::<HelpButton>(&mut app),
+            "Show controls, rules, and keyboard shortcuts."
+        );
+        assert_eq!(
+            tooltip_for::<ModesButton>(&mut app),
+            "Switch modes: Classic, Daily, Zen, Challenge, Time Attack."
+        );
+        assert_eq!(
+            tooltip_for::<NewGameButton>(&mut app),
+            "Start a fresh deal. Confirms first if a game is in progress."
+        );
     }
 
     #[test]
