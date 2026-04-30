@@ -1,8 +1,80 @@
 # Solitaire Quest — UX Overhaul Session Handoff
 
-**Last updated:** 2026-04-30 — Phase 3 complete. All 10 steps landed; ready for full smoke-test.
+**Last updated:** 2026-04-30 — Phase 3 complete + Phase 4 in progress (Track B landed on disk, Track G subset in flight via background agent).
 
-## Where we are
+## ⚠️ In-progress work at pause time
+
+Smoke-test passed; Phase 4 was started. Pushed HEAD is `534870a`. The working tree has **uncommitted** work that is NOT pushed:
+
+### Track B — window polish (on disk, ready to commit)
+
+- **File:** `solitaire_app/src/main.rs` (+44 lines)
+- **What landed:**
+  - X11/Wayland WM_CLASS via `Window::name = Some("solitaire-quest".into())`
+  - Default position `WindowPosition::Centered(MonitorSelection::Primary)`
+  - `install_crash_log_hook()` wraps the default panic hook to also append a `crash.log` next to `settings.json`. Uses `std::time::SystemTime` (no new chrono dep). Falls through silently if the data dir is unavailable.
+- **Skipped this round (deferred):**
+  - App icon hookup — no artwork asset exists yet; add the loader path when art lands.
+  - Persisted window geometry — needs a `Settings` schema migration.
+  - F11 fullscreen toggle — already wired in `input_plugin.rs:114`, no change needed.
+- **Build status:** `cargo build -p solitaire_app` clean; `cargo clippy -p solitaire_app -- -D warnings` clean.
+- **Suggested commit subject:** `feat(app): window polish — class name, centered position, crash-log hook`
+
+### Track G subset — modal open animation + score-change feedback (in flight)
+
+- A **background agent** (`general-purpose`, no worktree) was launched against this turn's tree to:
+  - Extend `spawn_modal` in `solitaire_engine/src/ui_modal.rs` with a `ModalEntering` component + `advance_modal_enter` system that animates scrim alpha 0 → `SCRIM` and card scale 0.96 → 1.0 over `MOTION_MODAL_SECS`. Respects `AnimSpeed::Instant` via `scaled_duration`. Animate-OUT path is intentionally out of scope.
+  - In `solitaire_engine/src/hud_plugin.rs`, add a `ScorePulse` 1.0→1.1→1.0 readout pulse over `MOTION_SCORE_PULSE_SECS` and a floating "+N" Text2d (only for ≥ +50 jumps) that drifts up ~40 px and fades over `MOTION_SCORE_PULSE_SECS * 2`.
+  - Tests for both behaviours.
+- **State at pause:** the agent had partial edits in `solitaire_engine/src/ui_modal.rs` (visible via `git status`) — at least one unused-import warning was already surfacing. It had not reported back when this snapshot was taken.
+- **Resume options for the next session:**
+  1. **Wait for the notification.** The agent runs in background; if Claude Code is still alive, the completion notification will fire.
+  2. **Inspect and finish manually.** `git diff solitaire_engine/src/ui_modal.rs solitaire_engine/src/hud_plugin.rs` to see what landed; finish or revert and restart with a tighter prompt.
+  3. **Discard and restart.** `git restore solitaire_engine/src/ui_modal.rs solitaire_engine/src/hud_plugin.rs` then relaunch the agent with the prompt below.
+
+### Next-session workflow at pause
+
+1. Verify the workspace builds cleanly with **all** in-flight changes: `cargo build --workspace && cargo clippy --workspace -- -D warnings && cargo test --workspace`. The Track B `main.rs` change is independent — even if Track G is reverted, B compiles on its own.
+2. If Track B is clean and Track G is incomplete or broken: commit Track B first using the subject above, then deal with Track G.
+3. If both are clean: commit each as a separate landing — one feature per commit per project convention.
+4. Use:
+   ```
+   git -c user.name=funman300 -c user.email=root@vscode.infinity commit -m "<subject>"
+   ```
+5. Push with `git push origin master` (requires interactive credentials on `git.aleshym.co`).
+
+### Original Track G subset prompt (for relaunch if needed)
+
+The agent's full brief is preserved here verbatim — paste into a fresh agent if the current one is unrecoverable:
+
+```
+Two UI/UX polish items from track G. Tree clean at HEAD `534870a`.
+Sub-agents CANNOT git commit — stage your work; orchestrator commits.
+
+G1. Modal open animation: extend spawn_modal in ui_modal.rs with a
+ModalEntering component + advance_modal_enter system that animates
+scrim alpha 0 → SCRIM and card scale 0.96 → 1.0 over MOTION_MODAL_SECS.
+Use scaled_duration for AnimSpeed respect; ease-out curve t*(2-t).
+Register the system in UiModalPlugin::build. Animate-OUT is OUT of
+scope. Add ≥2 tests covering ModalEntering presence on spawn and
+removal after duration elapses.
+
+G2. Score-change feedback in hud_plugin.rs: ScorePulse component that
+scales the score Text 1.0→1.1→1.0 over MOTION_SCORE_PULSE_SECS using
+triangular curve. Plus a floating "+N" Text2d (only for ≥ +50 jumps)
+in ACCENT_PRIMARY that drifts up 40 px and fades over
+MOTION_SCORE_PULSE_SECS * 2. Add ≥2 tests for floater spawn on +50
+and despawn after lifetime, plus ≥1 test that +5 does NOT spawn.
+
+Hard requirements: workspace build + clippy --workspace -- -D warnings
++ test --workspace all green. Touch ONLY ui_modal.rs, hud_plugin.rs,
+optionally ui_theme.rs for new tokens (don't think you'll need any).
+DO NOT touch solitaire_app/src/main.rs (parallel work).
+```
+
+---
+
+## Where we are (Phase 3)
 
 Phase 3 of the UX overhaul brief is **done**. The whole engine has been migrated to the `ui_theme` design-token system + `ui_modal` scaffold. Animation system upgraded. Final literal sweep landed. The work spans 17 commits this session, from the foundation (`e14852c`) through to the final sweep (`54e024c`).
 
