@@ -15,11 +15,12 @@ use crate::auto_complete_plugin::AutoCompleteState;
 use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
 use crate::daily_challenge_plugin::DailyChallengeResource;
 use crate::progress_plugin::ProgressResource;
+use crate::settings_plugin::SettingsResource;
 use crate::ui_theme::{
-    ACCENT_PRIMARY, ACCENT_SECONDARY, BG_ELEVATED, BG_ELEVATED_HI, BG_ELEVATED_PRESSED,
-    BORDER_SUBTLE, RADIUS_MD, RADIUS_SM, STATE_DANGER, STATE_INFO, STATE_SUCCESS, STATE_WARNING,
-    TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY, TYPE_BODY_LG, TYPE_CAPTION, TYPE_HEADLINE,
-    VAL_SPACE_1, VAL_SPACE_2, VAL_SPACE_3,
+    scaled_duration, ACCENT_PRIMARY, ACCENT_SECONDARY, BG_ELEVATED, BG_ELEVATED_HI,
+    BG_ELEVATED_PRESSED, BORDER_SUBTLE, MOTION_SCORE_PULSE_SECS, RADIUS_MD, RADIUS_SM,
+    STATE_DANGER, STATE_INFO, STATE_SUCCESS, STATE_WARNING, TEXT_PRIMARY, TEXT_SECONDARY,
+    TYPE_BODY, TYPE_BODY_LG, TYPE_CAPTION, TYPE_HEADLINE, VAL_SPACE_1, VAL_SPACE_2, VAL_SPACE_3,
 };
 use crate::events::{
     HelpRequestEvent, InfoToastEvent, NewGameRequestEvent, PauseRequestEvent,
@@ -97,6 +98,46 @@ pub struct HudDrawCycle;
 /// out from the other white HUD items.
 #[derive(Component, Debug)]
 pub struct HudSelection;
+
+/// Drives the score-readout pulse: scales the [`HudScore`] text from
+/// 1.0 → 1.1 → 1.0 over [`MOTION_SCORE_PULSE_SECS`] (scaled by
+/// [`AnimSpeed`](solitaire_data::AnimSpeed)). Inserted on the score
+/// entity whenever the score increases; removed once `elapsed >=
+/// duration`.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ScorePulse {
+    /// Seconds elapsed since the pulse started.
+    pub elapsed: f32,
+    /// Total duration. Zero under `AnimSpeed::Instant` — the system
+    /// snaps the scale back to 1.0 on first tick so no half-state
+    /// is ever shown.
+    pub duration: f32,
+}
+
+/// Marker on a transient floating "+N" text spawned next to the score
+/// readout when the score jumps by [`SCORE_FLOATER_THRESHOLD`] or more.
+/// Drifts upward and fades out over `MOTION_SCORE_PULSE_SECS * 2`,
+/// then despawns. Kept rare/meaningful by the threshold gate.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ScoreFloater {
+    /// Seconds elapsed since the floater spawned.
+    pub elapsed: f32,
+    /// Total lifetime. Zero under `AnimSpeed::Instant` — the system
+    /// despawns it on first tick.
+    pub duration: f32,
+}
+
+/// Tracks the score from the previous frame so the HUD can detect
+/// changes without a `ScoreChangedEvent`. The plugin wires this to the
+/// pulse + floater systems on every `Update`.
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct PreviousScore(pub i32);
+
+/// Score increase (in points) below which no floating "+N" is spawned.
+/// 50 keeps the feedback for foundation drops and tableau-to-foundation
+/// promotions; single-card placements (which can earn as little as +5)
+/// stay quiet so the floater feels like a reward instead of noise.
+pub const SCORE_FLOATER_THRESHOLD: i32 = 50;
 
 /// Marker shared by every clickable HUD action button so a single
 /// `paint_action_buttons` system can recolour them on hover/press without
@@ -207,10 +248,21 @@ impl Plugin for HudPlugin {
             .add_message::<ToggleProfileRequestEvent>()
             .add_message::<ToggleSettingsRequestEvent>()
             .add_message::<ToggleLeaderboardRequestEvent>()
+            .init_resource::<PreviousScore>()
             .add_systems(Startup, (spawn_hud, spawn_action_buttons))
             .add_systems(Update, update_hud.after(GameMutation))
             .add_systems(Update, announce_auto_complete.after(GameMutation))
             .add_systems(Update, update_selection_hud)
+            .add_systems(
+                Update,
+                (
+                    detect_score_change,
+                    advance_score_pulse,
+                    advance_score_floater,
+                )
+                    .chain()
+                    .after(GameMutation),
+            )
             .add_systems(
                 Update,
                 (
@@ -794,6 +846,179 @@ pub fn format_time_limit(secs: u64) -> String {
     let m = secs / 60;
     let s = secs % 60;
     format!("{m}:{s:02}")
+}
+
+// ---------------------------------------------------------------------------
+// Score-change feedback (G2)
+//
+// The flow for each Update tick:
+//   1. `detect_score_change` diffs `GameStateResource.score` against
+//      `PreviousScore`. On any positive delta it inserts/refreshes
+//      `ScorePulse` on the score readout; on a delta ≥
+//      `SCORE_FLOATER_THRESHOLD` it also spawns a floating "+N" UI text
+//      anchored just below the score.
+//   2. `advance_score_pulse` ticks the pulse component, applies the
+//      triangular 1.0 → 1.1 → 1.0 scale curve, and removes the
+//      component on completion.
+//   3. `advance_score_floater` drifts each floater upward, fades it to
+//      transparent, and despawns it when its lifetime expires.
+//
+// The threshold of 50 (a foundation promotion's typical bonus) keeps
+// floaters rare and meaningful — see `SCORE_FLOATER_THRESHOLD`.
+// ---------------------------------------------------------------------------
+
+/// Triangular 1.0 → 1.1 → 1.0 curve used by the score pulse. Pure
+/// function so the test suite can assert on the curve directly
+/// without spinning up a Bevy app.
+///
+/// The brief proposed `if t < 0.5 { 1.0 + 0.2*t } else { 1.2 - 0.2*(t-0.5) }`,
+/// but that yields a discontinuity at t=0.5 (jumps from 1.1 → 1.2) and
+/// ends at 1.1 instead of 1.0. The corrected form below preserves the
+/// intent ("1.0 → 1.1 → 1.0 over the duration") with a continuous
+/// triangle peaking at 1.1.
+fn score_pulse_scale(t: f32) -> f32 {
+    let clamped = t.clamp(0.0, 1.0);
+    if clamped < 0.5 {
+        1.0 + 0.2 * clamped
+    } else {
+        1.1 - 0.2 * (clamped - 0.5)
+    }
+}
+
+/// Vertical pixels the floating "+N" drifts up over its lifetime.
+const FLOATER_DRIFT_PX: f32 = 40.0;
+
+/// Diffs the current `GameStateResource.score` against
+/// [`PreviousScore`]. On a positive delta:
+///
+/// - Inserts (or refreshes) a [`ScorePulse`] on every [`HudScore`] entity
+///   so the readout pulses 1.0 → 1.1 → 1.0.
+/// - When the delta is ≥ [`SCORE_FLOATER_THRESHOLD`], spawns a floating
+///   "+N" UI text in `ACCENT_PRIMARY` anchored just below the score
+///   readout (see the doc comment on [`ScoreFloater`] for why this is a
+///   UI Node rather than a `Text2d`).
+fn detect_score_change(
+    game: Res<GameStateResource>,
+    settings: Option<Res<SettingsResource>>,
+    mut prev: ResMut<PreviousScore>,
+    font_res: Option<Res<FontResource>>,
+    score_q: Query<Entity, With<HudScore>>,
+    mut commands: Commands,
+) {
+    let current = game.0.score;
+    let delta = current - prev.0;
+    prev.0 = current;
+    if delta <= 0 {
+        return;
+    }
+
+    let speed = settings
+        .as_ref()
+        .map(|s| s.0.animation_speed)
+        .unwrap_or_default();
+    let pulse_secs = scaled_duration(MOTION_SCORE_PULSE_SECS, speed);
+    let floater_secs = scaled_duration(MOTION_SCORE_PULSE_SECS * 2.0, speed);
+
+    // Refresh ScorePulse on every score readout entity (in practice
+    // there's exactly one, but iterating is cheaper than asserting).
+    for entity in &score_q {
+        commands.entity(entity).insert(ScorePulse {
+            elapsed: 0.0,
+            duration: pulse_secs,
+        });
+    }
+
+    if delta < SCORE_FLOATER_THRESHOLD {
+        return;
+    }
+
+    let font = TextFont {
+        font: font_res.as_ref().map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: TYPE_BODY_LG,
+        ..default()
+    };
+    // Spawned as an absolutely-positioned UI Node so the floater rides
+    // the same screen-coordinate system as the score readout. Using a
+    // `Text2d` here would require translating UI layout coordinates to
+    // world space every frame; a UI node piggybacks on the same
+    // anchoring `update_hud` already uses for the score and stays
+    // testable under `MinimalPlugins`.
+    commands.spawn((
+        ScoreFloater {
+            elapsed: 0.0,
+            duration: floater_secs,
+        },
+        Node {
+            position_type: PositionType::Absolute,
+            // Anchored next to the HUD column; matches the
+            // `spawn_hud` left/top offsets so the floater appears
+            // overlaid on the score line and drifts up from there.
+            left: VAL_SPACE_3,
+            top: Val::Px(0.0),
+            ..default()
+        },
+        ZIndex(Z_HUD + 10),
+        Text::new(format!("+{delta}")),
+        font,
+        TextColor(ACCENT_PRIMARY),
+    ));
+}
+
+/// Advances every [`ScorePulse`], scaling its entity's `Transform`
+/// using [`score_pulse_scale`]. Removes the component once
+/// `elapsed >= duration` (or immediately under
+/// [`AnimSpeed::Instant`](solitaire_data::AnimSpeed) where duration is
+/// 0) and pins the scale back to 1.0 so no float drift survives.
+fn advance_score_pulse(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut q: Query<(Entity, &mut ScorePulse, &mut Transform)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut pulse, mut transform) in &mut q {
+        let t = if pulse.duration <= 0.0 {
+            1.0
+        } else {
+            pulse.elapsed += dt;
+            (pulse.elapsed / pulse.duration).clamp(0.0, 1.0)
+        };
+        let scale = score_pulse_scale(t);
+        transform.scale = Vec3::new(scale, scale, 1.0);
+        if t >= 1.0 {
+            transform.scale = Vec3::ONE;
+            commands.entity(entity).remove::<ScorePulse>();
+        }
+    }
+}
+
+/// Advances every [`ScoreFloater`]: drifts the node upward by up to
+/// [`FLOATER_DRIFT_PX`] and fades the text colour to transparent over
+/// its lifetime. Despawns the entity once `elapsed >= duration`.
+fn advance_score_floater(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut nodes: Query<(Entity, &mut ScoreFloater, &mut Node, &mut TextColor)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut floater, mut node, mut color) in &mut nodes {
+        let t = if floater.duration <= 0.0 {
+            1.0
+        } else {
+            floater.elapsed += dt;
+            (floater.elapsed / floater.duration).clamp(0.0, 1.0)
+        };
+        // Drift upward: top decreases as t grows. Starting top=0 keeps
+        // the floater on the score line; ending at -FLOATER_DRIFT_PX
+        // pulls it up off the readout.
+        node.top = Val::Px(-FLOATER_DRIFT_PX * t);
+        // Linear fade: ACCENT_PRIMARY at t=0 → fully transparent at t=1.
+        let mut c = ACCENT_PRIMARY;
+        c.set_alpha(1.0 - t);
+        color.0 = c;
+        if t >= 1.0 {
+            commands.entity(entity).despawn();
+        }
+    }
 }
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
@@ -1475,5 +1700,108 @@ mod tests {
         app.world_mut().resource_mut::<GameStateResource>().0 = gs;
         app.update();
         assert_eq!(read_hud_text::<HudRecycles>(&mut app), "Recycles: 2");
+    }
+
+    // -----------------------------------------------------------------------
+    // Score-change feedback (G2)
+    // -----------------------------------------------------------------------
+
+    /// Tells `TimePlugin` to advance by `secs` on every subsequent
+    /// `app.update()`. Mirrors the helper in `ui_modal::tests`; kept
+    /// local to avoid coupling the two test modules.
+    fn set_manual_time_step(app: &mut App, secs: f32) {
+        use bevy::time::TimeUpdateStrategy;
+        use std::time::Duration;
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(
+            Duration::from_secs_f32(secs),
+        ));
+    }
+
+    /// Counts entities matching component `M` currently in the world.
+    fn count_with<M: Component>(app: &mut App) -> usize {
+        app.world_mut().query::<&M>().iter(app.world()).count()
+    }
+
+    /// A score jump ≥ `SCORE_FLOATER_THRESHOLD` spawns a floating
+    /// `ScoreFloater` entity coloured `ACCENT_PRIMARY`. The pulse
+    /// component is also inserted on the score readout — both signals
+    /// fire from the same delta detection.
+    #[test]
+    fn score_increase_above_threshold_spawns_floater_in_accent_primary() {
+        let mut app = headless_app();
+        // Pin `Time::delta_secs()` to 0 so the floater's RGB and alpha
+        // can be asserted exactly: with Automatic strategy a few ms
+        // of wall-clock time leaks in between updates and the alpha
+        // drifts below 1.0 by `dt / lifetime`.
+        set_manual_time_step(&mut app, 0.0);
+        // Initial state has score=0; bumping by 50 (the threshold)
+        // is the smallest jump that triggers the floater.
+        app.world_mut().resource_mut::<GameStateResource>().0.score = 50;
+        app.update();
+
+        // One floater should now exist.
+        let count = count_with::<ScoreFloater>(&mut app);
+        assert_eq!(count, 1, "expected a single ScoreFloater for a +50 jump");
+
+        // Its TextColor must be ACCENT_PRIMARY at full alpha. The
+        // detect system spawns the floater coloured ACCENT_PRIMARY
+        // and at dt=0 the first advance tick leaves alpha = 1.0.
+        let world = app.world_mut();
+        let mut q = world.query::<(&ScoreFloater, &TextColor)>();
+        let (_floater, color) = q.iter(world).next().expect("floater missing TextColor");
+        assert_eq!(color.0, ACCENT_PRIMARY);
+    }
+
+    /// After enough time for `MOTION_SCORE_PULSE_SECS * 2` to elapse
+    /// the floater has reached the end of its lifetime and despawned.
+    #[test]
+    fn score_floater_despawns_after_full_lifetime() {
+        let mut app = headless_app();
+        app.world_mut().resource_mut::<GameStateResource>().0.score = 100;
+        app.update();
+        assert_eq!(count_with::<ScoreFloater>(&mut app), 1);
+
+        // Advance by a delta well past the floater's lifetime — the
+        // single oversized tick clamps t at 1.0 and the entity is
+        // despawned in the same `Update`.
+        set_manual_time_step(&mut app, MOTION_SCORE_PULSE_SECS * 2.0 * 2.0 + 0.1);
+        app.update();
+        app.update(); // first update propagates the new strategy; second runs the system with non-zero dt.
+
+        assert_eq!(
+            count_with::<ScoreFloater>(&mut app),
+            0,
+            "floater should have despawned after its full lifetime"
+        );
+    }
+
+    /// A small score change (below the threshold) inserts a pulse on
+    /// the readout but never spawns a floater — keeping the floating
+    /// "+N" reserved for meaningful score jumps.
+    #[test]
+    fn score_increase_below_threshold_does_not_spawn_floater() {
+        let mut app = headless_app();
+        // +5 mirrors a single tableau-to-foundation move; well below
+        // the 50-point threshold so the floater path stays dormant.
+        app.world_mut().resource_mut::<GameStateResource>().0.score = 5;
+        app.update();
+        assert_eq!(
+            count_with::<ScoreFloater>(&mut app),
+            0,
+            "delta of +5 must not spawn a floater"
+        );
+    }
+
+    /// The triangular pulse curve hits its peak (1.1) at t=0.5 and
+    /// returns to 1.0 at the endpoints. Pure-function check that
+    /// guards the curve shape against future tweaks.
+    #[test]
+    fn score_pulse_scale_is_triangular() {
+        assert!((score_pulse_scale(0.0) - 1.0).abs() < 1e-6);
+        assert!((score_pulse_scale(0.5) - 1.1).abs() < 1e-6);
+        assert!((score_pulse_scale(1.0) - 1.0).abs() < 1e-6);
+        // Values outside [0,1] are clamped before the curve runs.
+        assert!((score_pulse_scale(-0.2) - 1.0).abs() < 1e-6);
+        assert!((score_pulse_scale(2.0) - 1.0).abs() < 1e-6);
     }
 }
