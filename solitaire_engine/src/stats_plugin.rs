@@ -22,8 +22,17 @@ use crate::events::{
 };
 use crate::game_plugin::GameMutation;
 use crate::progress_plugin::ProgressResource;
+use crate::font_plugin::FontResource;
 use crate::resources::GameStateResource;
 use crate::time_attack_plugin::TimeAttackResource;
+use crate::ui_modal::{
+    spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
+};
+use crate::ui_theme::{
+    ACCENT_PRIMARY, BORDER_SUBTLE, RADIUS_SM, STATE_INFO, STATE_WARNING, TEXT_PRIMARY,
+    TEXT_SECONDARY, TYPE_BODY, TYPE_BODY_LG, TYPE_HEADLINE, VAL_SPACE_2, VAL_SPACE_3, VAL_SPACE_4,
+    Z_MODAL_PANEL,
+};
 
 /// Bevy resource wrapping the current stats.
 #[derive(Resource, Debug, Clone)]
@@ -102,7 +111,8 @@ impl Plugin for StatsPlugin {
                 Update,
                 handle_forfeit.before(GameMutation),
             )
-            .add_systems(Update, toggle_stats_screen.after(GameMutation));
+            .add_systems(Update, toggle_stats_screen.after(GameMutation))
+            .add_systems(Update, handle_stats_close_button);
     }
 }
 
@@ -181,6 +191,12 @@ fn handle_forfeit(
     }
 }
 
+/// Marker on the "Done" button inside the Stats modal. Click despawns
+/// the overlay; `S` keyboard shortcut toggles it the same way.
+#[derive(Component, Debug)]
+pub struct StatsCloseButton;
+
+#[allow(clippy::too_many_arguments)]
 fn toggle_stats_screen(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
@@ -188,6 +204,7 @@ fn toggle_stats_screen(
     stats: Res<StatsResource>,
     progress: Option<Res<ProgressResource>>,
     time_attack: Option<Res<TimeAttackResource>>,
+    font_res: Option<Res<FontResource>>,
     screens: Query<Entity, With<StatsScreen>>,
 ) {
     let button_clicked = requests.read().count() > 0;
@@ -202,7 +219,23 @@ fn toggle_stats_screen(
             &stats.0,
             progress.as_deref().map(|p| &p.0),
             time_attack.as_deref(),
+            font_res.as_deref(),
         );
+    }
+}
+
+/// Click handler for the modal's "Done" button — despawns the overlay
+/// the same way the `S` accelerator does.
+fn handle_stats_close_button(
+    mut commands: Commands,
+    close_buttons: Query<&Interaction, (With<StatsCloseButton>, Changed<Interaction>)>,
+    screens: Query<Entity, With<StatsScreen>>,
+) {
+    if !close_buttons.iter().any(|i| *i == Interaction::Pressed) {
+        return;
+    }
+    for entity in &screens {
+        commands.entity(entity).despawn();
     }
 }
 
@@ -211,150 +244,146 @@ fn spawn_stats_screen(
     stats: &StatsSnapshot,
     progress: Option<&PlayerProgress>,
     time_attack: Option<&TimeAttackResource>,
+    font_res: Option<&FontResource>,
 ) {
-    // --- primary stat cells (tasks #65, #66, and #38) ---
-    let win_rate_str  = format_win_rate(stats);
-    let played_str    = format_stat_value(stats.games_played);
-    let won_str       = format_stat_value(stats.games_won);
-    let lost_str      = format_stat_value(stats.games_lost);
-    let fastest_str   = format_fastest_win(stats.fastest_win_seconds);
-    let avg_time_str  = format_avg_time(stats);
-    let best_score_str = format_optional_u32(stats.best_single_score);
+    // --- primary stat cells ---
+    let win_rate_str    = format_win_rate(stats);
+    let played_str      = format_stat_value(stats.games_played);
+    let won_str         = format_stat_value(stats.games_won);
+    let lost_str        = format_stat_value(stats.games_lost);
+    let fastest_str     = format_fastest_win(stats.fastest_win_seconds);
+    let avg_time_str    = format_avg_time(stats);
+    let best_score_str  = format_optional_u32(stats.best_single_score);
     let best_streak_str = format_stat_value(stats.win_streak_best);
 
-    commands
-        .spawn((
-            StatsScreen,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Percent(0.0),
-                top: Val::Percent(0.0),
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::FlexStart,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(6.0),
-                padding: UiRect::all(Val::Px(24.0)),
-                overflow: Overflow::clip(),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.88)),
-            ZIndex(200),
-        ))
-        .with_children(|root| {
-            // Title
-            root.spawn((
-                Text::new("Statistics"),
-                TextFont { font_size: 28.0, ..default() },
-                TextColor(Color::srgb(1.0, 0.85, 0.3)),
+    let font_handle = font_res.map(|f| f.0.clone()).unwrap_or_default();
+    let font_section = TextFont {
+        font: font_handle.clone(),
+        font_size: TYPE_BODY_LG,
+        ..default()
+    };
+    let font_row = TextFont {
+        font: font_handle,
+        font_size: TYPE_BODY,
+        ..default()
+    };
+
+    spawn_modal(commands, StatsScreen, Z_MODAL_PANEL, |card| {
+        spawn_modal_header(card, "Statistics", font_res);
+
+        // --- primary stat cells grid ---
+        card.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::FlexStart,
+            column_gap: VAL_SPACE_4,
+            row_gap: VAL_SPACE_3,
+            width: Val::Percent(100.0),
+            ..default()
+        })
+        .with_children(|grid| {
+            spawn_stat_cell(grid, &win_rate_str,    "Win Rate");
+            spawn_stat_cell(grid, &played_str,      "Games Played");
+            spawn_stat_cell(grid, &won_str,         "Games Won");
+            spawn_stat_cell(grid, &lost_str,        "Games Lost");
+            spawn_stat_cell(grid, &fastest_str,     "Fastest Win");
+            spawn_stat_cell(grid, &avg_time_str,    "Avg Time");
+            spawn_stat_cell(grid, &best_score_str,  "Best Score");
+            spawn_stat_cell(grid, &best_streak_str, "Best Streak");
+        });
+
+        // --- progression section ---
+        if let Some(p) = progress {
+            card.spawn((
+                Text::new("Progression"),
+                font_section.clone(),
+                TextColor(STATE_INFO),
             ));
 
-            // Two-column grid of stat cells
-            root.spawn(Node {
+            let level_str     = format_stat_value(p.level);
+            let xp_str        = format_stat_value(p.total_xp as u32);
+            let next_label    = xp_to_next_level_label(p.total_xp, p.level);
+            let daily_str     = format_stat_value(p.daily_challenge_streak);
+            let challenge_str = challenge_progress_label(p.challenge_index);
+
+            card.spawn(Node {
                 flex_direction: FlexDirection::Row,
                 flex_wrap: FlexWrap::Wrap,
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::FlexStart,
-                column_gap: Val::Px(24.0),
-                row_gap: Val::Px(16.0),
+                column_gap: VAL_SPACE_4,
+                row_gap: VAL_SPACE_3,
                 width: Val::Percent(100.0),
-                margin: UiRect::top(Val::Px(16.0)),
                 ..default()
             })
             .with_children(|grid| {
-                spawn_stat_cell(grid, &win_rate_str,    "Win Rate");
-                spawn_stat_cell(grid, &played_str,      "Games Played");
-                spawn_stat_cell(grid, &won_str,         "Games Won");
-                spawn_stat_cell(grid, &lost_str,        "Games Lost");
-                spawn_stat_cell(grid, &fastest_str,     "Fastest Win");
-                spawn_stat_cell(grid, &avg_time_str,    "Avg Time");
-                spawn_stat_cell(grid, &best_score_str,  "Best Score");
-                spawn_stat_cell(grid, &best_streak_str, "Best Streak");
+                spawn_stat_cell(grid, &level_str,     "Level");
+                spawn_stat_cell(grid, &xp_str,        "Total XP");
+                spawn_stat_cell(grid, &next_label,    "Next Level");
+                spawn_stat_cell(grid, &daily_str,     "Daily Streak");
+                spawn_stat_cell(grid, &challenge_str, "Challenge");
             });
 
-            // Progression section
-            if let Some(p) = progress {
-                root.spawn((
-                    Text::new("Progression"),
-                    TextFont { font_size: 22.0, ..default() },
-                    TextColor(Color::srgb(0.7, 0.9, 1.0)),
-                ));
-
-                let level_str = format_stat_value(p.level);
-                let xp_str    = format_stat_value(p.total_xp as u32);
-                let next_label = xp_to_next_level_label(p.total_xp, p.level);
-                let daily_str  = format_stat_value(p.daily_challenge_streak);
-                let challenge_str = challenge_progress_label(p.challenge_index);
-
-                root.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    flex_wrap: FlexWrap::Wrap,
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::FlexStart,
-                    column_gap: Val::Px(24.0),
-                    row_gap: Val::Px(12.0),
-                    width: Val::Percent(100.0),
-                    ..default()
-                })
-                .with_children(|grid| {
-                    spawn_stat_cell(grid, &level_str,     "Level");
-                    spawn_stat_cell(grid, &xp_str,        "Total XP");
-                    spawn_stat_cell(grid, &next_label,    "Next Level");
-                    spawn_stat_cell(grid, &daily_str,     "Daily Streak");
-                    spawn_stat_cell(grid, &challenge_str, "Challenge");
-                });
-
-                // Weekly goals row
-                root.spawn((
-                    Text::new("Weekly Goals"),
-                    TextFont { font_size: 18.0, ..default() },
-                    TextColor(Color::srgb(0.8, 0.8, 0.8)),
-                ));
-                for goal in WEEKLY_GOALS {
-                    let pv = p.weekly_goal_progress.get(goal.id).copied().unwrap_or(0);
-                    root.spawn((
-                        Text::new(format!("  {}: {}/{}", goal.description, pv, goal.target)),
-                        TextFont { font_size: 16.0, ..default() },
-                        TextColor(Color::srgb(0.85, 0.85, 0.80)),
-                    ));
-                }
-
-                // Unlocks row
-                root.spawn((
-                    Text::new(format!(
-                        "Card Backs: {}  |  Backgrounds: {}",
-                        format_id_list(&p.unlocked_card_backs),
-                        format_id_list(&p.unlocked_backgrounds),
-                    )),
-                    TextFont { font_size: 16.0, ..default() },
-                    TextColor(Color::srgb(0.75, 0.75, 0.75)),
+            // Weekly goals
+            card.spawn((
+                Text::new("Weekly Goals"),
+                font_section.clone(),
+                TextColor(TEXT_SECONDARY),
+            ));
+            for goal in WEEKLY_GOALS {
+                let pv = p.weekly_goal_progress.get(goal.id).copied().unwrap_or(0);
+                card.spawn((
+                    Text::new(format!("  {}: {}/{}", goal.description, pv, goal.target)),
+                    font_row.clone(),
+                    TextColor(TEXT_PRIMARY),
                 ));
             }
 
-            // Time Attack section
-            if let Some(ta) = time_attack
-                && ta.active {
-                    let mins = (ta.remaining_secs / 60.0).floor() as u64;
-                    let secs = (ta.remaining_secs % 60.0).floor() as u64;
-                    root.spawn((
-                        Text::new(format!("Time Attack — {mins}m {secs:02}s left  |  Wins: {}", ta.wins)),
-                        TextFont { font_size: 18.0, ..default() },
-                        TextColor(Color::srgb(1.0, 0.6, 0.2)),
-                    ));
-                }
-
-            // Dismiss hint
-            root.spawn((
-                Text::new("Press S to close"),
-                TextFont { font_size: 16.0, ..default() },
-                TextColor(Color::srgb(0.6, 0.6, 0.6)),
+            // Unlocks line
+            card.spawn((
+                Text::new(format!(
+                    "Card Backs: {}  |  Backgrounds: {}",
+                    format_id_list(&p.unlocked_card_backs),
+                    format_id_list(&p.unlocked_backgrounds),
+                )),
+                font_row.clone(),
+                TextColor(TEXT_SECONDARY),
             ));
+        }
+
+        // --- Time Attack section ---
+        if let Some(ta) = time_attack
+            && ta.active {
+                let mins = (ta.remaining_secs / 60.0).floor() as u64;
+                let secs = (ta.remaining_secs % 60.0).floor() as u64;
+                card.spawn((
+                    Text::new(format!(
+                        "Time Attack \u{2014} {mins}m {secs:02}s left  |  Wins: {}",
+                        ta.wins
+                    )),
+                    font_section.clone(),
+                    TextColor(STATE_WARNING),
+                ));
+            }
+
+        spawn_modal_actions(card, |actions| {
+            spawn_modal_button(
+                actions,
+                StatsCloseButton,
+                "Done",
+                Some("S"),
+                ButtonVariant::Primary,
+                font_res,
+            );
         });
+    });
 }
 
-/// Spawn a single stat cell: a large value label on top and a small grey
-/// descriptor below, inside a fixed-width column node with a [`StatsCell`] marker.
+/// Spawn a single stat cell: a large value label on top and a small
+/// descriptor below, inside a fixed-min-width column with a subtle
+/// border. Recoloured to use ui_theme tokens — the prior 6%-alpha-white
+/// fill clashed against the new midnight-purple modal surface.
 fn spawn_stat_cell(parent: &mut ChildSpawnerCommands, value: &str, label: &str) {
     parent
         .spawn((
@@ -364,23 +393,32 @@ fn spawn_stat_cell(parent: &mut ChildSpawnerCommands, value: &str, label: &str) 
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 min_width: Val::Px(110.0),
-                padding: UiRect::all(Val::Px(8.0)),
+                padding: UiRect::all(VAL_SPACE_2),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(RADIUS_SM)),
                 ..default()
             },
-            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.06)),
+            BorderColor::all(BORDER_SUBTLE),
         ))
         .with_children(|cell| {
-            // Large value label.
+            // Large value label — accent yellow makes the number sing
+            // against the dark card surface.
             cell.spawn((
                 Text::new(value.to_string()),
-                TextFont { font_size: 32.0, ..default() },
-                TextColor(Color::srgb(1.0, 1.0, 1.0)),
+                TextFont {
+                    font_size: TYPE_HEADLINE,
+                    ..default()
+                },
+                TextColor(ACCENT_PRIMARY),
             ));
-            // Small descriptor below.
+            // Small descriptor below the value.
             cell.spawn((
                 Text::new(label.to_string()),
-                TextFont { font_size: 14.0, ..default() },
-                TextColor(Color::srgb(0.65, 0.65, 0.65)),
+                TextFont {
+                    font_size: TYPE_BODY,
+                    ..default()
+                },
+                TextColor(TEXT_SECONDARY),
             ));
         });
 }
