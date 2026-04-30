@@ -68,6 +68,14 @@ cargo test -p solitaire_core -p solitaire_sync -p solitaire_data -p solitaire_se
 cargo clippy --workspace -- -D warnings
 ```
 
+## Credits
+
+Built on [Bevy](https://bevyengine.org/) and the wider Rust ecosystem (Tokio,
+Axum, sqlx, Serde, kira, and many more). Card faces and the default card back
+use xCards artwork (LGPL-3.0); the UI font is FiraMono-Medium (OFL). All audio
+is synthesized programmatically by this project. See [CREDITS.md](CREDITS.md)
+for the full list and license details.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
