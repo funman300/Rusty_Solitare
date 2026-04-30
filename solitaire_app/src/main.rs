@@ -11,7 +11,7 @@ use solitaire_engine::{
     FontPlugin, GamePlugin, HelpPlugin, HomePlugin, HudPlugin, InputPlugin, LeaderboardPlugin,
     OnboardingPlugin, PausePlugin, ProfilePlugin, ProgressPlugin, SelectionPlugin, SettingsPlugin,
     StatsPlugin, SyncPlugin, TablePlugin, TimeAttackPlugin, UiFocusPlugin, UiModalPlugin,
-    WeeklyGoalsPlugin, WinSummaryPlugin,
+    UiTooltipPlugin, WeeklyGoalsPlugin, WinSummaryPlugin,
 };
 
 fn main() {
@@ -100,6 +100,7 @@ fn main() {
         .add_plugins(WinSummaryPlugin)
         .add_plugins(UiModalPlugin)
         .add_plugins(UiFocusPlugin)
+        .add_plugins(UiTooltipPlugin)
         .run();
 }
 

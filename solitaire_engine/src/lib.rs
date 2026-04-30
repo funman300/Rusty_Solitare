@@ -33,6 +33,7 @@ pub mod time_attack_plugin;
 pub mod ui_focus;
 pub mod ui_modal;
 pub mod ui_theme;
+pub mod ui_tooltip;
 pub mod weekly_goals_plugin;
 pub mod win_summary_plugin;
 
@@ -104,6 +105,7 @@ pub use ui_modal::{
     spawn_modal_header, ButtonVariant, ModalActions, ModalBody, ModalButton, ModalCard,
     ModalHeader, ModalScrim, UiModalPlugin,
 };
+pub use ui_tooltip::{Tooltip, UiTooltipPlugin};
 pub use table_plugin::{
     BackgroundImageSet, HintPileHighlight, PileMarker, TableBackground, TablePlugin,
 };

@@ -275,6 +275,23 @@ pub const MOTION_SCORE_PULSE_SECS: f32 = 0.25;
 /// 400 ms.
 pub const MOTION_LOADING_TICK_SECS: f32 = 0.40;
 
+/// Hover delay before a tooltip appears, in seconds. Long enough that
+/// players gliding the cursor across the HUD don't see flicker; short
+/// enough that "stop and read" feels responsive. Not run through
+/// [`scaled_duration`] — `AnimSpeed` controls gameplay motion, not the
+/// hover-discoverability budget for help text.
+pub const MOTION_TOOLTIP_DELAY_SECS: f32 = 0.5;
+
+// ---------------------------------------------------------------------------
+// Z-index — tooltip layer
+// ---------------------------------------------------------------------------
+
+/// Z-layer for tooltips. Sits one rung above the focus ring so a
+/// tooltip rendered over a focused button is never occluded by the
+/// button's outline. Still below `Z_WIN_CASCADE` and `Z_TOAST` so the
+/// celebration and notification layers stay on top.
+pub const Z_TOOLTIP: i32 = Z_FOCUS_RING + 10;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -342,6 +359,7 @@ mod tests {
             Z_PAUSE_DIALOG,
             Z_ONBOARDING,
             Z_FOCUS_RING,
+            Z_TOOLTIP,
             Z_WIN_CASCADE,
             Z_TOAST,
         ];
