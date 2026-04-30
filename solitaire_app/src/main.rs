@@ -1,4 +1,9 @@
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use bevy::prelude::*;
+use bevy::window::{MonitorSelection, WindowPosition};
 use solitaire_data::{load_settings_from, provider_for_backend, settings_file_path, Settings};
 use solitaire_engine::{
     AchievementPlugin, AnimationPlugin, AudioPlugin, AutoCompletePlugin, CardAnimationPlugin,
@@ -10,6 +15,11 @@ use solitaire_engine::{
 };
 
 fn main() {
+    // Install a panic hook that writes a crash log next to the save files
+    // before re-running the default hook (so stderr still gets the message
+    // and any debugger attached still sees the panic).
+    install_crash_log_hook();
+
     // Initialise the platform keyring store before any token operations.
     // On Linux this uses the Secret Service (GNOME Keyring / KWallet); on
     // macOS it uses the Keychain; on Windows it uses the Credential store.
@@ -35,7 +45,11 @@ fn main() {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "Solitaire Quest".into(),
+                        // X11/Wayland WM_CLASS so taskbar managers group
+                        // multiple windows of this app correctly.
+                        name: Some("solitaire-quest".into()),
                         resolution: (1280u32, 800u32).into(),
+                        position: WindowPosition::Centered(MonitorSelection::Primary),
                         resize_constraints: bevy::window::WindowResizeConstraints {
                             min_width: 800.0,
                             min_height: 600.0,
@@ -86,4 +100,34 @@ fn main() {
         .add_plugins(WinSummaryPlugin)
         .add_plugins(UiModalPlugin)
         .run();
+}
+
+/// Wraps the default panic hook with one that also appends a crash log
+/// to `<data_dir>/crash.log` (next to `settings.json`). The default hook
+/// still runs afterwards, so stderr output and debugger integration are
+/// unchanged. If the data directory is unavailable, the wrapper silently
+/// falls through — the default hook handles output either way.
+fn install_crash_log_hook() {
+    let crash_log_path = settings_file_path().and_then(|p| {
+        p.parent()
+            .map(|parent| parent.join("crash.log"))
+    });
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Some(path) = crash_log_path.as_ref()
+            && let Ok(mut file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+        {
+            // Plain unix-seconds timestamp keeps the format trivially
+            // parseable and avoids pulling in chrono just for this.
+            let secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let _ = writeln!(file, "----- t={secs} -----\n{info}\n");
+        }
+        default_hook(info);
+    }));
 }
