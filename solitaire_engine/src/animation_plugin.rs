@@ -30,7 +30,8 @@ use crate::progress_plugin::LevelUpEvent;
 use crate::settings_plugin::{SettingsChangedEvent, SettingsResource};
 use crate::time_attack_plugin::TimeAttackEndedEvent;
 use crate::ui_theme::{
-    scaled_duration, MOTION_CASCADE_SLIDE_SECS, MOTION_CASCADE_STAGGER_SECS, MOTION_SLIDE_SECS,
+    scaled_duration, ACCENT_PRIMARY, MOTION_CASCADE_SLIDE_SECS, MOTION_CASCADE_STAGGER_SECS,
+    MOTION_SLIDE_SECS, TEXT_PRIMARY, VAL_SPACE_2, VAL_SPACE_3, VAL_SPACE_4, Z_TOAST,
 };
 use crate::weekly_goals_plugin::WeeklyGoalCompletedEvent;
 
@@ -533,19 +534,19 @@ fn spawn_queued_toast(commands: &mut Commands, message: String) -> Entity {
                 left: Val::Percent(15.0),
                 top: Val::Percent(8.0),
                 width: Val::Percent(70.0),
-                padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
+                padding: UiRect::axes(VAL_SPACE_4, VAL_SPACE_2),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.60)),
-            ZIndex(400),
+            ZIndex(Z_TOAST),
         ))
         .with_children(|b| {
             b.spawn((
                 Text::new(message),
                 TextFont { font_size: 22.0, ..default() },
-                TextColor(Color::srgb(1.0, 1.0, 1.0)),
+                TextColor(TEXT_PRIMARY),
             ));
         })
         .id()
@@ -589,7 +590,7 @@ fn spawn_toast(commands: &mut Commands, message: String, duration_secs: f32) {
                 left: Val::Percent(25.0),
                 top: Val::Percent(42.0),
                 width: Val::Percent(50.0),
-                padding: UiRect::axes(Val::Px(16.0), Val::Px(10.0)),
+                padding: UiRect::axes(VAL_SPACE_4, VAL_SPACE_3),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 ..default()
@@ -603,7 +604,7 @@ fn spawn_toast(commands: &mut Commands, message: String, duration_secs: f32) {
                     font_size: 32.0,
                     ..default()
                 },
-                TextColor(Color::srgb(1.0, 0.87, 0.0)),
+                TextColor(ACCENT_PRIMARY),
             ));
         });
 }

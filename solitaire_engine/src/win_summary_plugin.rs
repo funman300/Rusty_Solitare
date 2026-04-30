@@ -22,7 +22,12 @@ use crate::progress_plugin::ProgressResource;
 use crate::resources::GameStateResource;
 use crate::settings_plugin::SettingsResource;
 use crate::stats_plugin::{StatsResource, StatsUpdate};
-use crate::ui_theme::{scaled_duration, MOTION_WIN_SHAKE_AMPLITUDE, MOTION_WIN_SHAKE_SECS};
+use crate::ui_theme::{
+    scaled_duration, ACCENT_PRIMARY, BG_BASE, BG_ELEVATED, MOTION_WIN_SHAKE_AMPLITUDE,
+    MOTION_WIN_SHAKE_SECS, RADIUS_LG, RADIUS_MD, SCRIM, STATE_INFO, STATE_SUCCESS, STATE_WARNING,
+    TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY_LG, TYPE_DISPLAY, TYPE_HEADLINE, VAL_SPACE_2,
+    VAL_SPACE_3, Z_WIN_CASCADE,
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -454,8 +459,8 @@ fn spawn_overlay(
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.70)),
-            ZIndex(300),
+            BackgroundColor(SCRIM),
+            ZIndex(Z_WIN_CASCADE),
         ))
         .with_children(|root| {
             root.spawn((
@@ -465,25 +470,25 @@ fn spawn_overlay(
                     row_gap: Val::Px(18.0),
                     min_width: Val::Px(320.0),
                     align_items: AlignItems::Center,
-                    border_radius: BorderRadius::all(Val::Px(12.0)),
+                    border_radius: BorderRadius::all(Val::Px(RADIUS_LG)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.10, 0.12, 0.10)),
+                BackgroundColor(BG_ELEVATED),
             ))
             .with_children(|card| {
                 // Heading
                 card.spawn((
                     Text::new("You Won!"),
-                    TextFont { font_size: 42.0, ..default() },
-                    TextColor(Color::srgb(1.0, 0.87, 0.0)),
+                    TextFont { font_size: TYPE_DISPLAY, ..default() },
+                    TextColor(ACCENT_PRIMARY),
                 ));
 
                 // Challenge-mode annotation — shown only for Challenge wins.
                 if let Some(level) = challenge_level {
                     card.spawn((
                         Text::new(format!("Challenge {level} complete!")),
-                        TextFont { font_size: 28.0, ..default() },
-                        TextColor(Color::srgb(0.4, 0.85, 1.0)),
+                        TextFont { font_size: TYPE_HEADLINE, ..default() },
+                        TextColor(STATE_INFO),
                     ));
                 }
 
@@ -492,30 +497,30 @@ fn spawn_overlay(
                 if pending.new_record {
                     card.spawn((
                         Text::new("New Record!"),
-                        TextFont { font_size: 26.0, ..default() },
-                        TextColor(Color::srgb(1.0, 0.55, 0.0)),
+                        TextFont { font_size: TYPE_HEADLINE, ..default() },
+                        TextColor(STATE_WARNING),
                     ));
                 }
 
                 // Score
                 card.spawn((
                     Text::new(format!("Score: {}", pending.score)),
-                    TextFont { font_size: 26.0, ..default() },
-                    TextColor(Color::WHITE),
+                    TextFont { font_size: TYPE_HEADLINE, ..default() },
+                    TextColor(TEXT_PRIMARY),
                 ));
 
                 // Time
                 card.spawn((
                     Text::new(format!("Time: {}", format_win_time(pending.time_seconds))),
-                    TextFont { font_size: 26.0, ..default() },
-                    TextColor(Color::WHITE),
+                    TextFont { font_size: TYPE_HEADLINE, ..default() },
+                    TextColor(TEXT_PRIMARY),
                 ));
 
                 // XP total
                 card.spawn((
                     Text::new(format!("XP earned: +{}", pending.xp)),
-                    TextFont { font_size: 22.0, ..default() },
-                    TextColor(Color::srgb(0.4, 1.0, 0.4)),
+                    TextFont { font_size: TYPE_BODY_LG, ..default() },
+                    TextColor(STATE_SUCCESS),
                 ));
 
                 // XP breakdown (smaller, dimmer text)
@@ -523,7 +528,7 @@ fn spawn_overlay(
                     card.spawn((
                         Text::new(pending.xp_detail.clone()),
                         TextFont { font_size: 15.0, ..default() },
-                        TextColor(Color::srgb(0.55, 0.80, 0.55)),
+                        TextColor(TEXT_SECONDARY),
                     ));
                 }
 
@@ -538,19 +543,19 @@ fn spawn_overlay(
                     WinSummaryButton::PlayAgain,
                     Button,
                     Node {
-                        padding: UiRect::axes(Val::Px(28.0), Val::Px(12.0)),
+                        padding: UiRect::axes(Val::Px(28.0), VAL_SPACE_3),
                         justify_content: JustifyContent::Center,
-                        margin: UiRect::top(Val::Px(8.0)),
-                        border_radius: BorderRadius::all(Val::Px(6.0)),
+                        margin: UiRect::top(VAL_SPACE_2),
+                        border_radius: BorderRadius::all(Val::Px(RADIUS_MD)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgb(0.22, 0.45, 0.22)),
+                    BackgroundColor(ACCENT_PRIMARY),
                 ))
                 .with_children(|b| {
                     b.spawn((
                         Text::new("Play Again"),
-                        TextFont { font_size: 22.0, ..default() },
-                        TextColor(Color::WHITE),
+                        TextFont { font_size: TYPE_BODY_LG, ..default() },
+                        TextColor(BG_BASE),
                     ));
                 });
             });
@@ -569,8 +574,8 @@ const MAX_ACHIEVEMENTS_SHOWN: usize = 3;
 fn spawn_achievements_section(card: &mut ChildSpawnerCommands, names: &[String]) {
     card.spawn((
         Text::new("Achievements Unlocked"),
-        TextFont { font_size: 18.0, ..default() },
-        TextColor(Color::srgb(1.0, 0.87, 0.0)),
+        TextFont { font_size: TYPE_BODY_LG, ..default() },
+        TextColor(ACCENT_PRIMARY),
     ));
 
     let shown = names.len().min(MAX_ACHIEVEMENTS_SHOWN);
@@ -578,7 +583,7 @@ fn spawn_achievements_section(card: &mut ChildSpawnerCommands, names: &[String])
         card.spawn((
             Text::new(format!("  {name}")),
             TextFont { font_size: 16.0, ..default() },
-            TextColor(Color::srgb(0.9, 0.9, 0.9)),
+            TextColor(TEXT_PRIMARY),
         ));
     }
 
@@ -587,7 +592,7 @@ fn spawn_achievements_section(card: &mut ChildSpawnerCommands, names: &[String])
         card.spawn((
             Text::new(format!("  ...and {overflow} more")),
             TextFont { font_size: 15.0, ..default() },
-            TextColor(Color::srgb(0.6, 0.6, 0.65)),
+            TextColor(TEXT_SECONDARY),
         ));
     }
 }

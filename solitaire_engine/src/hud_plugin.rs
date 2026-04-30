@@ -17,7 +17,7 @@ use crate::daily_challenge_plugin::DailyChallengeResource;
 use crate::progress_plugin::ProgressResource;
 use crate::ui_theme::{
     ACCENT_PRIMARY, ACCENT_SECONDARY, BG_ELEVATED, BG_ELEVATED_HI, BG_ELEVATED_PRESSED,
-    BORDER_SUBTLE, RADIUS_MD, STATE_DANGER, STATE_INFO, STATE_SUCCESS, STATE_WARNING,
+    BORDER_SUBTLE, RADIUS_MD, RADIUS_SM, STATE_DANGER, STATE_INFO, STATE_SUCCESS, STATE_WARNING,
     TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY, TYPE_BODY_LG, TYPE_CAPTION, TYPE_HEADLINE,
     VAL_SPACE_1, VAL_SPACE_2, VAL_SPACE_3,
 };
@@ -387,10 +387,10 @@ fn spawn_action_buttons(font_res: Option<Res<FontResource>>, mut commands: Comma
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(12.0),
-                top: Val::Px(8.0),
+                right: VAL_SPACE_3,
+                top: VAL_SPACE_2,
                 flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(8.0),
+                column_gap: VAL_SPACE_2,
                 align_items: AlignItems::Center,
                 ..default()
             },
@@ -560,12 +560,12 @@ fn spawn_modes_popover(
             ModesPopover,
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(12.0),
+                right: VAL_SPACE_3,
                 top: Val::Px(50.0),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                padding: UiRect::all(Val::Px(8.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
+                row_gap: VAL_SPACE_1,
+                padding: UiRect::all(VAL_SPACE_2),
+                border_radius: BorderRadius::all(Val::Px(RADIUS_MD)),
                 ..default()
             },
             BackgroundColor(BG_ELEVATED),
@@ -579,11 +579,11 @@ fn spawn_modes_popover(
                         ActionButton,
                         Button,
                         Node {
-                            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                            padding: UiRect::axes(VAL_SPACE_3, Val::Px(6.0)),
                             justify_content: JustifyContent::FlexStart,
                             align_items: AlignItems::Center,
                             min_width: Val::Px(150.0),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            border_radius: BorderRadius::all(Val::Px(RADIUS_SM)),
                             ..default()
                         },
                         BackgroundColor(ACTION_BTN_IDLE),
@@ -689,12 +689,12 @@ fn spawn_menu_popover(commands: &mut Commands, font_res: Option<&FontResource>) 
             MenuPopover,
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(12.0),
+                right: VAL_SPACE_3,
                 top: Val::Px(50.0),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                padding: UiRect::all(Val::Px(8.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
+                row_gap: VAL_SPACE_1,
+                padding: UiRect::all(VAL_SPACE_2),
+                border_radius: BorderRadius::all(Val::Px(RADIUS_MD)),
                 ..default()
             },
             BackgroundColor(BG_ELEVATED),
@@ -708,11 +708,11 @@ fn spawn_menu_popover(commands: &mut Commands, font_res: Option<&FontResource>) 
                         ActionButton,
                         Button,
                         Node {
-                            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                            padding: UiRect::axes(VAL_SPACE_3, Val::Px(6.0)),
                             justify_content: JustifyContent::FlexStart,
                             align_items: AlignItems::Center,
                             min_width: Val::Px(150.0),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            border_radius: BorderRadius::all(Val::Px(RADIUS_SM)),
                             ..default()
                         },
                         BackgroundColor(ACTION_BTN_IDLE),
