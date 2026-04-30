@@ -102,6 +102,7 @@ impl Plugin for GamePlugin {
             .add_systems(Update, handle_confirm_input.after(GameMutation))
             .add_systems(Update, handle_confirm_button_input.after(GameMutation))
             .add_systems(Update, handle_game_over_input.after(GameMutation))
+            .add_systems(Update, handle_game_over_button_input.after(GameMutation))
             .init_resource::<AutoSaveTimer>()
             .add_systems(Update, tick_elapsed_time)
             .add_systems(Update, auto_save_game_state)
@@ -537,6 +538,7 @@ pub fn has_legal_moves(game: &GameState) -> bool {
 /// spawns a `GameOverScreen` overlay. The overlay is despawned automatically
 /// when `has_legal_moves` returns true again (e.g. after undo) or when the
 /// game is won.
+#[allow(clippy::too_many_arguments)]
 fn check_no_moves(
     mut commands: Commands,
     mut events: MessageReader<StateChangedEvent>,
@@ -544,6 +546,7 @@ fn check_no_moves(
     mut toast: MessageWriter<InfoToastEvent>,
     mut already_fired: Local<bool>,
     game_over_screens: Query<Entity, With<GameOverScreen>>,
+    font_res: Option<Res<FontResource>>,
 ) {
     // Reset the debounce flag on every state change so if something changes
     // we re-evaluate on the next state change.
@@ -577,84 +580,64 @@ fn check_no_moves(
         *already_fired = true;
         // Only spawn the overlay if one does not already exist.
         if game_over_screens.is_empty() {
-            spawn_game_over_screen(&mut commands, game.0.score);
+            spawn_game_over_screen(&mut commands, game.0.score, font_res.as_deref());
         }
     }
 }
 
-/// Spawns the full-screen game-over overlay with score display and action hints.
+/// Marker on the "Undo" secondary button inside the game-over modal.
+#[derive(Component, Debug)]
+pub struct GameOverUndoButton;
+
+/// Marker on the "New Game" primary button inside the game-over modal.
+#[derive(Component, Debug)]
+pub struct GameOverNewGameButton;
+
+/// Spawns the game-over modal using the standard `ui_modal` primitive.
 ///
-/// The background is intentionally semi-transparent (alpha 0.6) so the stuck
-/// card layout remains visible behind the dialog.
-fn spawn_game_over_screen(commands: &mut Commands, score: i32) {
-    commands
-        .spawn((
-            GameOverScreen,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Percent(0.0),
-                top: Val::Percent(0.0),
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(20.0),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-            ZIndex(200),
-        ))
-        .with_children(|root| {
-            root.spawn((
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    padding: UiRect::all(Val::Px(40.0)),
-                    row_gap: Val::Px(16.0),
-                    min_width: Val::Px(340.0),
-                    align_items: AlignItems::Center,
-                    border_radius: BorderRadius::all(Val::Px(12.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.10, 0.08, 0.08)),
-            ))
-            .with_children(|card| {
-                // Header — explains why the overlay appeared.
-                card.spawn((
-                    Text::new("No more moves available"),
-                    TextFont { font_size: 36.0, ..default() },
-                    TextColor(Color::srgb(1.0, 0.4, 0.1)),
-                ));
-                // Score
-                card.spawn((
-                    Text::new(format!("Score: {score}")),
-                    TextFont { font_size: 24.0, ..default() },
-                    TextColor(Color::WHITE),
-                ));
-                // Action hints — stacked vertically for legibility.
-                card.spawn((
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(8.0),
-                        margin: UiRect::top(Val::Px(8.0)),
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                ))
-                .with_children(|hints| {
-                    hints.spawn((
-                        Text::new("Press N or Escape for a new game"),
-                        TextFont { font_size: 20.0, ..default() },
-                        TextColor(Color::srgb(0.3, 1.0, 0.4)),
-                    ));
-                    hints.spawn((
-                        Text::new("Press G to forfeit (counts as a loss)"),
-                        TextFont { font_size: 20.0, ..default() },
-                        TextColor(Color::srgb(1.0, 0.6, 0.2)),
-                    ));
-                });
+/// Replaces a bespoke layout that listed action hints as plain text
+/// ("Press N for a new game", "Press G to forfeit") — the audit
+/// flagged this as the same class of "feels like a debug panel"
+/// problem the confirm modal had. Now there are real buttons with
+/// hover/press feedback; the keyboard accelerators stay as optional
+/// shortcuts displayed inside the buttons' caption chips.
+fn spawn_game_over_screen(
+    commands: &mut Commands,
+    score: i32,
+    font_res: Option<&FontResource>,
+) {
+    spawn_modal(
+        commands,
+        GameOverScreen,
+        ui_theme::Z_MODAL_PANEL,
+        |card| {
+            spawn_modal_header(card, "No more moves available", font_res);
+            spawn_modal_body_text(
+                card,
+                format!("Final score: {score}"),
+                ui_theme::TEXT_PRIMARY,
+                font_res,
+            );
+            spawn_modal_actions(card, |actions| {
+                spawn_modal_button(
+                    actions,
+                    GameOverUndoButton,
+                    "Undo",
+                    Some("U"),
+                    ButtonVariant::Secondary,
+                    font_res,
+                );
+                spawn_modal_button(
+                    actions,
+                    GameOverNewGameButton,
+                    "New Game",
+                    Some("N"),
+                    ButtonVariant::Primary,
+                    font_res,
+                );
             });
-        });
+        },
+    );
 }
 
 /// Handles keyboard input while `GameOverScreen` is open.
@@ -680,6 +663,33 @@ fn handle_game_over_input(
     if keys.just_pressed(KeyCode::KeyN) || keys.just_pressed(KeyCode::Escape) {
         new_game.write(NewGameRequestEvent::default());
     } else if keys.just_pressed(KeyCode::KeyU) {
+        for entity in &screens {
+            commands.entity(entity).despawn();
+        }
+        undo.write(UndoRequestEvent);
+    }
+}
+
+/// Mouse / touch counterpart to `handle_game_over_input`. Click on the
+/// modal's Undo button → fire `UndoRequestEvent` and despawn so
+/// `check_no_moves` can re-evaluate. Click on New Game → fire
+/// `NewGameRequestEvent` (the abandon-current-game guard does not apply
+/// here because the game is unwinnable).
+#[allow(clippy::type_complexity)]
+fn handle_game_over_button_input(
+    mut commands: Commands,
+    new_game_buttons: Query<&Interaction, (With<GameOverNewGameButton>, Changed<Interaction>)>,
+    undo_buttons: Query<&Interaction, (With<GameOverUndoButton>, Changed<Interaction>)>,
+    screens: Query<Entity, With<GameOverScreen>>,
+    mut new_game: MessageWriter<NewGameRequestEvent>,
+    mut undo: MessageWriter<UndoRequestEvent>,
+) {
+    if screens.is_empty() {
+        return;
+    }
+    if new_game_buttons.iter().any(|i| *i == Interaction::Pressed) {
+        new_game.write(NewGameRequestEvent::default());
+    } else if undo_buttons.iter().any(|i| *i == Interaction::Pressed) {
         for entity in &screens {
             commands.entity(entity).despawn();
         }
@@ -1294,13 +1304,24 @@ mod tests {
             texts.iter().any(|t| t == "No more moves available"),
             "header must read 'No more moves available'; found: {texts:?}"
         );
+        // The modal now uses real buttons instead of plain action-hint
+        // text, so we assert on the button labels and their hotkey
+        // chips rather than the prior "Press N…" / "Press G…" prose.
         assert!(
-            texts.iter().any(|t| t == "Press N or Escape for a new game"),
-            "hint 1 must read 'Press N or Escape for a new game'; found: {texts:?}"
+            texts.iter().any(|t| t == "New Game"),
+            "primary action button must label 'New Game'; found: {texts:?}"
         );
         assert!(
-            texts.iter().any(|t| t == "Press G to forfeit (counts as a loss)"),
-            "hint 2 must read 'Press G to forfeit (counts as a loss)'; found: {texts:?}"
+            texts.iter().any(|t| t == "N"),
+            "primary action must show its 'N' hotkey chip; found: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "Undo"),
+            "secondary action button must label 'Undo'; found: {texts:?}"
+        );
+        assert!(
+            texts.iter().any(|t| t == "U"),
+            "secondary action must show its 'U' hotkey chip; found: {texts:?}"
         );
     }
 
