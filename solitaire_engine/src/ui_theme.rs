@@ -282,6 +282,19 @@ pub const MOTION_LOADING_TICK_SECS: f32 = 0.40;
 /// hover-discoverability budget for help text.
 pub const MOTION_TOOLTIP_DELAY_SECS: f32 = 0.5;
 
+/// Total visible duration of the splash screen overlay, in seconds.
+/// Composed of a fade-in, a hold, and a fade-out — see
+/// [`MOTION_SPLASH_FADE_SECS`] for the per-edge fade budget. Not run
+/// through [`scaled_duration`]: the splash is a one-shot brand beat at
+/// app start, not gameplay motion that should track `AnimSpeed`.
+pub const MOTION_SPLASH_TOTAL_SECS: f32 = 1.6;
+
+/// Fade-in and fade-out duration of the splash overlay, in seconds.
+/// The hold time is `MOTION_SPLASH_TOTAL_SECS - 2 * MOTION_SPLASH_FADE_SECS`.
+/// Mirroring fade-in and fade-out keeps the curve symmetric so the brand
+/// beat reads as a single dissolve instead of two separate animations.
+pub const MOTION_SPLASH_FADE_SECS: f32 = 0.3;
+
 // ---------------------------------------------------------------------------
 // Z-index — tooltip layer
 // ---------------------------------------------------------------------------
@@ -291,6 +304,15 @@ pub const MOTION_TOOLTIP_DELAY_SECS: f32 = 0.5;
 /// button's outline. Still below `Z_WIN_CASCADE` and `Z_TOAST` so the
 /// celebration and notification layers stay on top.
 pub const Z_TOOLTIP: i32 = Z_FOCUS_RING + 10;
+
+/// Z-layer for the launch splash overlay. The splash owns the entire
+/// viewport for ~1.6 s before fading out, so it sits above every other
+/// UI rung — including `Z_TOAST` — to guarantee the brand beat is
+/// never occluded by a stray toast or tooltip. Neither toasts nor the
+/// win cascade can fire during the splash window in practice (no game
+/// has run yet, no toast queue has dispatched), but the relative order
+/// is kept tidy in case a future feature schedules either at startup.
+pub const Z_SPLASH: i32 = Z_TOAST + 100;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -362,6 +384,7 @@ mod tests {
             Z_TOOLTIP,
             Z_WIN_CASCADE,
             Z_TOAST,
+            Z_SPLASH,
         ];
         for window in layers.windows(2) {
             assert!(

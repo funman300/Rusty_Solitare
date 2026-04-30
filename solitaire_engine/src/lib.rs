@@ -26,6 +26,7 @@ pub mod settings_plugin;
 pub mod progress_plugin;
 pub mod resources;
 pub mod selection_plugin;
+pub mod splash_plugin;
 pub mod stats_plugin;
 pub mod sync_plugin;
 pub mod table_plugin;
@@ -97,6 +98,7 @@ pub use settings_plugin::{
 pub use layout::{compute_layout, Layout, LayoutResource};
 pub use resources::{DragState, GameStateResource, HintCycleIndex, SettingsScrollPos, SyncStatus, SyncStatusResource};
 pub use selection_plugin::{SelectionHighlight, SelectionPlugin, SelectionState};
+pub use splash_plugin::{SplashAge, SplashPlugin, SplashRoot};
 pub use stats_plugin::{StatsPlugin, StatsResource, StatsScreen, StatsUpdate};
 pub use sync_plugin::{SyncPlugin, SyncProviderResource};
 pub use ui_focus::{Disabled, FocusGroup, Focusable, FocusedButton, UiFocusPlugin};
