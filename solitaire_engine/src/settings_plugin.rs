@@ -33,8 +33,9 @@ use crate::ui_theme::{
 const SWATCH_PX: f32 = 40.0;
 
 /// Side length of a small toggle / cycle button (e.g. the "⇄" affordances).
-/// Sub-rung sizing — kept as a literal, see SWATCH_PX.
-const ICON_BUTTON_PX: f32 = 28.0;
+/// Sub-rung sizing — kept as a literal, see SWATCH_PX. 32 px meets the
+/// minimum desktop hit-target threshold while staying smaller than `SWATCH_PX`.
+const ICON_BUTTON_PX: f32 = 32.0;
 
 /// Volume adjustment step applied by the `[` / `]` hotkeys.
 pub const SFX_STEP: f32 = 0.1;
@@ -257,7 +258,7 @@ fn sync_settings_panel_visibility(
         if panels.is_empty() {
             let status_label = sync_status
                 .map(|s| sync_status_label(&s.0))
-                .unwrap_or_else(|| "Status: not configured".to_string());
+                .unwrap_or_else(|| "Status: local only".to_string());
             let unlocked_backs = progress
                 .as_ref()
                 .map(|p| p.0.unlocked_card_backs.as_slice())
