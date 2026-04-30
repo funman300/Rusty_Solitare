@@ -15,7 +15,7 @@ const APP_DIR_NAME: &str = "solitaire_quest";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 
 /// Animation playback speed for card transitions.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AnimSpeed {
     /// Standard animation timing (default).
     #[default]
