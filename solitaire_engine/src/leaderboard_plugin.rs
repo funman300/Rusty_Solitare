@@ -15,8 +15,16 @@ use solitaire_data::settings::SyncBackend;
 use solitaire_sync::LeaderboardEntry;
 
 use crate::events::{InfoToastEvent, ToggleLeaderboardRequestEvent};
+use crate::font_plugin::FontResource;
 use crate::settings_plugin::SettingsResource;
 use crate::sync_plugin::SyncProviderResource;
+use crate::ui_modal::{
+    spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
+};
+use crate::ui_theme::{
+    ACCENT_PRIMARY, BORDER_SUBTLE, STATE_INFO, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY,
+    TYPE_BODY_LG, TYPE_CAPTION, VAL_SPACE_4, Z_MODAL_PANEL,
+};
 
 // ---------------------------------------------------------------------------
 // Resources
@@ -79,6 +87,7 @@ impl Plugin for LeaderboardPlugin {
                 (
                     reset_closed_flag,
                     toggle_leaderboard_screen,
+                    handle_leaderboard_close_button,
                     poll_leaderboard_fetch,
                     update_leaderboard_panel,
                     handle_opt_in_button,
@@ -111,6 +120,7 @@ fn toggle_leaderboard_screen(
     screens: Query<Entity, With<LeaderboardScreen>>,
     data: Res<LeaderboardResource>,
     provider: Option<Res<SyncProviderResource>>,
+    font_res: Option<Res<FontResource>>,
     mut task_res: ResMut<LeaderboardFetchTask>,
     mut closed_flag: ResMut<ClosedThisFrame>,
 ) {
@@ -125,7 +135,7 @@ fn toggle_leaderboard_screen(
     }
 
     // Spawn the panel immediately with whatever data we have (may be None).
-    spawn_leaderboard_screen(&mut commands, data.0.as_deref());
+    spawn_leaderboard_screen(&mut commands, data.0.as_deref(), font_res.as_deref());
 
     // Start a background fetch if not already in flight.
     if task_res.0.is_none()
@@ -157,6 +167,7 @@ fn update_leaderboard_panel(
     mut result_res: ResMut<LeaderboardFetchResult>,
     mut data: ResMut<LeaderboardResource>,
     screens: Query<Entity, With<LeaderboardScreen>>,
+    font_res: Option<Res<FontResource>>,
     closed_flag: Res<ClosedThisFrame>,
 ) {
     let Some(result) = result_res.0.take() else { return };
@@ -180,7 +191,23 @@ fn update_leaderboard_panel(
     }
     for entity in &screens {
         commands.entity(entity).despawn();
-        spawn_leaderboard_screen(&mut commands, data.0.as_deref());
+        spawn_leaderboard_screen(&mut commands, data.0.as_deref(), font_res.as_deref());
+    }
+}
+
+/// Click handler for the modal's "Done" button — despawns the overlay.
+fn handle_leaderboard_close_button(
+    mut commands: Commands,
+    close_buttons: Query<&Interaction, (With<LeaderboardCloseButton>, Changed<Interaction>)>,
+    screens: Query<Entity, With<LeaderboardScreen>>,
+    mut closed_flag: ResMut<ClosedThisFrame>,
+) {
+    if !close_buttons.iter().any(|i| *i == Interaction::Pressed) {
+        return;
+    }
+    for entity in &screens {
+        commands.entity(entity).despawn();
+        closed_flag.0 = true;
     }
 }
 
@@ -283,197 +310,183 @@ fn poll_opt_out_task(
 // UI construction
 // ---------------------------------------------------------------------------
 
-fn spawn_leaderboard_screen(commands: &mut Commands, entries: Option<&[LeaderboardEntry]>) {
-    commands
-        .spawn((
-            LeaderboardScreen,
+/// Marker on the "Done" button inside the Leaderboard modal.
+#[derive(Component, Debug)]
+pub struct LeaderboardCloseButton;
+
+fn spawn_leaderboard_screen(
+    commands: &mut Commands,
+    entries: Option<&[LeaderboardEntry]>,
+    font_res: Option<&FontResource>,
+) {
+    spawn_modal(commands, LeaderboardScreen, Z_MODAL_PANEL, |card| {
+        spawn_modal_header(card, "Leaderboard", font_res);
+
+        // Subhead — what the screen does + what the buttons control.
+        let font_handle = font_res.map(|f| f.0.clone()).unwrap_or_default();
+        let font_caption = TextFont {
+            font: font_handle.clone(),
+            font_size: TYPE_CAPTION,
+            ..default()
+        };
+        let font_status = TextFont {
+            font: font_handle.clone(),
+            font_size: TYPE_BODY_LG,
+            ..default()
+        };
+        let font_row = TextFont {
+            font: font_handle.clone(),
+            font_size: TYPE_BODY,
+            ..default()
+        };
+        let font_header = TextFont {
+            font: font_handle,
+            font_size: TYPE_CAPTION,
+            ..default()
+        };
+
+        card.spawn((
+            Text::new("Use Opt In / Opt Out to control your visibility on the server."),
+            font_caption.clone(),
+            TextColor(TEXT_SECONDARY),
+        ));
+
+        // Opt In / Opt Out row uses the same modal-button helpers as
+        // the rest of the UI for consistent hover / press feedback.
+        spawn_modal_actions(card, |row| {
+            spawn_modal_button(
+                row,
+                LeaderboardOptInButton,
+                "Opt In",
+                None,
+                ButtonVariant::Secondary,
+                font_res,
+            );
+            spawn_modal_button(
+                row,
+                LeaderboardOptOutButton,
+                "Opt Out",
+                None,
+                ButtonVariant::Tertiary,
+                font_res,
+            );
+        });
+
+        // Subtle separator between the controls and the data area.
+        card.spawn((
             Node {
-                position_type: PositionType::Absolute,
-                left: Val::Percent(0.0),
-                top: Val::Percent(0.0),
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
+                height: Val::Px(1.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.82)),
-            ZIndex(210),
-        ))
-        .with_children(|root| {
-            root.spawn((
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    padding: UiRect::all(Val::Px(28.0)),
-                    row_gap: Val::Px(8.0),
-                    min_width: Val::Px(420.0),
-                    max_height: Val::Percent(80.0),
-                    overflow: Overflow::clip_y(),
-                    border_radius: BorderRadius::all(Val::Px(8.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.09, 0.09, 0.12)),
-            ))
-            .with_children(|card| {
-                // Header
-                card.spawn((
-                    Text::new("Leaderboard"),
-                    TextFont { font_size: 26.0, ..default() },
-                    TextColor(Color::WHITE),
-                ));
-                card.spawn((
-                    Text::new("Press L to close  •  Opt In / Opt Out to control your visibility"),
-                    TextFont { font_size: 14.0, ..default() },
-                    TextColor(Color::srgb(0.55, 0.55, 0.60)),
-                ));
+            BackgroundColor(BORDER_SUBTLE),
+        ));
 
-                // Separator
+        match entries {
+            None => {
                 card.spawn((
-                    Node {
-                        height: Val::Px(1.0),
-                        margin: UiRect::vertical(Val::Px(6.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.25, 0.25, 0.30)),
+                    Text::new("Fetching\u{2026}"),
+                    font_status.clone(),
+                    TextColor(STATE_INFO),
                 ));
-
-                // Opt-in / Opt-out buttons row
+            }
+            Some([]) => {
+                card.spawn((
+                    Text::new("No entries yet \u{2014} sync and opt in to appear here."),
+                    font_row.clone(),
+                    TextColor(TEXT_SECONDARY),
+                ));
+            }
+            Some(rows) => {
+                // Column headers
                 card.spawn(Node {
                     flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(10.0),
-                    margin: UiRect::bottom(Val::Px(8.0)),
+                    column_gap: VAL_SPACE_4,
                     ..default()
                 })
                 .with_children(|row| {
-                    row.spawn((
-                        LeaderboardOptInButton,
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
-                            justify_content: JustifyContent::Center,
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.18, 0.35, 0.50)),
-                    ))
-                    .with_children(|b| {
-                        b.spawn((
-                            Text::new("Opt In"),
-                            TextFont { font_size: 15.0, ..default() },
-                            TextColor(Color::WHITE),
-                        ));
-                    });
-
-                    row.spawn((
-                        LeaderboardOptOutButton,
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
-                            justify_content: JustifyContent::Center,
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.42, 0.15, 0.15)),
-                    ))
-                    .with_children(|b| {
-                        b.spawn((
-                            Text::new("Opt Out"),
-                            TextFont { font_size: 15.0, ..default() },
-                            TextColor(Color::WHITE),
-                        ));
-                    });
+                    header_cell(row, "#", 30.0, &font_header);
+                    header_cell(row, "Player", 160.0, &font_header);
+                    header_cell(row, "Best Score", 100.0, &font_header);
+                    header_cell(row, "Fastest Win", 110.0, &font_header);
                 });
 
-                match entries {
-                    None => {
-                        // Fetch in progress
-                        card.spawn((
-                            Text::new("Fetching…"),
-                            TextFont { font_size: 18.0, ..default() },
-                            TextColor(Color::srgb(0.65, 0.65, 0.70)),
-                        ));
-                    }
-                    Some([]) => {
-                        card.spawn((
-                            Text::new("No entries yet — sync and opt in to appear here."),
-                            TextFont { font_size: 16.0, ..default() },
-                            TextColor(Color::srgb(0.55, 0.55, 0.60)),
-                        ));
-                    }
-                    Some(rows) => {
-                        // Column headers
-                        card.spawn(Node {
-                            flex_direction: FlexDirection::Row,
-                            column_gap: Val::Px(16.0),
-                            margin: UiRect::bottom(Val::Px(4.0)),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            header_cell(row, "#", 30.0);
-                            header_cell(row, "Player", 160.0);
-                            header_cell(row, "Best Score", 100.0);
-                            header_cell(row, "Fastest Win", 110.0);
-                        });
+                let mut sorted = rows.to_vec();
+                sorted.sort_by_key(|e| std::cmp::Reverse(e.best_score.unwrap_or(0)));
 
-                        // Data rows (top 10)
-                        let mut sorted = rows.to_vec();
-                        sorted.sort_by(|a, b| {
-                            b.best_score
-                                .unwrap_or(0)
-                                .cmp(&a.best_score.unwrap_or(0))
-                        });
+                for (i, entry) in sorted.iter().take(10).enumerate() {
+                    // Top three get accent treatments to highlight the
+                    // podium without leaning on hand-picked metallic
+                    // colours that sit outside the token system.
+                    let rank_color = match i {
+                        0 => ACCENT_PRIMARY, // Balatro yellow for #1
+                        1 | 2 => TEXT_PRIMARY,
+                        _ => TEXT_SECONDARY,
+                    };
 
-                        for (i, entry) in sorted.iter().take(10).enumerate() {
-                            let rank_color = match i {
-                                0 => Color::srgb(1.0, 0.84, 0.0),
-                                1 => Color::srgb(0.75, 0.75, 0.75),
-                                2 => Color::srgb(0.80, 0.50, 0.20),
-                                _ => Color::srgb(0.80, 0.80, 0.80),
-                            };
+                    let time_str = entry
+                        .best_time_secs
+                        .map(format_secs)
+                        .unwrap_or_else(|| "-".to_string());
+                    let score_str = entry
+                        .best_score
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "-".to_string());
 
-                            let time_str = entry
-                                .best_time_secs
-                                .map(format_secs)
-                                .unwrap_or_else(|| "-".to_string());
-                            let score_str = entry
-                                .best_score
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| "-".to_string());
-
-                            card.spawn(Node {
-                                flex_direction: FlexDirection::Row,
-                                column_gap: Val::Px(16.0),
-                                ..default()
-                            })
-                            .with_children(|row| {
-                                data_cell(row, &format!("{}", i + 1), 30.0, rank_color);
-                                data_cell(row, &entry.display_name, 160.0, Color::WHITE);
-                                data_cell(row, &score_str, 100.0, Color::WHITE);
-                                data_cell(row, &time_str, 110.0, Color::WHITE);
-                            });
-                        }
-                    }
+                    card.spawn(Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: VAL_SPACE_4,
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        data_cell(row, &format!("{}", i + 1), 30.0, rank_color, &font_row);
+                        data_cell(row, &entry.display_name, 160.0, TEXT_PRIMARY, &font_row);
+                        data_cell(row, &score_str, 100.0, TEXT_PRIMARY, &font_row);
+                        data_cell(row, &time_str, 110.0, TEXT_PRIMARY, &font_row);
+                    });
                 }
-            });
+            }
+        }
+
+        spawn_modal_actions(card, |actions| {
+            spawn_modal_button(
+                actions,
+                LeaderboardCloseButton,
+                "Done",
+                Some("L"),
+                ButtonVariant::Primary,
+                font_res,
+            );
         });
+    });
 }
 
-fn header_cell(parent: &mut ChildSpawnerCommands, text: &str, width: f32) {
+fn header_cell(parent: &mut ChildSpawnerCommands, text: &str, width: f32, font: &TextFont) {
     parent.spawn((
         Text::new(text.to_string()),
-        TextFont { font_size: 13.0, ..default() },
-        TextColor(Color::srgb(0.55, 0.75, 0.55)),
-        Node { width: Val::Px(width), ..default() },
+        font.clone(),
+        TextColor(TEXT_SECONDARY),
+        Node {
+            width: Val::Px(width),
+            ..default()
+        },
     ));
 }
 
-fn data_cell(parent: &mut ChildSpawnerCommands, text: &str, width: f32, color: Color) {
+fn data_cell(
+    parent: &mut ChildSpawnerCommands,
+    text: &str,
+    width: f32,
+    color: Color,
+    font: &TextFont,
+) {
     parent.spawn((
         Text::new(text.to_string()),
-        TextFont { font_size: 15.0, ..default() },
+        font.clone(),
         TextColor(color),
-        Node { width: Val::Px(width), ..default() },
+        Node {
+            width: Val::Px(width),
+            ..default()
+        },
     ));
 }
 
