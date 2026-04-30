@@ -20,7 +20,7 @@ use crate::ui_theme::{
 #[derive(Component, Debug)]
 pub struct HelpScreen;
 
-/// Marker on the "Close" button inside the Help modal.
+/// Marker on the "Done" button inside the Help modal.
 #[derive(Component, Debug)]
 pub struct HelpCloseButton;
 
@@ -56,7 +56,7 @@ fn toggle_help_screen(
     }
 }
 
-/// Click handler for the modal's "Close" button. F1 toggles the overlay
+/// Click handler for the modal's "Done" button. F1 toggles the overlay
 /// the same way; this just exposes the close action to mouse / touch.
 fn handle_help_close_button(
     mut commands: Commands,
@@ -194,7 +194,7 @@ fn spawn_help_screen(commands: &mut Commands, font_res: Option<&FontResource>) {
             spawn_modal_button(
                 actions,
                 HelpCloseButton,
-                "Close",
+                "Done",
                 Some("F1"),
                 ButtonVariant::Primary,
                 font_res,

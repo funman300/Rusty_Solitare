@@ -166,7 +166,7 @@ fn handle_onboarding_buttons(
     }
 
     if skip_pressed || (next_pressed && slide_index.0 == SLIDE_COUNT - 1) {
-        // Skip or final-slide "Start playing" — complete onboarding.
+        // Skip or final-slide "Let's play" — complete onboarding.
         complete_onboarding(
             &mut commands,
             &screens,
@@ -412,7 +412,7 @@ fn spawn_slide_hotkeys(commands: &mut Commands, font_res: Option<&FontResource>)
             spawn_modal_button(
                 actions,
                 OnboardingNextButton,
-                "Start playing",
+                "Let's play",
                 Some("→"),
                 ButtonVariant::Primary,
                 font_res,
