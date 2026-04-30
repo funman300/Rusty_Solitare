@@ -690,14 +690,37 @@ fn spawn_modes_popover(
         ..default()
     };
 
-    let mut rows: Vec<(ModeOption, &'static str)> = vec![(ModeOption::Classic, "Classic")];
+    // Each row carries a tooltip alongside its label so hover reveals
+    // a one-line description of what the mode does — mirroring the
+    // tooltips on the action-bar buttons that opened this popover.
+    let mut rows: Vec<(ModeOption, &'static str, &'static str)> = vec![(
+        ModeOption::Classic,
+        "Classic",
+        "Standard Klondike. Score, timer, and full progression.",
+    )];
     if daily.is_some() {
-        rows.push((ModeOption::DailyChallenge, "Daily Challenge"));
+        rows.push((
+            ModeOption::DailyChallenge,
+            "Daily Challenge",
+            "Today's seeded deal. Same for every player worldwide.",
+        ));
     }
     if level >= CHALLENGE_UNLOCK_LEVEL {
-        rows.push((ModeOption::Zen, "Zen"));
-        rows.push((ModeOption::Challenge, "Challenge"));
-        rows.push((ModeOption::TimeAttack, "Time Attack"));
+        rows.push((
+            ModeOption::Zen,
+            "Zen",
+            "No timer, no score, no penalties. Just play.",
+        ));
+        rows.push((
+            ModeOption::Challenge,
+            "Challenge",
+            "Hand-picked hard seeds. No undo allowed.",
+        ));
+        rows.push((
+            ModeOption::TimeAttack,
+            "Time Attack",
+            "Win as many games as you can in ten minutes.",
+        ));
     }
 
     commands
@@ -717,12 +740,13 @@ fn spawn_modes_popover(
             ZIndex(Z_HUD + 5),
         ))
         .with_children(|panel| {
-            for (option, label) in rows {
+            for (option, label, tooltip) in rows {
                 panel
                     .spawn((
                         option,
                         ActionButton,
                         Button,
+                        Tooltip::new(tooltip),
                         Node {
                             padding: UiRect::axes(VAL_SPACE_3, Val::Px(6.0)),
                             justify_content: JustifyContent::FlexStart,
@@ -821,12 +845,35 @@ fn spawn_menu_popover(commands: &mut Commands, font_res: Option<&FontResource>) 
         ..default()
     };
 
-    let rows: [(MenuOption, &'static str); 5] = [
-        (MenuOption::Stats, "Stats"),
-        (MenuOption::Achievements, "Achievements"),
-        (MenuOption::Profile, "Profile"),
-        (MenuOption::Settings, "Settings"),
-        (MenuOption::Leaderboard, "Leaderboard"),
+    // Each row carries a tooltip alongside its label so hover reveals
+    // a one-line description of what each overlay shows — mirroring
+    // the tooltips on the action-bar buttons that opened this popover.
+    let rows: [(MenuOption, &'static str, &'static str); 5] = [
+        (
+            MenuOption::Stats,
+            "Stats",
+            "Lifetime totals: wins, streaks, fastest time, best score.",
+        ),
+        (
+            MenuOption::Achievements,
+            "Achievements",
+            "Browse unlocked achievements and the rewards still ahead.",
+        ),
+        (
+            MenuOption::Profile,
+            "Profile",
+            "Your level, XP progress, and sync status.",
+        ),
+        (
+            MenuOption::Settings,
+            "Settings",
+            "Audio, animations, theme, draw mode, and sync.",
+        ),
+        (
+            MenuOption::Leaderboard,
+            "Leaderboard",
+            "Top players from your sync server. Opt in from Profile.",
+        ),
     ];
 
     commands
@@ -846,12 +893,13 @@ fn spawn_menu_popover(commands: &mut Commands, font_res: Option<&FontResource>) 
             ZIndex(Z_HUD + 5),
         ))
         .with_children(|panel| {
-            for (option, label) in rows {
+            for (option, label, tooltip) in rows {
                 panel
                     .spawn((
                         option,
                         ActionButton,
                         Button,
+                        Tooltip::new(tooltip),
                         Node {
                             padding: UiRect::axes(VAL_SPACE_3, Val::Px(6.0)),
                             justify_content: JustifyContent::FlexStart,
@@ -2038,6 +2086,111 @@ mod tests {
             tooltip_for::<NewGameButton>(&mut app),
             "Start a fresh deal. Confirms first if a game is in progress."
         );
+    }
+
+    /// Every interior row of the Modes and Menu popovers must carry a
+    /// `Tooltip`. The popovers open from action-bar buttons whose own
+    /// tooltips are already covered above; this test extends the
+    /// invariant inward so hover discoverability is uniform across the
+    /// HUD's nested controls.
+    ///
+    /// We invoke the popover spawn helpers directly with a maxed-out
+    /// `ProgressResource` and a `DailyChallengeResource` so every row
+    /// branch fires (Classic, Daily, Zen, Challenge, Time Attack).
+    /// Headless click simulation isn't needed — the contract under
+    /// test is "every popover row spawns with a tooltip", which is a
+    /// property of the spawn helpers themselves.
+    #[test]
+    fn popover_rows_carry_tooltip_strings() {
+        use crate::progress_plugin::ProgressResource;
+        use solitaire_sync::progress::PlayerProgress;
+
+        let mut app = headless_app();
+
+        // Force every mode row to render: level past the challenge
+        // unlock threshold, plus a daily challenge resource so the
+        // Daily row appears.
+        let progress = ProgressResource(PlayerProgress {
+            level: CHALLENGE_UNLOCK_LEVEL,
+            ..Default::default()
+        });
+        let daily = DailyChallengeResource {
+            date: Local::now().date_naive(),
+            seed: 1,
+            goal_description: None,
+            target_score: None,
+            max_time_secs: None,
+        };
+
+        // Spawn both popovers via their helpers. Mirrors how the click
+        // handlers invoke them in production — we just skip the click.
+        {
+            let world = app.world_mut();
+            let mut commands = world.commands();
+            spawn_modes_popover(&mut commands, Some(&progress), Some(&daily), None);
+            spawn_menu_popover(&mut commands, None);
+            world.flush();
+        }
+        app.update();
+
+        // Every ModeOption-tagged entity must also carry a Tooltip,
+        // and the count must match the five canonical modes.
+        let mut mode_q = app
+            .world_mut()
+            .query_filtered::<&Tooltip, With<ModeOption>>();
+        let mode_tooltips: Vec<String> = mode_q
+            .iter(app.world())
+            .map(|t| t.0.clone().into_owned())
+            .collect();
+        assert_eq!(
+            mode_tooltips.len(),
+            5,
+            "expected a tooltip on each of the 5 mode rows, got {}",
+            mode_tooltips.len()
+        );
+        // Every approved mode tooltip string must be present somewhere
+        // among the ModeOption rows. Order isn't asserted — the spawn
+        // order test elsewhere already covers that.
+        for expected in [
+            "Standard Klondike. Score, timer, and full progression.",
+            "Today's seeded deal. Same for every player worldwide.",
+            "No timer, no score, no penalties. Just play.",
+            "Hand-picked hard seeds. No undo allowed.",
+            "Win as many games as you can in ten minutes.",
+        ] {
+            assert!(
+                mode_tooltips.iter().any(|s| s == expected),
+                "missing mode tooltip: {expected:?}"
+            );
+        }
+
+        // Same contract for MenuOption rows: five entries, each with a
+        // tooltip, exact strings matching the approved microcopy.
+        let mut menu_q = app
+            .world_mut()
+            .query_filtered::<&Tooltip, With<MenuOption>>();
+        let menu_tooltips: Vec<String> = menu_q
+            .iter(app.world())
+            .map(|t| t.0.clone().into_owned())
+            .collect();
+        assert_eq!(
+            menu_tooltips.len(),
+            5,
+            "expected a tooltip on each of the 5 menu rows, got {}",
+            menu_tooltips.len()
+        );
+        for expected in [
+            "Lifetime totals: wins, streaks, fastest time, best score.",
+            "Browse unlocked achievements and the rewards still ahead.",
+            "Your level, XP progress, and sync status.",
+            "Audio, animations, theme, draw mode, and sync.",
+            "Top players from your sync server. Opt in from Profile.",
+        ] {
+            assert!(
+                menu_tooltips.iter().any(|s| s == expected),
+                "missing menu tooltip: {expected:?}"
+            );
+        }
     }
 
     #[test]
