@@ -30,6 +30,7 @@ pub mod stats_plugin;
 pub mod sync_plugin;
 pub mod table_plugin;
 pub mod time_attack_plugin;
+pub mod ui_theme;
 pub mod weekly_goals_plugin;
 pub mod win_summary_plugin;
 
