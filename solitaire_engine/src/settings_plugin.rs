@@ -17,8 +17,24 @@ use solitaire_core::game_state::DrawMode;
 use solitaire_data::{load_settings_from, save_settings_to, settings_file_path, settings::Theme, AnimSpeed, Settings};
 
 use crate::events::{ManualSyncRequestEvent, ToggleSettingsRequestEvent};
+use crate::font_plugin::FontResource;
 use crate::progress_plugin::ProgressResource;
 use crate::resources::{SettingsScrollPos, SyncStatus, SyncStatusResource};
+use crate::ui_modal::{
+    spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
+};
+use crate::ui_theme::{
+    BG_BASE, BG_ELEVATED_HI, BORDER_SUBTLE, RADIUS_SM, STATE_SUCCESS, TEXT_PRIMARY, TEXT_SECONDARY,
+    TYPE_BODY, TYPE_BODY_LG, TYPE_CAPTION, VAL_SPACE_2, VAL_SPACE_3, Z_MODAL_PANEL,
+};
+
+/// Side length of a swatch button in the card-back / background pickers.
+/// Smaller than the smallest spacing rung so it stays a literal.
+const SWATCH_PX: f32 = 40.0;
+
+/// Side length of a small toggle / cycle button (e.g. the "⇄" affordances).
+/// Sub-rung sizing — kept as a literal, see SWATCH_PX.
+const ICON_BUTTON_PX: f32 = 28.0;
 
 /// Volume adjustment step applied by the `[` / `]` hotkeys.
 pub const SFX_STEP: f32 = 0.1;
@@ -232,6 +248,7 @@ fn sync_settings_panel_visibility(
     settings: Res<SettingsResource>,
     sync_status: Option<Res<SyncStatusResource>>,
     progress: Option<Res<ProgressResource>>,
+    font_res: Option<Res<FontResource>>,
 ) {
     if !screen.is_changed() {
         return;
@@ -256,6 +273,7 @@ fn sync_settings_panel_visibility(
                 unlocked_backs,
                 unlocked_bgs,
                 scroll_pos.0,
+                font_res.as_deref(),
             );
         }
     } else {
@@ -575,327 +593,134 @@ fn spawn_settings_panel(
     unlocked_card_backs: &[usize],
     unlocked_backgrounds: &[usize],
     scroll_offset: f32,
+    font_res: Option<&FontResource>,
 ) {
-    commands
-        .spawn((
-            SettingsPanel,
+    spawn_modal(commands, SettingsPanel, Z_MODAL_PANEL, |card| {
+        spawn_modal_header(card, "Settings", font_res);
+
+        // Scrollable body — contains every section so tall content stays
+        // reachable on short windows. The Done button below stays fixed
+        // outside the scroll so it's always one click away.
+        card.spawn((
+            SettingsPanelScrollable,
+            SettingsScrollNode,
+            ScrollPosition(Vec2::new(0.0, scroll_offset)),
             Node {
-                position_type: PositionType::Absolute,
-                left: Val::Percent(0.0),
-                top: Val::Percent(0.0),
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
+                row_gap: VAL_SPACE_3,
+                max_height: Val::Vh(60.0),
+                overflow: Overflow::scroll_y(),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.72)),
-            ZIndex(200),
         ))
-        .with_children(|root| {
-            // Inner card — max_height + scroll_y lets the player reach all rows
-            // on small windows by scrolling with the mouse wheel.
-            root.spawn((
-                SettingsPanelScrollable,
-                SettingsScrollNode,
-                ScrollPosition(Vec2::new(0.0, scroll_offset)),
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    padding: UiRect::all(Val::Px(28.0)),
-                    row_gap: Val::Px(14.0),
-                    min_width: Val::Px(340.0),
-                    max_height: Val::Percent(88.0),
-                    overflow: Overflow::scroll_y(),
-                    border_radius: BorderRadius::all(Val::Px(8.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.11, 0.11, 0.14)),
-            ))
-            .with_children(|card| {
-                // Title
-                card.spawn((
-                    Text::new("Settings"),
-                    TextFont {
-                        font_size: 30.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
+        .with_children(|body| {
+            // --- Audio ---
+            section_label(body, "Audio", font_res);
+            volume_row(
+                body,
+                "SFX Volume",
+                settings.sfx_volume,
+                SfxVolumeText,
+                SettingsButton::SfxDown,
+                SettingsButton::SfxUp,
+                font_res,
+            );
+            volume_row(
+                body,
+                "Music Volume",
+                settings.music_volume,
+                MusicVolumeText,
+                SettingsButton::MusicDown,
+                SettingsButton::MusicUp,
+                font_res,
+            );
 
-                // --- Audio section ---
-                section_label(card, "Audio");
+            // --- Gameplay ---
+            section_label(body, "Gameplay", font_res);
+            toggle_row(
+                body,
+                "Draw Mode",
+                DrawModeText,
+                draw_mode_label(&settings.draw_mode),
+                SettingsButton::ToggleDrawMode,
+                font_res,
+            );
+            toggle_row(
+                body,
+                "Anim Speed",
+                AnimSpeedText,
+                anim_speed_label(&settings.animation_speed),
+                SettingsButton::CycleAnimSpeed,
+                font_res,
+            );
 
-                // SFX volume row
-                volume_row(card, "SFX Volume", settings.sfx_volume, SfxVolumeText,
-                    SettingsButton::SfxDown, SettingsButton::SfxUp);
+            // --- Cosmetic ---
+            section_label(body, "Cosmetic", font_res);
+            toggle_row(
+                body,
+                "Theme",
+                ThemeText,
+                theme_label(&settings.theme),
+                SettingsButton::ToggleTheme,
+                font_res,
+            );
+            toggle_row(
+                body,
+                "Color-blind Mode",
+                ColorBlindText,
+                color_blind_label(settings.color_blind_mode),
+                SettingsButton::ToggleColorBlind,
+                font_res,
+            );
+            picker_row(
+                body,
+                "Card Back",
+                unlocked_card_backs,
+                settings.selected_card_back,
+                SettingsButton::SelectCardBack,
+                font_res,
+            );
+            picker_row(
+                body,
+                "Background",
+                unlocked_backgrounds,
+                settings.selected_background,
+                SettingsButton::SelectBackground,
+                font_res,
+            );
 
-                // Music volume row
-                volume_row(card, "Music Volume", settings.music_volume, MusicVolumeText,
-                    SettingsButton::MusicDown, SettingsButton::MusicUp);
-
-                // --- Gameplay section ---
-                section_label(card, "Gameplay");
-
-                // Draw mode row
-                card.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    row.spawn((
-                        Text::new("Draw Mode"),
-                        TextFont { font_size: 18.0, ..default() },
-                        TextColor(Color::srgb(0.85, 0.85, 0.80)),
-                    ));
-                    row.spawn((
-                        DrawModeText,
-                        Text::new(draw_mode_label(&settings.draw_mode)),
-                        TextFont { font_size: 18.0, ..default() },
-                        TextColor(Color::WHITE),
-                    ));
-                    icon_button(row, "⇄", SettingsButton::ToggleDrawMode);
-                });
-
-                // Animation speed row
-                card.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    row.spawn((
-                        Text::new("Anim Speed"),
-                        TextFont { font_size: 18.0, ..default() },
-                        TextColor(Color::srgb(0.85, 0.85, 0.80)),
-                    ));
-                    row.spawn((
-                        AnimSpeedText,
-                        Text::new(anim_speed_label(&settings.animation_speed)),
-                        TextFont { font_size: 18.0, ..default() },
-                        TextColor(Color::WHITE),
-                    ));
-                    icon_button(row, "⇄", SettingsButton::CycleAnimSpeed);
-                });
-
-                // --- Appearance section ---
-                section_label(card, "Appearance");
-
-                // Theme row
-                card.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    row.spawn((
-                        Text::new("Theme"),
-                        TextFont { font_size: 18.0, ..default() },
-                        TextColor(Color::srgb(0.85, 0.85, 0.80)),
-                    ));
-                    row.spawn((
-                        ThemeText,
-                        Text::new(theme_label(&settings.theme)),
-                        TextFont { font_size: 18.0, ..default() },
-                        TextColor(Color::WHITE),
-                    ));
-                    icon_button(row, "⇄", SettingsButton::ToggleTheme);
-                });
-
-                // Color-blind mode row
-                card.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    row.spawn((
-                        Text::new("Color-blind Mode"),
-                        TextFont { font_size: 18.0, ..default() },
-                        TextColor(Color::srgb(0.85, 0.85, 0.80)),
-                    ));
-                    row.spawn((
-                        ColorBlindText,
-                        Text::new(color_blind_label(settings.color_blind_mode)),
-                        TextFont { font_size: 18.0, ..default() },
-                        TextColor(Color::WHITE),
-                    ));
-                    icon_button(row, "⇄", SettingsButton::ToggleColorBlind);
-                });
-
-                // --- Card Back section ---
-                section_label(card, "Card Back");
-                card.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    flex_wrap: FlexWrap::Wrap,
-                    ..default()
-                })
-                .with_children(|row| {
-                    // Always show at least button "1" (index 0 = default).
-                    let backs = if unlocked_card_backs.is_empty() {
-                        &[0usize][..]
-                    } else {
-                        unlocked_card_backs
-                    };
-                    for &back_idx in backs {
-                        let is_selected = back_idx == settings.selected_card_back;
-                        let bg_color = if is_selected {
-                            Color::srgb(0.2, 0.9, 0.3)
-                        } else {
-                            Color::srgb(0.25, 0.25, 0.30)
-                        };
-                        row.spawn((
-                            SettingsButton::SelectCardBack(back_idx),
-                            Button,
-                            Node {
-                                width: Val::Px(40.0),
-                                height: Val::Px(40.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(bg_color),
-                        ))
-                        .with_children(|b| {
-                            b.spawn((
-                                Text::new(format!("{}", back_idx + 1)),
-                                TextFont { font_size: 16.0, ..default() },
-                                TextColor(Color::WHITE),
-                            ));
-                        });
-                    }
-                });
-
-                // --- Background section ---
-                section_label(card, "Background");
-                card.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    flex_wrap: FlexWrap::Wrap,
-                    ..default()
-                })
-                .with_children(|row| {
-                    // Always show at least button "1" (index 0 = default).
-                    let bgs = if unlocked_backgrounds.is_empty() {
-                        &[0usize][..]
-                    } else {
-                        unlocked_backgrounds
-                    };
-                    for &bg_idx in bgs {
-                        let is_selected = bg_idx == settings.selected_background;
-                        let bg_color = if is_selected {
-                            Color::srgb(0.2, 0.9, 0.3)
-                        } else {
-                            Color::srgb(0.25, 0.25, 0.30)
-                        };
-                        row.spawn((
-                            SettingsButton::SelectBackground(bg_idx),
-                            Button,
-                            Node {
-                                width: Val::Px(40.0),
-                                height: Val::Px(40.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(bg_color),
-                        ))
-                        .with_children(|b| {
-                            b.spawn((
-                                Text::new(format!("{}", bg_idx + 1)),
-                                TextFont { font_size: 16.0, ..default() },
-                                TextColor(Color::WHITE),
-                            ));
-                        });
-                    }
-                });
-
-                // --- Sync section ---
-                section_label(card, "Sync");
-                card.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    row.spawn((
-                        SyncStatusText,
-                        Text::new(sync_status.to_string()),
-                        TextFont { font_size: 16.0, ..default() },
-                        TextColor(Color::srgb(0.65, 0.65, 0.70)),
-                    ));
-                    // "Sync Now" button — hidden when SyncPlugin is not installed;
-                    // visible because ManualSyncRequestEvent is always registered.
-                    row.spawn((
-                        SettingsButton::SyncNow,
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                            justify_content: JustifyContent::Center,
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.20, 0.30, 0.45)),
-                    ))
-                    .with_children(|b| {
-                        b.spawn((
-                            Text::new("Sync Now"),
-                            TextFont { font_size: 14.0, ..default() },
-                            TextColor(Color::WHITE),
-                        ));
-                    });
-                });
-
-                // Done button
-                card.spawn((
-                    SettingsButton::Done,
-                    Button,
-                    Node {
-                        padding: UiRect::axes(Val::Px(20.0), Val::Px(8.0)),
-                        justify_content: JustifyContent::Center,
-                        margin: UiRect::top(Val::Px(6.0)),
-                        border_radius: BorderRadius::all(Val::Px(4.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.22, 0.45, 0.22)),
-                ))
-                .with_children(|b| {
-                    b.spawn((
-                        Text::new("Done"),
-                        TextFont {
-                            font_size: 18.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
-                });
-            });
+            // --- Sync ---
+            section_label(body, "Sync", font_res);
+            sync_row(body, sync_status, font_res);
         });
+
+        // Done is the only action — primary so the player always knows
+        // how to leave the modal. `O` toggles it the same way.
+        spawn_modal_actions(card, |actions| {
+            spawn_modal_button(
+                actions,
+                SettingsButton::Done,
+                "Done",
+                Some("O"),
+                ButtonVariant::Primary,
+                font_res,
+            );
+        });
+    });
 }
 
-fn section_label(parent: &mut ChildSpawnerCommands, title: &str) {
-    parent.spawn((
-        Text::new(title),
-        TextFont {
-            font_size: 14.0,
-            ..default()
-        },
-        TextColor(Color::srgb(0.55, 0.75, 0.55)),
-    ));
+/// Section divider — small lavender label inside the scrollable body.
+fn section_label(parent: &mut ChildSpawnerCommands, title: &str, font_res: Option<&FontResource>) {
+    let font = TextFont {
+        font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: TYPE_BODY,
+        ..default()
+    };
+    parent.spawn((Text::new(title), font, TextColor(TEXT_SECONDARY)));
 }
 
-/// Generic volume row: `Label  0.80  [−]  [+]`
+/// `Label  0.80  [−]  [+]` — used for SFX and Music volume rows.
+#[allow(clippy::too_many_arguments)]
 fn volume_row<Marker: Component>(
     parent: &mut ChildSpawnerCommands,
     label: &str,
@@ -903,55 +728,223 @@ fn volume_row<Marker: Component>(
     marker: Marker,
     btn_down: SettingsButton,
     btn_up: SettingsButton,
+    font_res: Option<&FontResource>,
 ) {
+    let label_font = label_text_font(font_res);
+    let value_font = value_text_font(font_res);
     parent
         .spawn(Node {
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
-            column_gap: Val::Px(8.0),
+            column_gap: VAL_SPACE_2,
             ..default()
         })
         .with_children(|row| {
             row.spawn((
                 Text::new(label.to_string()),
-                TextFont { font_size: 18.0, ..default() },
-                TextColor(Color::srgb(0.85, 0.85, 0.80)),
+                label_font,
+                TextColor(TEXT_SECONDARY),
             ));
             row.spawn((
                 marker,
                 Text::new(format!("{:.2}", value)),
-                TextFont { font_size: 18.0, ..default() },
-                TextColor(Color::WHITE),
+                value_font,
+                TextColor(TEXT_PRIMARY),
             ));
-            icon_button(row, "−", btn_down);
-            icon_button(row, "+", btn_up);
+            icon_button(row, "−", btn_down, font_res);
+            icon_button(row, "+", btn_up, font_res);
         });
 }
 
-fn icon_button(parent: &mut ChildSpawnerCommands, label: &str, action: SettingsButton) {
+/// `Label  Value  [⇄]` — used for cycle/toggle rows (draw mode, theme,
+/// anim speed, colour-blind).
+fn toggle_row<Marker: Component>(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    marker: Marker,
+    value: String,
+    action: SettingsButton,
+    font_res: Option<&FontResource>,
+) {
+    let label_font = label_text_font(font_res);
+    let value_font = value_text_font(font_res);
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: VAL_SPACE_2,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                Text::new(label.to_string()),
+                label_font,
+                TextColor(TEXT_SECONDARY),
+            ));
+            row.spawn((marker, Text::new(value), value_font, TextColor(TEXT_PRIMARY)));
+            icon_button(row, "⇄", action, font_res);
+        });
+}
+
+/// Wrapping row of indexed swatch buttons — used for card-back and
+/// background pickers. The currently-selected swatch is tinted with
+/// `STATE_SUCCESS` so the user can see it without reading a label.
+fn picker_row(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    unlocked: &[usize],
+    selected: usize,
+    make_button: impl Fn(usize) -> SettingsButton,
+    font_res: Option<&FontResource>,
+) {
+    let label_font = label_text_font(font_res);
+    let chip_font = TextFont {
+        font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: TYPE_BODY,
+        ..default()
+    };
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: VAL_SPACE_2,
+            flex_wrap: FlexWrap::Wrap,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                Text::new(label.to_string()),
+                label_font,
+                TextColor(TEXT_SECONDARY),
+            ));
+            // Always show at least swatch 0 (default).
+            let entries: &[usize] = if unlocked.is_empty() { &[0] } else { unlocked };
+            for &idx in entries {
+                let is_selected = idx == selected;
+                let bg = if is_selected { STATE_SUCCESS } else { BG_ELEVATED_HI };
+                row.spawn((
+                    make_button(idx),
+                    Button,
+                    Node {
+                        width: Val::Px(SWATCH_PX),
+                        height: Val::Px(SWATCH_PX),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(RADIUS_SM)),
+                        ..default()
+                    },
+                    BackgroundColor(bg),
+                    BorderColor::all(BORDER_SUBTLE),
+                ))
+                .with_children(|b| {
+                    let text_color = if is_selected { BG_BASE } else { TEXT_PRIMARY };
+                    b.spawn((
+                        Text::new(format!("{}", idx + 1)),
+                        chip_font.clone(),
+                        TextColor(text_color),
+                    ));
+                });
+            }
+        });
+}
+
+/// Status text + manual "Sync Now" button.
+fn sync_row(parent: &mut ChildSpawnerCommands, status_text: &str, font_res: Option<&FontResource>) {
+    let status_font = TextFont {
+        font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: TYPE_BODY,
+        ..default()
+    };
+    let button_font = TextFont {
+        font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: TYPE_CAPTION,
+        ..default()
+    };
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: VAL_SPACE_3,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                SyncStatusText,
+                Text::new(status_text.to_string()),
+                status_font,
+                TextColor(TEXT_SECONDARY),
+            ));
+            // ManualSyncRequestEvent is always registered, so this
+            // button is safe to show even when SyncPlugin is absent.
+            row.spawn((
+                SettingsButton::SyncNow,
+                Button,
+                Node {
+                    padding: UiRect::axes(VAL_SPACE_3, VAL_SPACE_2),
+                    justify_content: JustifyContent::Center,
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(RADIUS_SM)),
+                    ..default()
+                },
+                BackgroundColor(BG_ELEVATED_HI),
+                BorderColor::all(BORDER_SUBTLE),
+            ))
+            .with_children(|b| {
+                b.spawn((
+                    Text::new("Sync Now"),
+                    button_font,
+                    TextColor(TEXT_PRIMARY),
+                ));
+            });
+        });
+}
+
+fn label_text_font(font_res: Option<&FontResource>) -> TextFont {
+    TextFont {
+        font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: TYPE_BODY_LG,
+        ..default()
+    }
+}
+
+fn value_text_font(font_res: Option<&FontResource>) -> TextFont {
+    TextFont {
+        font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: TYPE_BODY_LG,
+        ..default()
+    }
+}
+
+fn icon_button(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    action: SettingsButton,
+    font_res: Option<&FontResource>,
+) {
+    let glyph_font = TextFont {
+        font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: TYPE_BODY_LG,
+        ..default()
+    };
     parent
         .spawn((
             action,
             Button,
             Node {
-                width: Val::Px(28.0),
-                height: Val::Px(28.0),
+                width: Val::Px(ICON_BUTTON_PX),
+                height: Val::Px(ICON_BUTTON_PX),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                border_radius: BorderRadius::all(Val::Px(4.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(RADIUS_SM)),
                 ..default()
             },
-            BackgroundColor(Color::srgb(0.25, 0.25, 0.30)),
+            BackgroundColor(BG_ELEVATED_HI),
+            BorderColor::all(BORDER_SUBTLE),
         ))
         .with_children(|b| {
-            b.spawn((
-                Text::new(label.to_string()),
-                TextFont {
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
+            b.spawn((Text::new(label.to_string()), glyph_font, TextColor(TEXT_PRIMARY)));
         });
 }
 
