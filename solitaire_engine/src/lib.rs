@@ -69,9 +69,9 @@ pub use font_plugin::{FontPlugin, FontResource};
 pub use cursor_plugin::CursorPlugin;
 pub use events::{
     AchievementUnlockedEvent, CardFaceRevealedEvent, CardFlippedEvent, DrawRequestEvent,
-    ForfeitEvent, GameWonEvent, HelpRequestEvent, HintVisualEvent, InfoToastEvent,
-    ManualSyncRequestEvent, MoveRejectedEvent, MoveRequestEvent, NewGameConfirmEvent,
-    NewGameRequestEvent, PauseRequestEvent, StartChallengeRequestEvent,
+    ForfeitEvent, ForfeitRequestEvent, GameWonEvent, HelpRequestEvent, HintVisualEvent,
+    InfoToastEvent, ManualSyncRequestEvent, MoveRejectedEvent, MoveRequestEvent,
+    NewGameConfirmEvent, NewGameRequestEvent, PauseRequestEvent, StartChallengeRequestEvent,
     StartDailyChallengeRequestEvent, StartTimeAttackRequestEvent, StartZenRequestEvent,
     StateChangedEvent, SyncCompleteEvent, ToggleAchievementsRequestEvent,
     ToggleLeaderboardRequestEvent, ToggleProfileRequestEvent, ToggleSettingsRequestEvent,
@@ -87,7 +87,7 @@ pub use hud_plugin::{
 pub use leaderboard_plugin::{LeaderboardPlugin, LeaderboardResource, LeaderboardScreen};
 pub use input_plugin::InputPlugin;
 pub use onboarding_plugin::{OnboardingPlugin, OnboardingScreen};
-pub use pause_plugin::{PausePlugin, PauseScreen, PausedResource};
+pub use pause_plugin::{ForfeitConfirmScreen, PausePlugin, PauseScreen, PausedResource};
 pub use profile_plugin::{ProfilePlugin, ProfileScreen};
 pub use settings_plugin::{
     SettingsChangedEvent, SettingsPlugin, SettingsResource, SettingsScreen, SFX_STEP,

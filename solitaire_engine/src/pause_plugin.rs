@@ -5,10 +5,15 @@
 //! - Elapsed-time and Time Attack tickers stop counting (they read this
 //!   resource and bail out early).
 //!
-//! Pressing Esc again dismisses the overlay and resumes ticking. Other
-//! input (drag, keyboard hotkeys) is **not** blocked — pause is purely a
-//! "stop the clock" screen for now. A future polish slice can layer
-//! input-blocking on top if desired.
+//! The pause modal is built on the standard `ui_modal` scaffold:
+//! uniform scrim, centred card, real Resume / Forfeit buttons. Clicking
+//! Forfeit (or pressing the `G` accelerator) fires
+//! `ForfeitRequestEvent`, which spawns a `ForfeitConfirmScreen` modal
+//! stacked above the pause card; confirming there fires `ForfeitEvent`
+//! and dismisses both modals so the new game can start cleanly.
+//!
+//! This replaces the prior double-G keyboard countdown — see commit
+//! history for the legacy `forfeit_countdown` toast design.
 //!
 //! **Drag cancellation:** when Esc is pressed while a mouse drag is in
 //! progress, the drag is cancelled (cards snap back to their origin) and
@@ -19,25 +24,55 @@ use bevy::prelude::*;
 use solitaire_core::game_state::DrawMode;
 use solitaire_data::save_game_state_to;
 
-use crate::events::{PauseRequestEvent, StateChangedEvent};
+use crate::events::{ForfeitEvent, ForfeitRequestEvent, PauseRequestEvent, StateChangedEvent};
+use crate::font_plugin::FontResource;
 use crate::game_plugin::{GameOverScreen, GameStatePath};
 use crate::progress_plugin::ProgressResource;
 use crate::resources::{DragState, GameStateResource};
 use crate::selection_plugin::{SelectionKeySet, SelectionState};
 use crate::settings_plugin::{SettingsChangedEvent, SettingsResource, SettingsStoragePath};
 use crate::stats_plugin::StatsResource;
+use crate::ui_modal::{
+    spawn_modal, spawn_modal_actions, spawn_modal_body_text, spawn_modal_button,
+    spawn_modal_header, ButtonVariant,
+};
+use crate::ui_theme::{
+    self, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY_LG, TYPE_CAPTION, VAL_SPACE_3,
+};
 
 /// Toggleable flag read by `tick_elapsed_time` and `advance_time_attack`.
 #[derive(Resource, Debug, Default)]
 pub struct PausedResource(pub bool);
 
-/// Marker on the pause overlay root node.
+/// Marker on the pause overlay scrim.
 #[derive(Component, Debug)]
 pub struct PauseScreen;
 
 /// Marker on the draw-mode toggle button inside the pause overlay.
 #[derive(Component, Debug)]
 struct PauseDrawToggle;
+
+/// Marker on the Resume primary button on the pause modal.
+#[derive(Component, Debug)]
+struct PauseResumeButton;
+
+/// Marker on the Forfeit tertiary button on the pause modal. A click
+/// fires `ForfeitRequestEvent`, the same event the `G` accelerator
+/// fires, so the same code path opens the confirm modal either way.
+#[derive(Component, Debug)]
+struct PauseForfeitButton;
+
+/// Marker on the forfeit-confirm modal scrim.
+#[derive(Component, Debug)]
+pub struct ForfeitConfirmScreen;
+
+/// Marker on the Cancel secondary button inside the forfeit-confirm modal.
+#[derive(Component, Debug)]
+struct ForfeitCancelButton;
+
+/// Marker on the "Yes, forfeit" primary button inside the forfeit-confirm modal.
+#[derive(Component, Debug)]
+struct ForfeitConfirmButton;
 
 /// Returns the human-readable label for a draw mode.
 ///
@@ -49,24 +84,40 @@ pub fn draw_mode_label(mode: DrawMode) -> &'static str {
     }
 }
 
-/// Handles pause and resume: toggles the pause overlay on Esc, freezes game-input systems via `PausedResource`, and saves the in-progress game state to disk.
+/// Handles pause and resume: toggles the pause overlay on Esc, freezes
+/// game-input systems via `PausedResource`, saves the in-progress game
+/// to disk, and routes the Forfeit confirm-modal flow.
 pub struct PausePlugin;
 
 impl Plugin for PausePlugin {
     fn build(&self, app: &mut App) {
-        // Both add_event calls are idempotent — other plugins may register these
-        // events first, but calling add_event again is always safe.
+        // add_message is idempotent — other plugins may register these
+        // first, but a duplicate call is always safe.
         app.add_message::<SettingsChangedEvent>()
             .add_message::<StateChangedEvent>()
             .add_message::<PauseRequestEvent>()
+            .add_message::<ForfeitRequestEvent>()
+            .add_message::<ForfeitEvent>()
             .init_resource::<PausedResource>()
             .add_systems(
                 Update,
                 (
                     // toggle_pause must see SelectionState *before* handle_selection_keys
                     // clears it, so it can skip Escape when a card is selected.
-                    toggle_pause.before(SelectionKeySet),
+                    // It must also run *before* handle_forfeit_keyboard so the
+                    // ForfeitConfirmScreen is still alive when toggle_pause's
+                    // early-return guard checks for it — otherwise an Esc that
+                    // closes the forfeit modal would also open pause in the
+                    // same frame.
+                    toggle_pause
+                        .before(SelectionKeySet)
+                        .before(handle_forfeit_keyboard),
                     handle_pause_draw_toggle,
+                    handle_pause_resume_button,
+                    handle_pause_forfeit_button,
+                    handle_forfeit_request,
+                    handle_forfeit_confirm_buttons,
+                    handle_forfeit_keyboard,
                 ),
             );
     }
@@ -79,12 +130,14 @@ fn toggle_pause(
     mut requests: MessageReader<PauseRequestEvent>,
     mut paused: ResMut<PausedResource>,
     screens: Query<Entity, With<PauseScreen>>,
+    forfeit_screens: Query<Entity, With<ForfeitConfirmScreen>>,
     game_over_screens: Query<Entity, With<GameOverScreen>>,
     game: Option<Res<GameStateResource>>,
     path: Option<Res<GameStatePath>>,
     progress: Option<Res<ProgressResource>>,
     stats: Option<Res<StatsResource>>,
     settings: Option<Res<SettingsResource>>,
+    font_res: Option<Res<FontResource>>,
     mut drag: Option<ResMut<DragState>>,
     mut changed: MessageWriter<StateChangedEvent>,
     selection: Option<Res<SelectionState>>,
@@ -94,6 +147,11 @@ fn toggle_pause(
     // burst of clicks doesn't queue future toggles.
     let button_clicked = requests.read().count() > 0;
     if !keys.just_pressed(KeyCode::Escape) && !button_clicked {
+        return;
+    }
+    // Forfeit confirm modal eats Esc — let `handle_forfeit_keyboard`
+    // close it instead of toggling pause.
+    if !forfeit_screens.is_empty() {
         return;
     }
     // If a card is currently selected, let SelectionPlugin handle this Escape
@@ -123,7 +181,13 @@ fn toggle_pause(
         let level = progress.as_deref().map(|p| p.0.level);
         let streak = stats.as_deref().map(|s| s.0.win_streak_current);
         let draw_mode = settings.as_deref().map(|s| s.0.draw_mode.clone());
-        spawn_pause_screen(&mut commands, level, streak, draw_mode);
+        spawn_pause_screen(
+            &mut commands,
+            level,
+            streak,
+            draw_mode,
+            font_res.as_deref(),
+        );
         paused.0 = true;
         // Persist the current game state whenever the player opens the pause
         // overlay so an OS-level kill still leaves a resumable save.
@@ -167,108 +231,273 @@ fn handle_pause_draw_toggle(
     }
 }
 
-/// Spawns the full-screen pause overlay.
+/// Closes the pause modal when the player clicks the Resume button.
+/// Routes through `PauseRequestEvent` so the same toggle path runs as
+/// when Esc is pressed or the HUD Pause button is clicked.
+fn handle_pause_resume_button(
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<PauseResumeButton>)>,
+    mut requests: MessageWriter<PauseRequestEvent>,
+) {
+    for interaction in &interaction_query {
+        if *interaction == Interaction::Pressed {
+            requests.write(PauseRequestEvent);
+        }
+    }
+}
+
+/// Translates a click on the pause modal's Forfeit button into a
+/// `ForfeitRequestEvent` so `handle_forfeit_request` can spawn the
+/// confirm modal — same code path as the `G` accelerator.
+fn handle_pause_forfeit_button(
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<PauseForfeitButton>)>,
+    mut requests: MessageWriter<ForfeitRequestEvent>,
+) {
+    for interaction in &interaction_query {
+        if *interaction == Interaction::Pressed {
+            requests.write(ForfeitRequestEvent);
+        }
+    }
+}
+
+/// Spawns `ForfeitConfirmScreen` in response to a `ForfeitRequestEvent`
+/// (from the `G` accelerator or the Pause modal's Forfeit button).
 ///
-/// `level` and `streak` are optional snapshots taken at pause time. When
-/// `ProgressResource` or `StatsResource` is not installed (e.g. in headless
-/// tests), those lines are omitted from the overlay.
+/// Bails when no game is in progress so a stray request never opens
+/// the modal on the home screen / game-over screen.
+fn handle_forfeit_request(
+    mut commands: Commands,
+    mut requests: MessageReader<ForfeitRequestEvent>,
+    forfeit_screens: Query<Entity, With<ForfeitConfirmScreen>>,
+    game: Option<Res<GameStateResource>>,
+    font_res: Option<Res<FontResource>>,
+) {
+    let requested = requests.read().count() > 0;
+    if !requested {
+        return;
+    }
+    if !forfeit_screens.is_empty() {
+        return;
+    }
+    let active_game = game
+        .as_ref()
+        .is_some_and(|g| g.0.move_count > 0 && !g.0.is_won);
+    if !active_game {
+        return;
+    }
+    spawn_forfeit_confirm_screen(&mut commands, font_res.as_deref());
+}
+
+/// Mouse / touch handler for the forfeit-confirm modal buttons.
 ///
-/// `draw_mode` is the current draw mode shown on the toggle button. When
-/// `SettingsResource` is absent the draw-mode row is omitted.
+/// Cancel despawns the confirm modal and leaves the pause modal (if
+/// any) untouched. Confirm despawns both modals, clears the paused
+/// flag, and fires `ForfeitEvent` for `StatsPlugin` to consume.
+#[allow(clippy::too_many_arguments)]
+fn handle_forfeit_confirm_buttons(
+    mut commands: Commands,
+    yes_buttons: Query<&Interaction, (Changed<Interaction>, With<ForfeitConfirmButton>)>,
+    no_buttons: Query<&Interaction, (Changed<Interaction>, With<ForfeitCancelButton>)>,
+    forfeit_screens: Query<Entity, With<ForfeitConfirmScreen>>,
+    pause_screens: Query<Entity, With<PauseScreen>>,
+    paused: ResMut<PausedResource>,
+    forfeit: MessageWriter<ForfeitEvent>,
+) {
+    let confirmed = yes_buttons.iter().any(|i| *i == Interaction::Pressed);
+    let cancelled = no_buttons.iter().any(|i| *i == Interaction::Pressed);
+    if !confirmed && !cancelled {
+        return;
+    }
+    close_forfeit_modal(
+        &mut commands,
+        confirmed,
+        &forfeit_screens,
+        &pause_screens,
+        paused,
+        forfeit,
+    );
+}
+
+/// Keyboard accelerator for the forfeit-confirm modal — Y / Enter
+/// confirms; N / Escape cancels.
+fn handle_forfeit_keyboard(
+    mut commands: Commands,
+    keys: Option<Res<ButtonInput<KeyCode>>>,
+    forfeit_screens: Query<Entity, With<ForfeitConfirmScreen>>,
+    pause_screens: Query<Entity, With<PauseScreen>>,
+    paused: ResMut<PausedResource>,
+    forfeit: MessageWriter<ForfeitEvent>,
+) {
+    if forfeit_screens.is_empty() {
+        return;
+    }
+    let Some(keys) = keys else { return };
+    let confirmed = keys.just_pressed(KeyCode::KeyY) || keys.just_pressed(KeyCode::Enter);
+    let cancelled = keys.just_pressed(KeyCode::KeyN) || keys.just_pressed(KeyCode::Escape);
+    if !confirmed && !cancelled {
+        return;
+    }
+    close_forfeit_modal(
+        &mut commands,
+        confirmed,
+        &forfeit_screens,
+        &pause_screens,
+        paused,
+        forfeit,
+    );
+}
+
+/// Common cleanup shared by the click and keyboard close paths.
+///
+/// On `confirm`: despawn both modals, clear the paused flag, and fire
+/// `ForfeitEvent`. On cancel: despawn only the confirm modal so the
+/// pause modal (if any) stays open.
+fn close_forfeit_modal(
+    commands: &mut Commands,
+    confirm: bool,
+    forfeit_screens: &Query<Entity, With<ForfeitConfirmScreen>>,
+    pause_screens: &Query<Entity, With<PauseScreen>>,
+    mut paused: ResMut<PausedResource>,
+    mut forfeit: MessageWriter<ForfeitEvent>,
+) {
+    for entity in forfeit_screens {
+        commands.entity(entity).despawn();
+    }
+    if confirm {
+        for entity in pause_screens {
+            commands.entity(entity).despawn();
+        }
+        paused.0 = false;
+        forfeit.write(ForfeitEvent);
+    }
+}
+
+/// Spawns the pause modal using the standard `ui_modal` scaffold —
+/// uniform scrim, centred card, `Resume` primary + `Forfeit` tertiary
+/// action buttons, plus a Draw Mode toggle row when settings are
+/// installed.
+///
+/// `level` and `streak` are optional snapshots taken at pause time —
+/// rendered as the modal's body line. `draw_mode` is the current draw
+/// mode shown on the toggle button. When the corresponding resources
+/// are absent (e.g. headless tests) the related sections are omitted.
 fn spawn_pause_screen(
     commands: &mut Commands,
     level: Option<u32>,
     streak: Option<u32>,
     draw_mode: Option<DrawMode>,
+    font_res: Option<&FontResource>,
 ) {
-    commands
-        .spawn((
-            PauseScreen,
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Percent(0.0),
-                top: Val::Percent(0.0),
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(8.0),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.82)),
-            ZIndex(220),
-        ))
-        .with_children(|b| {
-            b.spawn((
-                Text::new("Paused"),
-                TextFont {
-                    font_size: 48.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(1.0, 0.87, 0.0)),
-            ));
-            // Level and streak line — only shown when the resources are present.
-            if level.is_some() || streak.is_some() {
-                let info = build_level_streak_line(level, streak);
-                b.spawn((
-                    Text::new(info),
-                    TextFont {
-                        font_size: 22.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.75, 0.95, 0.75)),
-                ));
-            }
-            // Draw-mode toggle row — only shown when SettingsResource is present.
-            if let Some(mode) = draw_mode {
-                b.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(12.0),
-                    ..default()
-                })
-                .with_children(|row| {
-                    row.spawn((
-                        Text::new("Draw Mode:"),
-                        TextFont { font_size: 20.0, ..default() },
-                        TextColor(Color::srgb(0.85, 0.85, 0.80)),
-                    ));
-                    row.spawn((
-                        PauseDrawToggle,
-                        Button,
-                        Node {
-                            padding: UiRect::axes(Val::Px(14.0), Val::Px(6.0)),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.20, 0.30, 0.45)),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new(draw_mode_label(mode)),
-                            TextFont { font_size: 18.0, ..default() },
-                            TextColor(Color::WHITE),
-                        ));
-                    });
-                });
-                b.spawn((
-                    Text::new("Takes effect next game"),
-                    TextFont { font_size: 14.0, ..default() },
-                    TextColor(Color::srgb(0.55, 0.55, 0.60)),
-                ));
-            }
-            b.spawn((
-                Text::new("Press Esc to resume"),
-                TextFont {
-                    font_size: 22.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.85, 0.85, 0.80)),
-            ));
+    spawn_modal(commands, PauseScreen, ui_theme::Z_PAUSE, |card| {
+        spawn_modal_header(card, "Paused", font_res);
+        if level.is_some() || streak.is_some() {
+            let info = build_level_streak_line(level, streak);
+            spawn_modal_body_text(card, info, TEXT_SECONDARY, font_res);
+        }
+        if let Some(mode) = draw_mode {
+            spawn_draw_mode_row(card, mode, font_res);
+        }
+        spawn_modal_actions(card, |actions| {
+            spawn_modal_button(
+                actions,
+                PauseForfeitButton,
+                "Forfeit",
+                Some("G"),
+                ButtonVariant::Tertiary,
+                font_res,
+            );
+            spawn_modal_button(
+                actions,
+                PauseResumeButton,
+                "Resume",
+                Some("Esc"),
+                ButtonVariant::Primary,
+                font_res,
+            );
         });
+    });
+}
+
+/// Inline "Draw Mode  [Draw 1]" row + a caption explaining the change
+/// applies to the next game. Spawned inside the modal body.
+fn spawn_draw_mode_row(
+    parent: &mut ChildSpawnerCommands,
+    mode: DrawMode,
+    font_res: Option<&FontResource>,
+) {
+    let label_font = TextFont {
+        font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: TYPE_BODY_LG,
+        ..default()
+    };
+    let caption_font = TextFont {
+        font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: TYPE_CAPTION,
+        ..default()
+    };
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: VAL_SPACE_3,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                Text::new("Draw Mode"),
+                label_font,
+                TextColor(TEXT_PRIMARY),
+            ));
+            spawn_modal_button(
+                row,
+                PauseDrawToggle,
+                draw_mode_label(mode),
+                None,
+                ButtonVariant::Secondary,
+                font_res,
+            );
+        });
+    parent.spawn((
+        Text::new("Takes effect next game"),
+        caption_font,
+        TextColor(TEXT_SECONDARY),
+    ));
+}
+
+/// Spawns `ForfeitConfirmScreen` — a Cancel / "Yes, forfeit" modal
+/// stacked above the pause modal at `Z_PAUSE_DIALOG`.
+fn spawn_forfeit_confirm_screen(commands: &mut Commands, font_res: Option<&FontResource>) {
+    spawn_modal(
+        commands,
+        ForfeitConfirmScreen,
+        ui_theme::Z_PAUSE_DIALOG,
+        |card| {
+            spawn_modal_header(card, "Forfeit this game?", font_res);
+            spawn_modal_body_text(
+                card,
+                "This will count as a loss and break your win streak.",
+                TEXT_SECONDARY,
+                font_res,
+            );
+            spawn_modal_actions(card, |actions| {
+                spawn_modal_button(
+                    actions,
+                    ForfeitCancelButton,
+                    "Cancel",
+                    Some("Esc"),
+                    ButtonVariant::Secondary,
+                    font_res,
+                );
+                spawn_modal_button(
+                    actions,
+                    ForfeitConfirmButton,
+                    "Yes, forfeit",
+                    Some("Y"),
+                    ButtonVariant::Primary,
+                    font_res,
+                );
+            });
+        },
+    );
 }
 
 /// Formats the level / win-streak summary line for the pause overlay.
@@ -301,6 +530,24 @@ mod tests {
         input.release(KeyCode::Escape);
         input.clear();
         input.press(KeyCode::Escape);
+    }
+
+    fn press_key(app: &mut App, key: KeyCode) {
+        let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        input.release(key);
+        input.clear();
+        input.press(key);
+    }
+
+    /// `MinimalPlugins` does not include the input-plugin tick that
+    /// transitions `just_pressed` → `pressed` between frames, so a key
+    /// press would otherwise stay "just-pressed" forever. Call this
+    /// helper between `app.update()` calls in tests that span multiple
+    /// frames without re-pressing — it mirrors the real input cycle.
+    fn advance_input(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
     }
 
     #[test]
@@ -541,5 +788,290 @@ mod tests {
 
         // Restore default settings state for hygiene.
         let _ = Settings::default();
+    }
+
+    // -----------------------------------------------------------------------
+    // Pause modal exposes Resume + Forfeit buttons
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn pause_modal_has_resume_and_forfeit_buttons() {
+        let mut app = headless_app();
+        press_esc(&mut app);
+        app.update();
+
+        let resume_count = app
+            .world_mut()
+            .query::<&PauseResumeButton>()
+            .iter(app.world())
+            .count();
+        let forfeit_count = app
+            .world_mut()
+            .query::<&PauseForfeitButton>()
+            .iter(app.world())
+            .count();
+        assert_eq!(resume_count, 1, "Resume button must be present on the pause modal");
+        assert_eq!(forfeit_count, 1, "Forfeit button must be present on the pause modal");
+    }
+
+    /// Clicking the Resume button (via Pressed interaction) closes the
+    /// pause modal — same outcome as a second Esc.
+    #[test]
+    fn pause_resume_button_closes_modal() {
+        let mut app = headless_app();
+        press_esc(&mut app);
+        app.update();
+        assert!(app.world().resource::<PausedResource>().0);
+
+        // Mark the Resume button as Pressed.
+        let resume_entity = {
+            let mut q = app.world_mut().query_filtered::<Entity, With<PauseResumeButton>>();
+            q.iter(app.world()).next().expect("Resume button must exist")
+        };
+        app.world_mut()
+            .entity_mut(resume_entity)
+            .insert(Interaction::Pressed);
+
+        // Clear keys so the simulated "click" isn't competing with a real Esc press.
+        app.world_mut().resource_mut::<ButtonInput<KeyCode>>().clear();
+        app.update();
+        // One more frame so the resulting PauseRequestEvent is consumed by toggle_pause.
+        app.update();
+
+        assert!(!app.world().resource::<PausedResource>().0, "Resume must clear PausedResource");
+        assert_eq!(
+            app.world_mut()
+                .query::<&PauseScreen>()
+                .iter(app.world())
+                .count(),
+            0,
+            "Resume must despawn PauseScreen"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Forfeit confirm modal
+    // -----------------------------------------------------------------------
+
+    /// Test app with the resources `handle_forfeit_request` reads.
+    /// Provides a `GameStateResource` with one move so `active_game` is true.
+    fn forfeit_app() -> App {
+        use solitaire_core::game_state::{DrawMode, GameState};
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(PausePlugin);
+        app.init_resource::<ButtonInput<KeyCode>>();
+
+        // Build an "active" game: move_count > 0 and not won.
+        let mut game = GameState::new(1, DrawMode::DrawOne);
+        game.move_count = 1;
+        app.insert_resource(GameStateResource(game));
+        app.update();
+        app
+    }
+
+    #[test]
+    fn forfeit_request_event_spawns_forfeit_confirm_screen() {
+        let mut app = forfeit_app();
+        app.world_mut()
+            .resource_mut::<Messages<ForfeitRequestEvent>>()
+            .write(ForfeitRequestEvent);
+        app.update();
+
+        assert_eq!(
+            app.world_mut()
+                .query::<&ForfeitConfirmScreen>()
+                .iter(app.world())
+                .count(),
+            1,
+            "ForfeitRequestEvent must spawn the forfeit-confirm modal"
+        );
+    }
+
+    #[test]
+    fn forfeit_request_does_not_double_spawn() {
+        let mut app = forfeit_app();
+        app.world_mut()
+            .resource_mut::<Messages<ForfeitRequestEvent>>()
+            .write(ForfeitRequestEvent);
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<ForfeitRequestEvent>>()
+            .write(ForfeitRequestEvent);
+        app.update();
+
+        assert_eq!(
+            app.world_mut()
+                .query::<&ForfeitConfirmScreen>()
+                .iter(app.world())
+                .count(),
+            1,
+            "second ForfeitRequestEvent must not stack a second modal"
+        );
+    }
+
+    #[test]
+    fn forfeit_request_does_nothing_when_no_active_game() {
+        use solitaire_core::game_state::{DrawMode, GameState};
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(PausePlugin);
+        app.init_resource::<ButtonInput<KeyCode>>();
+        // GameState with move_count == 0 — not an active game.
+        app.insert_resource(GameStateResource(GameState::new(1, DrawMode::DrawOne)));
+        app.update();
+
+        app.world_mut()
+            .resource_mut::<Messages<ForfeitRequestEvent>>()
+            .write(ForfeitRequestEvent);
+        app.update();
+
+        assert_eq!(
+            app.world_mut()
+                .query::<&ForfeitConfirmScreen>()
+                .iter(app.world())
+                .count(),
+            0,
+            "ForfeitRequestEvent must be ignored when no game is in progress"
+        );
+    }
+
+    #[test]
+    fn forfeit_confirm_y_key_fires_forfeit_event_and_despawns() {
+        let mut app = forfeit_app();
+        // Open the forfeit confirm modal.
+        app.world_mut()
+            .resource_mut::<Messages<ForfeitRequestEvent>>()
+            .write(ForfeitRequestEvent);
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query::<&ForfeitConfirmScreen>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+
+        // Press Y to confirm.
+        press_key(&mut app, KeyCode::KeyY);
+        app.update();
+
+        // Modal despawned.
+        assert_eq!(
+            app.world_mut()
+                .query::<&ForfeitConfirmScreen>()
+                .iter(app.world())
+                .count(),
+            0,
+            "Y must despawn the forfeit-confirm modal"
+        );
+        // ForfeitEvent fired.
+        let events = app.world().resource::<Messages<ForfeitEvent>>();
+        let mut cursor = events.get_cursor();
+        assert_eq!(
+            cursor.read(events).count(),
+            1,
+            "Y must fire exactly one ForfeitEvent"
+        );
+    }
+
+    #[test]
+    fn forfeit_confirm_n_key_cancels_without_firing_event() {
+        let mut app = forfeit_app();
+        app.world_mut()
+            .resource_mut::<Messages<ForfeitRequestEvent>>()
+            .write(ForfeitRequestEvent);
+        app.update();
+
+        press_key(&mut app, KeyCode::KeyN);
+        app.update();
+
+        assert_eq!(
+            app.world_mut()
+                .query::<&ForfeitConfirmScreen>()
+                .iter(app.world())
+                .count(),
+            0,
+            "N must despawn the forfeit-confirm modal"
+        );
+        let events = app.world().resource::<Messages<ForfeitEvent>>();
+        let mut cursor = events.get_cursor();
+        assert_eq!(
+            cursor.read(events).count(),
+            0,
+            "Cancelling the modal must not fire ForfeitEvent"
+        );
+    }
+
+    #[test]
+    fn forfeit_confirm_esc_cancels_without_toggling_pause() {
+        let mut app = forfeit_app();
+        // Open the forfeit confirm modal directly via G-equivalent event.
+        app.world_mut()
+            .resource_mut::<Messages<ForfeitRequestEvent>>()
+            .write(ForfeitRequestEvent);
+        app.update();
+        // Pause is NOT open at this point.
+        assert!(!app.world().resource::<PausedResource>().0);
+
+        press_esc(&mut app);
+        app.update();
+
+        // Forfeit modal is gone.
+        assert_eq!(
+            app.world_mut()
+                .query::<&ForfeitConfirmScreen>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        // Pause must NOT have toggled on — the Esc was consumed by the
+        // forfeit-confirm handler, and toggle_pause must early-return
+        // when a forfeit modal is visible (the despawn happens in the
+        // same frame, but the early-return guard runs first).
+        assert!(
+            !app.world().resource::<PausedResource>().0,
+            "Esc that closes the forfeit modal must not also open pause"
+        );
+    }
+
+    #[test]
+    fn forfeit_confirm_y_also_closes_pause_modal() {
+        let mut app = forfeit_app();
+        // Open pause first.
+        press_esc(&mut app);
+        app.update();
+        assert!(app.world().resource::<PausedResource>().0);
+        // Cycle input so Esc is no longer treated as `just_pressed` —
+        // otherwise the next update would toggle pause back off and the
+        // freshly-spawned forfeit modal would also be cancelled by the
+        // stale Esc in handle_forfeit_keyboard.
+        advance_input(&mut app);
+        // Open forfeit-confirm on top of pause.
+        app.world_mut()
+            .resource_mut::<Messages<ForfeitRequestEvent>>()
+            .write(ForfeitRequestEvent);
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query::<&ForfeitConfirmScreen>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+
+        press_key(&mut app, KeyCode::KeyY);
+        app.update();
+
+        assert_eq!(
+            app.world_mut()
+                .query::<&PauseScreen>()
+                .iter(app.world())
+                .count(),
+            0,
+            "confirming forfeit must also despawn the pause modal"
+        );
+        assert!(
+            !app.world().resource::<PausedResource>().0,
+            "PausedResource must be cleared when a forfeit is confirmed"
+        );
     }
 }

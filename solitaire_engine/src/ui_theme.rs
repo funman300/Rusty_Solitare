@@ -182,6 +182,10 @@ pub const Z_MODAL_SCRIM: i32 = 200;
 pub const Z_MODAL_PANEL: i32 = 210;
 /// Pause overlay outranks normal modals — pausing should always be on top.
 pub const Z_PAUSE: i32 = 220;
+/// Confirmation dialog stacked on top of the pause overlay (e.g. the
+/// forfeit-confirm modal launched from the pause modal). Sits above
+/// `Z_PAUSE` so the dialog is always visible over the paused state.
+pub const Z_PAUSE_DIALOG: i32 = 225;
 pub const Z_ONBOARDING: i32 = 230;
 /// Win cascade sits between modals and toasts so the celebration plays
 /// over a paused / mid-modal screen.
@@ -325,6 +329,7 @@ mod tests {
             Z_MODAL_SCRIM,
             Z_MODAL_PANEL,
             Z_PAUSE,
+            Z_PAUSE_DIALOG,
             Z_ONBOARDING,
             Z_WIN_CASCADE,
             Z_TOAST,

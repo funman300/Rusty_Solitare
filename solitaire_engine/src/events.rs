@@ -189,6 +189,15 @@ pub struct XpAwardedEvent {
 #[derive(Message, Debug, Clone, Copy, Default)]
 pub struct ForfeitEvent;
 
+/// Request to open the forfeit-confirm modal. Fired by the `G` accelerator
+/// and by the Pause modal's "Forfeit" button so the same modal opens
+/// either way. Consumed by `PausePlugin`, which spawns
+/// `ForfeitConfirmScreen` after checking that a game is in progress and
+/// no forfeit modal is already showing. Confirmation inside that modal
+/// then fires `ForfeitEvent` for `StatsPlugin` to consume.
+#[derive(Message, Debug, Clone, Copy, Default)]
+pub struct ForfeitRequestEvent;
+
 /// Fired when the player requests a hint (H key). Carries the source card ID
 /// and destination pile for visual highlighting.
 ///

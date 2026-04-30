@@ -35,7 +35,7 @@ use crate::feedback_anim_plugin::ShakeAnim;
 use solitaire_core::game_state::DrawMode;
 use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
 use crate::events::{
-    DrawRequestEvent, ForfeitEvent, HintVisualEvent, InfoToastEvent, MoveRejectedEvent,
+    DrawRequestEvent, ForfeitRequestEvent, HintVisualEvent, InfoToastEvent, MoveRejectedEvent,
     MoveRequestEvent, NewGameConfirmEvent, NewGameRequestEvent, StartZenRequestEvent,
     StateChangedEvent, UndoRequestEvent,
 };
@@ -50,18 +50,20 @@ use crate::time_attack_plugin::TimeAttackResource;
 /// Z-depth used for cards while being dragged — above all resting cards.
 const DRAG_Z: f32 = 500.0;
 
-/// Shared countdown timers for the double-press confirmation flows.
+/// Shared countdown state for the new-game double-press confirmation
+/// flow.
 ///
-/// Using a resource (instead of `Local`) lets the three keyboard sub-systems
-/// share the same countdown state without needing to pass values between them.
+/// Using a resource (instead of `Local`) lets the keyboard sub-systems
+/// share the same countdown state without needing to pass values
+/// between them. Forfeit no longer has a keyboard countdown — `G` now
+/// fires `ForfeitRequestEvent` and `PausePlugin` shows a real
+/// `ForfeitConfirmScreen` modal.
 #[derive(Resource, Debug, Default)]
 struct KeyboardConfirmState {
     /// Seconds remaining in the new-game confirmation window (> 0 while open).
     new_game_countdown: f32,
     /// True while we are waiting for the second N press to confirm a new game.
     new_game_pending: bool,
-    /// Seconds remaining in the forfeit confirmation window (> 0 while open).
-    forfeit_countdown: f32,
 }
 
 /// Registers keyboard, mouse, and touch input systems.
@@ -87,7 +89,7 @@ impl Plugin for InputPlugin {
             .add_message::<NewGameConfirmEvent>()
             .add_message::<StartZenRequestEvent>()
             .add_message::<InfoToastEvent>()
-            .add_message::<ForfeitEvent>()
+            .add_message::<ForfeitRequestEvent>()
             .add_message::<HintVisualEvent>()
             .add_systems(
                 Update,
@@ -117,9 +119,6 @@ impl Plugin for InputPlugin {
 /// Seconds after the first N press during which a second N confirms new game.
 const NEW_GAME_CONFIRM_WINDOW: f32 = 3.0;
 
-/// Seconds after the first G press during which a second G confirms forfeit.
-const FORFEIT_CONFIRM_WINDOW: f32 = 3.0;
-
 /// Bundles the event writers needed by the core keyboard handler.
 ///
 /// Keeping these in a [`SystemParam`] avoids hitting Bevy's 16-parameter limit.
@@ -135,9 +134,6 @@ struct CoreKeyboardMessages<'w> {
 /// Handles the core keyboard shortcuts: U (undo), N (new game + confirmation
 /// window), Z (zen mode), D / Space (draw), and ticks down the new-game
 /// confirmation countdown each frame.
-///
-/// Also resets `forfeit_countdown` whenever U, D, Z, or N are pressed so that
-/// an in-flight forfeit confirmation is cancelled by any other action.
 #[allow(clippy::too_many_arguments)]
 fn handle_keyboard_core(
     keys: Res<ButtonInput<KeyCode>>,
@@ -168,15 +164,10 @@ fn handle_keyboard_core(
     }
 
     if keys.just_pressed(KeyCode::KeyU) {
-        // Cancel any pending forfeit when the player takes another action.
-        confirm.forfeit_countdown = 0.0;
         ev.undo.write(UndoRequestEvent);
     }
 
     if keys.just_pressed(KeyCode::KeyN) {
-        // Cancel any pending forfeit when the player takes another action.
-        confirm.forfeit_countdown = 0.0;
-
         // If a Time Attack session is running, cancel it and start a Classic game.
         if let Some(ref mut session) = time_attack
             && session.active {
@@ -214,8 +205,6 @@ fn handle_keyboard_core(
 
     let zen_clicked = zen_requests.read().count() > 0;
     if keys.just_pressed(KeyCode::KeyZ) || zen_clicked {
-        // Cancel any pending forfeit when the player takes another action.
-        confirm.forfeit_countdown = 0.0;
         // Zen / Challenge / Time Attack are gated to level >= CHALLENGE_UNLOCK_LEVEL.
         // X is gated separately by ChallengePlugin. Either Z or the HUD
         // Modes-popover "Zen" row reaches this branch.
@@ -238,16 +227,13 @@ fn handle_keyboard_core(
     let space_draws = keys.just_pressed(KeyCode::Space)
         && selection.as_ref().is_none_or(|s| s.selected_pile.is_none());
     if keys.just_pressed(KeyCode::KeyD) || space_draws {
-        // Cancel any pending forfeit when the player takes another action.
-        confirm.forfeit_countdown = 0.0;
         ev.draw.write(DrawRequestEvent);
     }
     // Esc is handled by `PausePlugin` (overlay toggle + paused flag).
 }
 
 /// Handles the H key: cycles through all available hints, highlighting the
-/// source card yellow for 2 s and showing a descriptive toast. Resets the
-/// forfeit countdown on each press.
+/// source card yellow for 2 s and showing a descriptive toast.
 ///
 /// The hint index wraps around once all hints have been cycled through. When no
 /// moves are available a "No hints available" toast is shown instead.
@@ -257,7 +243,6 @@ fn handle_keyboard_hint(
     paused: Option<Res<PausedResource>>,
     game: Option<Res<GameStateResource>>,
     layout: Option<Res<LayoutResource>>,
-    mut confirm: ResMut<KeyboardConfirmState>,
     mut hint_cycle: ResMut<HintCycleIndex>,
     mut commands: Commands,
     mut card_entities: Query<(Entity, &CardEntity, &mut Sprite)>,
@@ -270,9 +255,6 @@ fn handle_keyboard_hint(
     if !keys.just_pressed(KeyCode::KeyH) {
         return;
     }
-
-    // H cancels any in-flight forfeit confirmation.
-    confirm.forfeit_countdown = 0.0;
 
     let Some(ref g) = game else { return };
 
@@ -353,52 +335,30 @@ fn handle_keyboard_hint(
     info_toast.write(InfoToastEvent(msg));
 }
 
-/// Handles the G key: forfeit the current game with a 3-second double-confirm
-/// window to prevent accidental forfeits.
+/// Handles the G key: fires `ForfeitRequestEvent` so `PausePlugin`
+/// can spawn the `ForfeitConfirmScreen` modal.
 ///
-/// First press shows a toast and starts the countdown.
-/// Second press **within the window** sends [`ForfeitEvent`].
-/// Pressing any other key between presses cancels the countdown
-/// (handled by [`handle_keyboard_core`]).
+/// Replaces a prior double-press toast countdown with a real
+/// Cancel / Yes-forfeit modal — the same code path the Pause modal's
+/// Forfeit button takes. Bails when no game is in progress so the
+/// hotkey is a no-op on the home screen / game-over screen.
 fn handle_keyboard_forfeit(
     keys: Res<ButtonInput<KeyCode>>,
     paused: Option<Res<PausedResource>>,
-    time: Res<Time>,
     game: Option<Res<GameStateResource>>,
-    mut confirm: ResMut<KeyboardConfirmState>,
-    mut forfeit: MessageWriter<ForfeitEvent>,
-    mut info_toast: MessageWriter<InfoToastEvent>,
+    mut requests: MessageWriter<ForfeitRequestEvent>,
 ) {
     if paused.is_some_and(|p| p.0) {
         return;
     }
-
-    // Tick down the forfeit confirmation window each frame.
-    if confirm.forfeit_countdown > 0.0 {
-        confirm.forfeit_countdown -= time.delta_secs();
-        if confirm.forfeit_countdown <= 0.0 {
-            confirm.forfeit_countdown = 0.0;
-        }
-    }
-
     if !keys.just_pressed(KeyCode::KeyG) {
         return;
     }
-
     let active_game = game.as_ref().is_some_and(|g| g.0.move_count > 0 && !g.0.is_won);
     if !active_game {
         return;
     }
-
-    if confirm.forfeit_countdown > 0.0 {
-        // Second press within the confirmation window — confirmed.
-        forfeit.write(ForfeitEvent);
-        confirm.forfeit_countdown = 0.0;
-    } else {
-        // First press — start the countdown and warn the player.
-        confirm.forfeit_countdown = FORFEIT_CONFIRM_WINDOW;
-        info_toast.write(InfoToastEvent("Press G again to forfeit".to_string()));
-    }
+    requests.write(ForfeitRequestEvent);
 }
 
 /// Resets [`HintCycleIndex`] to `0` whenever the game state changes or a new
@@ -1843,138 +1803,26 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Task #54 — forfeit double-confirm logic pure-function tests
+    // G key fires ForfeitRequestEvent (modal-based forfeit flow)
     // -----------------------------------------------------------------------
 
-    /// Verify the FORFEIT_CONFIRM_WINDOW constant is positive so the countdown
-    /// window actually opens on the first G press.
+    /// Pure-function check on the active-game predicate that gates the
+    /// G hotkey: a game must have at least one move and not be won
+    /// before forfeit is meaningful.
     #[test]
-    fn forfeit_confirm_window_is_positive() {
-        const { assert!(FORFEIT_CONFIRM_WINDOW > 0.0, "FORFEIT_CONFIRM_WINDOW must be > 0"); }
-    }
-
-    /// Simulate the first G press: countdown was 0, so it should become
-    /// FORFEIT_CONFIRM_WINDOW and no ForfeitEvent should be "sent" yet.
-    #[test]
-    fn forfeit_first_press_opens_countdown() {
-        // Simulate: forfeit_countdown starts at 0 (no pending confirmation).
-        let mut forfeit_countdown: f32 = 0.0;
-        let active_game = true;
-
-        // --- first G press logic (mirrors handle_keyboard) ---
-        let forfeit_sent = if active_game {
-            if forfeit_countdown > 0.0 {
-                // Second press — would send ForfeitEvent.
-                forfeit_countdown = 0.0;
-                true
-            } else {
-                // First press — open window, send toast (not ForfeitEvent).
-                forfeit_countdown = FORFEIT_CONFIRM_WINDOW;
-                false
-            }
-        } else {
-            false
-        };
-
-        assert!(!forfeit_sent, "ForfeitEvent must NOT fire on first G press");
-        assert_eq!(
-            forfeit_countdown, FORFEIT_CONFIRM_WINDOW,
-            "countdown must be opened to FORFEIT_CONFIRM_WINDOW after first press"
-        );
-    }
-
-    /// Simulate the second G press within the window: countdown > 0, so
-    /// ForfeitEvent should fire and countdown resets to 0.
-    #[test]
-    fn forfeit_second_press_within_window_sends_event() {
-        // Countdown is open from the first press.
-        let mut forfeit_countdown: f32 = FORFEIT_CONFIRM_WINDOW - 1.0; // still in window
-        let active_game = true;
-
-        // --- second G press logic ---
-        let forfeit_sent = if active_game {
-            if forfeit_countdown > 0.0 {
-                forfeit_countdown = 0.0;
-                true
-            } else {
-                forfeit_countdown = FORFEIT_CONFIRM_WINDOW;
-                false
-            }
-        } else {
-            false
-        };
-
-        assert!(forfeit_sent, "ForfeitEvent MUST fire on second G press within window");
-        assert_eq!(forfeit_countdown, 0.0, "countdown must reset to 0 after confirmation");
-    }
-
-    /// Simulate G press after the countdown has expired: countdown ticked to 0,
-    /// so the next G press opens a fresh window (no ForfeitEvent).
-    #[test]
-    fn forfeit_press_after_countdown_expired_reopens_window() {
-        // Countdown already expired.
-        let mut forfeit_countdown: f32 = 0.0;
-        let active_game = true;
-
-        let forfeit_sent = if active_game {
-            if forfeit_countdown > 0.0 {
-                forfeit_countdown = 0.0;
-                true
-            } else {
-                forfeit_countdown = FORFEIT_CONFIRM_WINDOW;
-                false
-            }
-        } else {
-            false
-        };
-
-        assert!(!forfeit_sent, "ForfeitEvent must NOT fire when countdown expired before second press");
-        assert_eq!(
-            forfeit_countdown, FORFEIT_CONFIRM_WINDOW,
-            "a new confirmation window must open"
-        );
-    }
-
-    /// Pressing any other key (e.g. U for undo) while the forfeit countdown is
-    /// active must immediately cancel it (reset to 0.0).
-    #[test]
-    fn forfeit_cancelled_by_other_key_press() {
-        // Countdown is open from the first G press.
-        let mut forfeit_countdown: f32 = FORFEIT_CONFIRM_WINDOW - 0.5; // still in window
-
-        // --- simulate U (undo) press: cancel countdown ---
-        if forfeit_countdown > 0.0 {
-            forfeit_countdown = 0.0;
+    fn g_key_active_game_predicate_requires_move_and_unwon() {
+        fn is_active(game: &GameState) -> bool {
+            game.move_count > 0 && !game.is_won
         }
-        // Then perform undo logic (omitted here as it requires Bevy infrastructure).
-
-        assert_eq!(
-            forfeit_countdown, 0.0,
-            "forfeit countdown must be reset to 0.0 when another key is pressed"
-        );
-    }
-
-    /// G press when no game is active must never fire ForfeitEvent and must
-    /// not open a countdown.
-    #[test]
-    fn forfeit_no_active_game_does_nothing() {
-        let mut forfeit_countdown: f32 = 0.0;
-        let active_game = false;
-
-        let forfeit_sent = if active_game {
-            if forfeit_countdown > 0.0 {
-                forfeit_countdown = 0.0;
-                true
-            } else {
-                forfeit_countdown = FORFEIT_CONFIRM_WINDOW;
-                false
-            }
-        } else {
-            false
-        };
-
-        assert!(!forfeit_sent, "ForfeitEvent must not fire when no game is active");
-        assert_eq!(forfeit_countdown, 0.0, "countdown must remain 0 when no game is active");
+        let mut game = GameState::new(1, DrawMode::DrawOne);
+        // Fresh deal: move_count == 0 → not active.
+        assert!(!is_active(&game));
+        // Mid-game: move_count > 0, not won → active.
+        game.move_count = 1;
+        assert!(is_active(&game));
+        // Won game: not active even with moves on the clock.
+        game.is_won = true;
+        assert!(!is_active(&game));
     }
 
     // -----------------------------------------------------------------------
