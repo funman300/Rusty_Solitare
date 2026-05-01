@@ -16,9 +16,10 @@ use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
 use crate::daily_challenge_plugin::DailyChallengeResource;
 use crate::progress_plugin::ProgressResource;
 use crate::settings_plugin::SettingsResource;
+use crate::layout::HUD_BAND_HEIGHT;
 use crate::ui_theme::{
     scaled_duration, ACCENT_PRIMARY, ACCENT_SECONDARY, BG_ELEVATED, BG_ELEVATED_HI,
-    BG_ELEVATED_PRESSED, BORDER_SUBTLE, MOTION_SCORE_PULSE_SECS, RADIUS_MD, RADIUS_SM,
+    BG_ELEVATED_PRESSED, BG_HUD_BAND, BORDER_SUBTLE, MOTION_SCORE_PULSE_SECS, RADIUS_MD, RADIUS_SM,
     STATE_DANGER, STATE_INFO, STATE_SUCCESS, STATE_WARNING, TEXT_PRIMARY, TEXT_SECONDARY,
     TYPE_BODY, TYPE_BODY_LG, TYPE_CAPTION, TYPE_HEADLINE, VAL_SPACE_1, VAL_SPACE_2, VAL_SPACE_3,
 };
@@ -251,7 +252,7 @@ impl Plugin for HudPlugin {
             .add_message::<ToggleSettingsRequestEvent>()
             .add_message::<ToggleLeaderboardRequestEvent>()
             .init_resource::<PreviousScore>()
-            .add_systems(Startup, (spawn_hud, spawn_action_buttons))
+            .add_systems(Startup, (spawn_hud_band, spawn_hud, spawn_action_buttons))
             .add_systems(Update, update_hud.after(GameMutation))
             .add_systems(Update, announce_auto_complete.after(GameMutation))
             .add_systems(Update, update_selection_hud)
@@ -280,6 +281,34 @@ impl Plugin for HudPlugin {
                 ),
             );
     }
+}
+
+/// Spawns the translucent HUD band that anchors the action buttons
+/// and primary readouts visually. Sits behind every other HUD element
+/// (one z-rung below `Z_HUD`) so it reads as the band's "container"
+/// without intercepting clicks from the buttons it sits under.
+///
+/// Width is full-window, height matches `layout::HUD_BAND_HEIGHT` (the
+/// same constant the card layout reserves at the top), so the band's
+/// bottom edge lines up exactly with the top edge of the highest
+/// playable card. The fill is `BG_HUD_BAND` — midnight purple at 0.70
+/// alpha, so the green felt reads through subtly.
+fn spawn_hud_band(mut commands: Commands) {
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(0.0),
+            left: Val::Px(0.0),
+            width: Val::Percent(100.0),
+            height: Val::Px(HUD_BAND_HEIGHT),
+            ..default()
+        },
+        BackgroundColor(BG_HUD_BAND),
+        // Sit one z-rung below the HUD content so the buttons and text
+        // paint on top, but above the card sprites (which are 2D-world
+        // entities and rendered behind UI regardless).
+        ZIndex(Z_HUD - 1),
+    ));
 }
 
 /// Spawns the in-game HUD as a 4-tier vertical column anchored to the

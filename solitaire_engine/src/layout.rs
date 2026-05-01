@@ -43,6 +43,15 @@ const TABLEAU_FAN_FRAC: f32 = 0.25;
 /// this column inside the visible window.
 const MAX_TABLEAU_CARDS: f32 = 13.0;
 
+/// Vertical pixel band reserved at the top of the play area for the HUD
+/// (action buttons, Score / Moves / Timer readouts). The card grid starts
+/// below this band so the HUD doesn't bleed into the play surface.
+///
+/// 64 px comfortably fits the action button bar (~32 px tall) plus the
+/// Score/Moves text line plus padding, with a few pixels of breathing room.
+/// The matching translucent background is painted by `hud_plugin::spawn_hud_band`.
+pub const HUD_BAND_HEIGHT: f32 = 64.0;
+
 /// Table background colour (dark green felt).
 pub const TABLE_COLOUR: [f32; 3] = [0.059, 0.322, 0.196];
 
@@ -88,8 +97,8 @@ pub fn compute_layout(window: Vec2) -> Layout {
     //
     // Letting w = card_width and h = w * CARD_ASPECT, the vertical layout is:
     //   top edge of window     = +window.y / 2
-    //   top of top-row card    = window.y/2 - h_gap                       (h_gap top margin)
-    //   centre of top-row card = window.y/2 - h_gap - h/2
+    //   top of top-row card    = window.y/2 - HUD_BAND_HEIGHT - h_gap     (HUD reserve + h_gap top margin)
+    //   centre of top-row card = window.y/2 - HUD_BAND_HEIGHT - h_gap - h/2
     //   centre of tableau card = top centre - h - vertical_gap            (vertical_gap = VERTICAL_GAP_FRAC * h)
     //   bottom of last fanned  = tableau_centre + h/2 - fan_factor * h
     //                           where fan_factor = 1 + (MAX_TABLEAU_CARDS - 1) * TABLEAU_FAN_FRAC
@@ -97,10 +106,10 @@ pub fn compute_layout(window: Vec2) -> Layout {
     //
     // Substituting h_gap = w/4 and h = CARD_ASPECT * w and solving for the
     // largest w that fits gives:
-    //   window.y = w * (0.5 + (1 + fan_factor + VERTICAL_GAP_FRAC) * CARD_ASPECT)
+    //   (window.y - HUD_BAND_HEIGHT) = w * (0.5 + (1 + fan_factor + VERTICAL_GAP_FRAC) * CARD_ASPECT)
     let fan_factor = 1.0 + (MAX_TABLEAU_CARDS - 1.0) * TABLEAU_FAN_FRAC;
     let height_denom = 0.5 + (1.0 + fan_factor + VERTICAL_GAP_FRAC) * CARD_ASPECT;
-    let card_width_height_based = window.y / height_denom;
+    let card_width_height_based = (window.y - HUD_BAND_HEIGHT).max(0.0) / height_denom;
 
     let card_width = card_width_width_based.min(card_width_height_based);
     let card_height = card_width * CARD_ASPECT;
@@ -120,7 +129,7 @@ pub fn compute_layout(window: Vec2) -> Layout {
     };
 
     let vertical_gap = card_height * VERTICAL_GAP_FRAC;
-    let top_y = window.y / 2.0 - h_gap - card_height / 2.0;
+    let top_y = window.y / 2.0 - HUD_BAND_HEIGHT - h_gap - card_height / 2.0;
     let tableau_y = top_y - card_height - vertical_gap;
 
     let mut pile_positions: HashMap<PileType, Vec2> = HashMap::with_capacity(13);
@@ -215,6 +224,23 @@ mod tests {
         let stock_y = layout.pile_positions[&PileType::Stock].y;
         let tableau_y = layout.pile_positions[&PileType::Tableau(0)].y;
         assert!(stock_y > tableau_y);
+    }
+
+    /// HUD band reservation: the top edge of every top-row card must sit
+    /// at least `HUD_BAND_HEIGHT` pixels below the top of the window so
+    /// the action button bar / score readout has its own visual band
+    /// instead of bleeding into the play surface.
+    #[test]
+    fn top_row_clears_hud_band() {
+        let window = Vec2::new(1280.0, 800.0);
+        let layout = compute_layout(window);
+        let stock_y = layout.pile_positions[&PileType::Stock].y;
+        let card_top = stock_y + layout.card_size.y / 2.0;
+        let band_bottom = window.y / 2.0 - HUD_BAND_HEIGHT;
+        assert!(
+            card_top <= band_bottom,
+            "top of stock card ({card_top}) must sit below the HUD band ({band_bottom})",
+        );
     }
 
     #[test]

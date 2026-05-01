@@ -48,6 +48,13 @@ pub const BG_ELEVATED_PRESSED: Color = Color::srgb(0.149, 0.082, 0.357);
 /// them. `rgba(13, 7, 28, 0.85)`.
 pub const SCRIM: Color = Color::srgba(0.051, 0.027, 0.110, 0.85);
 
+/// Translucent fill for the top-of-window HUD band painted by
+/// `hud_plugin::spawn_hud_band`. Same midnight-purple hue as `BG_BASE`,
+/// but at 0.70 alpha so the green felt reads through subtly — enough
+/// to mark the band as "UI" without feeling like a hard chrome strip.
+/// `rgba(26, 15, 46, 0.70)`.
+pub const BG_HUD_BAND: Color = Color::srgba(0.102, 0.059, 0.180, 0.70);
+
 /// Primary text — warm off-white with a hint of purple to fit the
 /// midnight palette without feeling clinical. `#F5F0FF`.
 pub const TEXT_PRIMARY: Color = Color::srgb(0.961, 0.941, 1.000);
