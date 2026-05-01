@@ -12,6 +12,7 @@
 //! handles directly on card entities, so a theme switch propagates on
 //! the next frame without re-spawning anything.
 
+pub mod importer;
 pub mod loader;
 pub mod manifest;
 
@@ -25,6 +26,7 @@ use thiserror::Error;
 
 use solitaire_core::card::{Rank, Suit};
 
+pub use importer::{import_theme, import_theme_into, ImportError, ThemeId};
 pub use loader::{CardThemeLoader, CardThemeLoaderError};
 pub use manifest::ThemeManifest;
 

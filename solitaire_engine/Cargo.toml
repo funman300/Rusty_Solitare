@@ -20,6 +20,8 @@ resvg          = { workspace = true }
 tiny-skia      = { workspace = true }
 ron            = { workspace = true }
 dirs           = { workspace = true }
+zip            = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
+tempfile    = { workspace = true }

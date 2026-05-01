@@ -50,6 +50,18 @@ tiny-skia = "0.12"
 # preserving Rust-style structures the importer can validate.
 ron = "0.12"
 
+# Importer-only: reads user-supplied theme zip archives, validates
+# their contents, and unpacks them into the user themes directory.
+# Default features are disabled to keep the dependency footprint small;
+# only `deflate` is needed because the importer rejects other
+# compression methods anyway (see Phase 7 spec).
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
+
+# Importer-only test dependency: tests build zip archives in a
+# scratch directory so they don't pollute the real user themes path
+# on the developer's machine.
+tempfile = "3.27"
+
 axum               = "0.8"
 sqlx               = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "macros", "migrate"] }
 jsonwebtoken       = { version = "10", default-features = false, features = ["rust_crypto"] }
