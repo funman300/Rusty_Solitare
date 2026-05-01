@@ -35,9 +35,9 @@ pub enum CardThemeLoaderError {
     Parse(#[from] ron::error::SpannedError),
     #[error("manifest validation: {0}")]
     Validation(#[from] ManifestError),
-    /// `AssetPath::resolve` rejected a manifest-relative path. Almost
-    /// always means the manifest contains an absolute path or a
-    /// surface that includes a custom asset source the manifest
+    /// `AssetPath::resolve_embed` rejected a manifest-relative path.
+    /// Almost always means the manifest contains an absolute path or
+    /// a surface that includes a custom asset source the manifest
     /// shouldn't be reaching across.
     #[error("could not resolve asset path: {0}")]
     PathResolve(#[from] ParseAssetPathError),
@@ -73,12 +73,18 @@ impl AssetLoader for CardThemeLoader {
         // it via `.loader()`.
         let manifest_path: AssetPath<'static> = load_context.path().clone();
 
-        let back_path = manifest_path.resolve(&path_to_str(&manifest.back))?;
+        // `resolve_embed` is the RFC 1808 sibling-resolution method:
+        // the last segment of the base path (the manifest filename) is
+        // stripped before concatenation, so `themes/foo/theme.ron` +
+        // `hearts_4.svg` resolves to `themes/foo/hearts_4.svg`. Plain
+        // `resolve` would concatenate, giving `themes/foo/theme.ron/hearts_4.svg`,
+        // which is never what manifest-relative references mean.
+        let back_path = manifest_path.resolve_embed(&path_to_str(&manifest.back))?;
         let face_full: Vec<(CardKey, AssetPath<'static>)> = face_paths
             .iter()
             .map(|(k, p)| {
                 manifest_path
-                    .resolve(&path_to_str(p))
+                    .resolve_embed(&path_to_str(p))
                     .map(|ap| (*k, ap))
             })
             .collect::<Result<_, _>>()?;
