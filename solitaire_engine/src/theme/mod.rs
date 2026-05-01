@@ -15,6 +15,7 @@
 pub mod importer;
 pub mod loader;
 pub mod manifest;
+pub mod plugin;
 
 use std::collections::HashMap;
 
@@ -29,6 +30,7 @@ use solitaire_core::card::{Rank, Suit};
 pub use importer::{import_theme, import_theme_into, ImportError, ThemeId};
 pub use loader::{CardThemeLoader, CardThemeLoaderError};
 pub use manifest::ThemeManifest;
+pub use plugin::{set_theme, ActiveTheme, ThemePlugin};
 
 /// Hashable lookup key into [`CardTheme::faces`].
 ///
