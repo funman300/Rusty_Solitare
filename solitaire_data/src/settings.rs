@@ -61,6 +61,25 @@ pub enum SyncBackend {
 
 }
 
+/// Persisted window size (in logical pixels) and screen position
+/// (top-left corner, in physical pixels) — restored on next launch.
+///
+/// Stored inside [`Settings::window_geometry`]. `None` on `Settings`
+/// means "use platform defaults"; a populated value is written every
+/// time the player resizes or moves the window so the next launch
+/// reopens at the same geometry.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct WindowGeometry {
+    /// Logical width of the window in pixels.
+    pub width: u32,
+    /// Logical height of the window in pixels.
+    pub height: u32,
+    /// X coordinate of the window's top-left corner, in physical pixels.
+    pub x: i32,
+    /// Y coordinate of the window's top-left corner, in physical pixels.
+    pub y: i32,
+}
+
 /// Persistent user settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
@@ -98,6 +117,13 @@ pub struct Settings {
     /// solely on colour.
     #[serde(default)]
     pub color_blind_mode: bool,
+    /// Window size and screen position to restore on next launch. `None`
+    /// means "use platform defaults" — set on first run, then populated
+    /// as the player resizes / moves the window. Older `settings.json`
+    /// files written before this field existed deserialize cleanly to
+    /// `None` thanks to `#[serde(default)]`.
+    #[serde(default)]
+    pub window_geometry: Option<WindowGeometry>,
 }
 
 fn default_draw_mode() -> DrawMode {
@@ -125,6 +151,7 @@ impl Default for Settings {
             selected_background: 0,
             first_run_complete: false,
             color_blind_mode: false,
+            window_geometry: None,
         }
     }
 }
@@ -276,6 +303,7 @@ mod tests {
             selected_background: 0,
             first_run_complete: true,
             color_blind_mode: false,
+            window_geometry: None,
         };
         save_settings_to(&path, &s).expect("save");
         let loaded = load_settings_from(&path);
@@ -405,5 +433,63 @@ mod tests {
         let loaded = load_settings_from(&path);
         assert_eq!(loaded.selected_background, 3, "selected_background must survive serde round-trip");
         let _ = fs::remove_file(&path);
+    }
+
+    // -----------------------------------------------------------------------
+    // window_geometry — persisted window size/position
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn settings_window_geometry_default_is_none() {
+        assert!(
+            Settings::default().window_geometry.is_none(),
+            "default window_geometry must be None so first launch uses platform defaults"
+        );
+    }
+
+    #[test]
+    fn settings_with_window_geometry_round_trip() {
+        let path = tmp_path("window_geometry_round_trip");
+        let _ = fs::remove_file(&path);
+        let geom = WindowGeometry {
+            width: 1440,
+            height: 900,
+            x: 120,
+            y: 80,
+        };
+        let s = Settings {
+            window_geometry: Some(geom),
+            ..Settings::default()
+        };
+        save_settings_to(&path, &s).expect("save");
+        let loaded = load_settings_from(&path);
+        assert_eq!(
+            loaded.window_geometry,
+            Some(geom),
+            "window_geometry must survive serde round-trip"
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn legacy_settings_without_window_geometry_deserializes_to_none() {
+        // A settings.json written by an older version of the game will be
+        // missing this field entirely. `#[serde(default)]` on the field
+        // must yield `None` rather than failing the whole deserialise.
+        let json = br#"{ "sfx_volume": 0.7, "first_run_complete": true }"#;
+        let s: Settings = serde_json::from_slice(json).unwrap_or_default();
+        assert!(
+            s.window_geometry.is_none(),
+            "legacy settings.json missing window_geometry must deserialize to None"
+        );
+    }
+
+    #[test]
+    fn window_geometry_explicit_null_deserializes_to_none() {
+        // An explicit `"window_geometry": null` is also valid input that
+        // must yield None — keeps tooling that hand-edits the file safe.
+        let json = br#"{ "window_geometry": null }"#;
+        let s: Settings = serde_json::from_slice(json).unwrap_or_default();
+        assert!(s.window_geometry.is_none());
     }
 }

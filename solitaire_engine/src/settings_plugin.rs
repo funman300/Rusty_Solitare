@@ -14,8 +14,12 @@ use std::path::PathBuf;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy::ui::{ComputedNode, UiGlobalTransform};
+use bevy::window::{WindowMoved, WindowResized};
 use solitaire_core::game_state::DrawMode;
-use solitaire_data::{load_settings_from, save_settings_to, settings_file_path, settings::Theme, AnimSpeed, Settings};
+use solitaire_data::{
+    load_settings_from, save_settings_to, settings_file_path, settings::Theme, AnimSpeed, Settings,
+    WindowGeometry,
+};
 
 use crate::events::{ManualSyncRequestEvent, ToggleSettingsRequestEvent};
 use crate::font_plugin::FontResource;
@@ -55,6 +59,24 @@ pub struct SettingsStoragePath(pub Option<PathBuf>);
 /// Whether the Settings panel is currently visible. Toggle with `O`.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SettingsScreen(pub bool);
+
+/// Debounce window for persisting window-geometry changes, in seconds.
+///
+/// `WindowResized` and `WindowMoved` fire continuously during a resize/
+/// move drag, so writing to disk on every event would thrash the file
+/// system. Instead the geometry-watch system records the pending value
+/// and waits this long after the *last* event before saving.
+pub const WINDOW_GEOMETRY_DEBOUNCE_SECS: f32 = 0.5;
+
+/// Tracks a pending window-geometry change so the saver can debounce
+/// `WindowResized` / `WindowMoved` storms during a resize / move drag.
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct PendingWindowGeometry {
+    /// Most recent observed geometry. `None` when nothing is pending.
+    pub geometry: Option<WindowGeometry>,
+    /// `Time::elapsed_secs()` value at which `geometry` was last updated.
+    pub last_changed_secs: f32,
+}
 
 /// Fired whenever settings change so consumers (audio, UI) can react.
 #[derive(Message, Debug, Clone)]
@@ -198,11 +220,27 @@ impl Plugin for SettingsPlugin {
             .insert_resource(SettingsStoragePath(self.storage_path.clone()))
             .init_resource::<SettingsScreen>()
             .init_resource::<SettingsScrollPos>()
+            .init_resource::<PendingWindowGeometry>()
             .add_message::<SettingsChangedEvent>()
             .add_message::<ManualSyncRequestEvent>()
             .add_message::<ToggleSettingsRequestEvent>()
             .add_message::<bevy::input::mouse::MouseWheel>()
-            .add_systems(Update, (handle_volume_keys, toggle_settings_screen, scroll_settings_panel));
+            // `WindowResized` / `WindowMoved` are real Bevy window events
+            // and emitted by the windowing backend under `DefaultPlugins`,
+            // but we register them explicitly here so the geometry watcher
+            // also runs cleanly under `MinimalPlugins` (tests).
+            .add_message::<WindowResized>()
+            .add_message::<WindowMoved>()
+            .add_systems(
+                Update,
+                (
+                    handle_volume_keys,
+                    toggle_settings_screen,
+                    scroll_settings_panel,
+                    record_window_geometry_changes,
+                    persist_window_geometry_after_debounce,
+                ),
+            );
 
         if self.ui_enabled {
             app.add_systems(
@@ -232,6 +270,32 @@ fn persist(path: &SettingsStoragePath, settings: &Settings) {
     if let Err(e) = save_settings_to(target, settings) {
         warn!("failed to save settings: {e}");
     }
+}
+
+/// Pure helper: returns `true` when a pending geometry change has sat
+/// quietly long enough to flush to disk.
+///
+/// Extracted so the debounce condition can be unit-tested without
+/// spinning up a Bevy app.
+fn should_persist_geometry(now_secs: f32, last_changed_secs: f32) -> bool {
+    (now_secs - last_changed_secs) >= WINDOW_GEOMETRY_DEBOUNCE_SECS
+}
+
+/// Returns the geometry implied by an event pair `(width, height, x, y)`,
+/// using each component from `existing` when the corresponding event-derived
+/// value is `None`. Returns `None` when neither side supplies width/height.
+///
+/// Pure helper so the merge logic can be unit-tested without an `App`.
+fn merge_geometry(
+    existing: Option<WindowGeometry>,
+    new_size: Option<(u32, u32)>,
+    new_pos: Option<(i32, i32)>,
+) -> Option<WindowGeometry> {
+    let (width, height) = new_size.or_else(|| existing.map(|g| (g.width, g.height)))?;
+    let (x, y) = new_pos
+        .or_else(|| existing.map(|g| (g.x, g.y)))
+        .unwrap_or((0, 0));
+    Some(WindowGeometry { width, height, x, y })
 }
 
 // ---------------------------------------------------------------------------
@@ -762,6 +826,79 @@ fn scroll_settings_panel(
     for mut sp in scrollables.iter_mut() {
         sp.0.y = (sp.0.y - delta_y).max(0.0);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Window geometry persistence
+// ---------------------------------------------------------------------------
+
+/// Records `WindowResized` and `WindowMoved` events into
+/// [`PendingWindowGeometry`], coalescing every event arriving this frame
+/// into the latest pending geometry.
+///
+/// The actual disk write is debounced — see
+/// [`persist_window_geometry_after_debounce`] — so the file system isn't
+/// hit on every pixel of a resize / move drag.
+fn record_window_geometry_changes(
+    time: Res<Time>,
+    mut resized: MessageReader<WindowResized>,
+    mut moved: MessageReader<WindowMoved>,
+    settings: Res<SettingsResource>,
+    mut pending: ResMut<PendingWindowGeometry>,
+) {
+    // Read .last() — only the final event matters for persistence; the
+    // intermediate sizes/positions are noise during a drag.
+    let new_size = resized
+        .read()
+        .last()
+        .map(|ev| (ev.width.round().max(0.0) as u32, ev.height.round().max(0.0) as u32));
+    let new_pos = moved.read().last().map(|ev| (ev.position.x, ev.position.y));
+
+    if new_size.is_none() && new_pos.is_none() {
+        return;
+    }
+
+    // Fold the new components into the existing pending value (if any),
+    // otherwise into the persisted geometry from settings.
+    let baseline = pending.geometry.or(settings.0.window_geometry);
+    let Some(geometry) = merge_geometry(baseline, new_size, new_pos) else {
+        return;
+    };
+
+    pending.geometry = Some(geometry);
+    pending.last_changed_secs = time.elapsed_secs();
+}
+
+/// After [`WINDOW_GEOMETRY_DEBOUNCE_SECS`] of quiet (no `WindowResized` or
+/// `WindowMoved` events arriving), commits the pending geometry to
+/// `SettingsResource` and writes `settings.json`. Skips the write when the
+/// pending value already matches the settings (e.g. a resize that was
+/// reverted, or a synthetic event with no geometry change).
+fn persist_window_geometry_after_debounce(
+    time: Res<Time>,
+    mut pending: ResMut<PendingWindowGeometry>,
+    mut settings: ResMut<SettingsResource>,
+    path: Res<SettingsStoragePath>,
+    mut changed: MessageWriter<SettingsChangedEvent>,
+) {
+    let Some(new_geom) = pending.geometry else {
+        return;
+    };
+    if !should_persist_geometry(time.elapsed_secs(), pending.last_changed_secs) {
+        return;
+    }
+
+    // Always clear the pending slot regardless of whether we end up
+    // writing — otherwise an idempotent change would re-trigger this
+    // system every tick.
+    pending.geometry = None;
+
+    if settings.0.window_geometry == Some(new_geom) {
+        return;
+    }
+    settings.0.window_geometry = Some(new_geom);
+    persist(&path, &settings.0);
+    changed.write(SettingsChangedEvent(settings.0.clone()));
 }
 
 // ---------------------------------------------------------------------------
@@ -1509,6 +1646,181 @@ mod tests {
         assert!(
             row_count >= 2,
             "expected at least two FocusRow containers (card-back + background); got {row_count}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Window geometry persistence
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn should_persist_geometry_respects_debounce_window() {
+        // Within the debounce window: not yet.
+        assert!(!should_persist_geometry(10.0, 9.7));
+        assert!(!should_persist_geometry(
+            10.0,
+            10.0 - WINDOW_GEOMETRY_DEBOUNCE_SECS + 0.01
+        ));
+        // Exactly the debounce window: allowed (>= comparison).
+        assert!(should_persist_geometry(
+            10.0,
+            10.0 - WINDOW_GEOMETRY_DEBOUNCE_SECS
+        ));
+        // Well past the debounce window: allowed.
+        assert!(should_persist_geometry(20.0, 10.0));
+    }
+
+    #[test]
+    fn merge_geometry_uses_existing_when_event_components_missing() {
+        let existing = WindowGeometry { width: 1280, height: 800, x: 100, y: 50 };
+        // Position-only event keeps existing size.
+        let merged = merge_geometry(Some(existing), None, Some((200, 75))).unwrap();
+        assert_eq!(merged.width, 1280);
+        assert_eq!(merged.height, 800);
+        assert_eq!(merged.x, 200);
+        assert_eq!(merged.y, 75);
+        // Size-only event keeps existing position.
+        let merged = merge_geometry(Some(existing), Some((1024, 768)), None).unwrap();
+        assert_eq!(merged.width, 1024);
+        assert_eq!(merged.height, 768);
+        assert_eq!(merged.x, 100);
+        assert_eq!(merged.y, 50);
+    }
+
+    #[test]
+    fn merge_geometry_returns_none_when_size_unknown() {
+        // No existing geometry, no size in the event → can't fabricate one.
+        assert!(merge_geometry(None, None, Some((10, 20))).is_none());
+    }
+
+    /// Drives `app.update()` past [`WINDOW_GEOMETRY_DEBOUNCE_SECS`] using
+    /// `TimeUpdateStrategy::ManualDuration`. `Time<Virtual>` clamps each
+    /// frame's delta to `max_delta` (default 250 ms), so we step in 150 ms
+    /// slices and run enough ticks to comfortably exceed the debounce
+    /// window after the first record tick has set `last_changed_secs`.
+    fn advance_past_geometry_debounce(app: &mut App) {
+        use bevy::time::TimeUpdateStrategy;
+        use std::time::Duration;
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
+            0.15,
+        )));
+        // Tick 1 sets last_changed_secs from any pending events. Each
+        // subsequent tick advances the clock by 150 ms; five ticks total
+        // buys 0.75 s of elapsed time relative to the record tick — well
+        // past the 0.5 s debounce window.
+        for _ in 0..5 {
+            app.update();
+        }
+    }
+
+    fn fire_resize(app: &mut App, width: f32, height: f32) {
+        app.world_mut().write_message(WindowResized {
+            window: bevy::ecs::entity::Entity::PLACEHOLDER,
+            width,
+            height,
+        });
+    }
+
+    fn fire_move(app: &mut App, x: i32, y: i32) {
+        app.world_mut().write_message(WindowMoved {
+            window: bevy::ecs::entity::Entity::PLACEHOLDER,
+            position: IVec2::new(x, y),
+        });
+    }
+
+    #[test]
+    fn resize_event_then_quiet_persists_window_geometry() {
+        let mut app = headless_app();
+        // Sanity: geometry starts unset (default).
+        assert!(
+            app.world()
+                .resource::<SettingsResource>()
+                .0
+                .window_geometry
+                .is_none()
+        );
+
+        // Fire a resize, then go quiet for past the debounce.
+        fire_resize(&mut app, 1500.0, 950.0);
+        advance_past_geometry_debounce(&mut app);
+
+        let geom = app
+            .world()
+            .resource::<SettingsResource>()
+            .0
+            .window_geometry
+            .expect("geometry should be persisted after debounce");
+        assert_eq!(geom.width, 1500);
+        assert_eq!(geom.height, 950);
+        // Position not yet observed → defaults to 0, 0 since there was
+        // no existing geometry to fall back on.
+        assert_eq!(geom.x, 0);
+        assert_eq!(geom.y, 0);
+    }
+
+    #[test]
+    fn move_event_after_resize_updates_position_only() {
+        let mut app = headless_app();
+
+        // First, establish a baseline geometry via a resize event.
+        fire_resize(&mut app, 1280.0, 800.0);
+        advance_past_geometry_debounce(&mut app);
+        let baseline = app
+            .world()
+            .resource::<SettingsResource>()
+            .0
+            .window_geometry
+            .unwrap();
+        assert_eq!(baseline.width, 1280);
+
+        // Now fire a move-only event — size must be preserved from the
+        // existing geometry.
+        fire_move(&mut app, 250, 175);
+        advance_past_geometry_debounce(&mut app);
+
+        let geom = app
+            .world()
+            .resource::<SettingsResource>()
+            .0
+            .window_geometry
+            .unwrap();
+        assert_eq!(geom.width, 1280, "size must be preserved across a move-only update");
+        assert_eq!(geom.height, 800);
+        assert_eq!(geom.x, 250);
+        assert_eq!(geom.y, 175);
+    }
+
+    #[test]
+    fn rapid_resize_storm_only_persists_final_size() {
+        let mut app = headless_app();
+
+        // Burst of resize events on a single frame — only the last one
+        // should be the eventually-persisted size.
+        fire_resize(&mut app, 900.0, 600.0);
+        fire_resize(&mut app, 1100.0, 700.0);
+        fire_resize(&mut app, 1400.0, 850.0);
+        advance_past_geometry_debounce(&mut app);
+
+        let geom = app
+            .world()
+            .resource::<SettingsResource>()
+            .0
+            .window_geometry
+            .unwrap();
+        assert_eq!((geom.width, geom.height), (1400, 850));
+    }
+
+    #[test]
+    fn no_window_events_no_geometry_change() {
+        let mut app = headless_app();
+        // Just advance time — without any events, settings must stay clean.
+        advance_past_geometry_debounce(&mut app);
+        assert!(
+            app.world()
+                .resource::<SettingsResource>()
+                .0
+                .window_geometry
+                .is_none()
         );
     }
 

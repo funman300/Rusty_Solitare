@@ -39,6 +39,21 @@ fn main() {
         .unwrap_or_default();
     let sync_provider = provider_for_backend(&settings.sync_backend);
 
+    // Restore the previous window geometry if the player has one saved.
+    // Otherwise open at the platform default (1280×800, centred on the
+    // primary monitor). The window_geometry field is None on first run
+    // and after upgrading from a build that didn't persist geometry.
+    let (window_resolution, window_position) = match settings.window_geometry {
+        Some(geom) => (
+            (geom.width, geom.height).into(),
+            WindowPosition::At(IVec2::new(geom.x, geom.y)),
+        ),
+        None => (
+            (1280u32, 800u32).into(),
+            WindowPosition::Centered(MonitorSelection::Primary),
+        ),
+    };
+
     App::new()
         .add_plugins(
             DefaultPlugins
@@ -48,8 +63,8 @@ fn main() {
                         // X11/Wayland WM_CLASS so taskbar managers group
                         // multiple windows of this app correctly.
                         name: Some("solitaire-quest".into()),
-                        resolution: (1280u32, 800u32).into(),
-                        position: WindowPosition::Centered(MonitorSelection::Primary),
+                        resolution: window_resolution,
+                        position: window_position,
                         // AutoNoVsync prefers Mailbox (triple-buffered) and
                         // falls back to Immediate, eliminating the vsync stall
                         // that AutoVsync produces during continuous window

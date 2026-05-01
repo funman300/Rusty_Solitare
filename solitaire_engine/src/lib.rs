@@ -93,7 +93,8 @@ pub use onboarding_plugin::{OnboardingPlugin, OnboardingScreen};
 pub use pause_plugin::{ForfeitConfirmScreen, PausePlugin, PauseScreen, PausedResource};
 pub use profile_plugin::{ProfilePlugin, ProfileScreen};
 pub use settings_plugin::{
-    SettingsChangedEvent, SettingsPlugin, SettingsResource, SettingsScreen, SFX_STEP,
+    PendingWindowGeometry, SettingsChangedEvent, SettingsPlugin, SettingsResource, SettingsScreen,
+    SFX_STEP, WINDOW_GEOMETRY_DEBOUNCE_SECS,
 };
 pub use layout::{compute_layout, Layout, LayoutResource};
 pub use resources::{DragState, GameStateResource, HintCycleIndex, SettingsScrollPos, SyncStatus, SyncStatusResource};

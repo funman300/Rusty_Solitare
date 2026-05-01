@@ -126,7 +126,7 @@ pub use challenge::{challenge_count, challenge_seed_for, CHALLENGE_SEEDS};
 pub mod settings;
 pub use settings::{
     load_settings_from, save_settings_to, settings_file_path, AnimSpeed, Settings, SyncBackend,
-    Theme,
+    Theme, WindowGeometry,
 };
 
 pub mod auth_tokens;
