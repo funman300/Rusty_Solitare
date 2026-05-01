@@ -100,6 +100,19 @@ fn main() {
                 .set(bevy::asset::AssetPlugin {
                     file_path: "../assets".to_string(),
                     ..default()
+                })
+                // The bundled hayeah card SVGs declare `font-family="Arial"`
+                // for rank/suit text. usvg compares family names exactly,
+                // so on systems without Arial installed (every Linux
+                // distro by default) it bridges a `log::warn!` per text
+                // node into our tracing output — 50+ lines per game on
+                // launch. The substitution path in `svg_loader::shared_fontdb`
+                // already resolves the glyphs to whatever sans-serif the
+                // user does have; the warn is purely informational and
+                // dropping it leaves real errors visible.
+                .set(bevy::log::LogPlugin {
+                    filter: format!("{},usvg::text=error", bevy::log::DEFAULT_FILTER),
+                    ..default()
                 }),
         )
         .add_plugins(AssetSourcesPlugin)

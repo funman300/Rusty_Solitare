@@ -19,6 +19,8 @@
 //! loading via `load_with_settings(...)`. The default of 512×768 is a
 //! safe fallback that fits a typical 2:3 playing card.
 
+use std::sync::{Arc, OnceLock};
+
 use bevy::asset::io::Reader;
 use bevy::asset::{AssetLoader, LoadContext, RenderAssetUsages};
 use bevy::image::Image;
@@ -27,6 +29,7 @@ use bevy::reflect::TypePath;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use usvg::fontdb;
 
 /// Per-asset settings consumed by [`SvgLoader::load`].
 ///
@@ -102,7 +105,10 @@ impl AssetLoader for SvgLoader {
 /// thumbnail generators) can rasterise without going through the
 /// asset graph.
 pub fn rasterize_svg(svg_bytes: &[u8], target: UVec2) -> Result<Image, SvgLoaderError> {
-    let opt = usvg::Options::default();
+    let opt = usvg::Options {
+        fontdb: shared_fontdb(),
+        ..Default::default()
+    };
     let tree = usvg::Tree::from_data(svg_bytes, &opt)?;
 
     let svg_size = tree.size();
@@ -138,6 +144,27 @@ pub fn rasterize_svg(svg_bytes: &[u8], target: UVec2) -> Result<Image, SvgLoader
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
     ))
+}
+
+/// Returns a process-wide font database populated with the OS-installed
+/// fonts the user has available. Initialised lazily on first SVG that
+/// references text, then shared (via `Arc`) across every subsequent
+/// rasterisation. `usvg::Options::default()` ships an empty `fontdb`,
+/// so without this call any text glyph in an SVG renders with no font
+/// match — the visible symptom on the bundled hayeah artwork is the
+/// "No match for Arial font-family" warn spam plus glyphs that fall
+/// through to whatever shape-only path usvg uses for missing fonts.
+/// `load_system_fonts` is comparatively expensive (~50–200 ms on a
+/// typical desktop) so we only pay it once for the lifetime of the
+/// process, gated by `OnceLock`.
+fn shared_fontdb() -> Arc<fontdb::Database> {
+    static DB: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
+    DB.get_or_init(|| {
+        let mut db = fontdb::Database::new();
+        db.load_system_fonts();
+        Arc::new(db)
+    })
+    .clone()
 }
 
 #[cfg(test)]
