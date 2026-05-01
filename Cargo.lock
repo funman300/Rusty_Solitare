@@ -7533,16 +7533,21 @@ name = "solitaire_data"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
  "chrono",
  "dirs",
+ "jsonwebtoken",
  "keyring-core",
  "reqwest",
  "serde",
  "serde_json",
  "solitaire_core",
+ "solitaire_server",
  "solitaire_sync",
+ "sqlx",
  "thiserror 2.0.18",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

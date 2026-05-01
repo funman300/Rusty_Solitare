@@ -16,3 +16,12 @@ dirs           = { workspace = true }
 keyring-core   = { workspace = true }
 reqwest        = { workspace = true }
 tokio          = { workspace = true }
+
+[dev-dependencies]
+solitaire_server = { path = "../solitaire_server" }
+solitaire_sync   = { workspace = true }
+axum             = { workspace = true }
+sqlx             = { workspace = true }
+jsonwebtoken     = { workspace = true }
+uuid             = { workspace = true }
+chrono           = { workspace = true }
