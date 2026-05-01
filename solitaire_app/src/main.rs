@@ -6,12 +6,13 @@ use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PresentMode, WindowPosition};
 use solitaire_data::{load_settings_from, provider_for_backend, settings_file_path, Settings};
 use solitaire_engine::{
-    AchievementPlugin, AnimationPlugin, AudioPlugin, AutoCompletePlugin, CardAnimationPlugin,
-    CardPlugin, ChallengePlugin, CursorPlugin, DailyChallengePlugin, FeedbackAnimPlugin,
-    FontPlugin, GamePlugin, HelpPlugin, HomePlugin, HudPlugin, InputPlugin, LeaderboardPlugin,
-    OnboardingPlugin, PausePlugin, ProfilePlugin, ProgressPlugin, SelectionPlugin, SettingsPlugin,
-    SplashPlugin, StatsPlugin, SyncPlugin, TablePlugin, TimeAttackPlugin, UiFocusPlugin,
-    UiModalPlugin, UiTooltipPlugin, WeeklyGoalsPlugin, WinSummaryPlugin,
+    register_theme_asset_sources, AchievementPlugin, AnimationPlugin, AssetSourcesPlugin,
+    AudioPlugin, AutoCompletePlugin, CardAnimationPlugin, CardPlugin, ChallengePlugin,
+    CursorPlugin, DailyChallengePlugin, FeedbackAnimPlugin, FontPlugin, GamePlugin, HelpPlugin,
+    HomePlugin, HudPlugin, InputPlugin, LeaderboardPlugin, OnboardingPlugin, PausePlugin,
+    ProfilePlugin, ProgressPlugin, SelectionPlugin, SettingsPlugin, SplashPlugin, StatsPlugin,
+    SyncPlugin, TablePlugin, TimeAttackPlugin, UiFocusPlugin, UiModalPlugin, UiTooltipPlugin,
+    WeeklyGoalsPlugin, WinSummaryPlugin,
 };
 
 fn main() {
@@ -54,7 +55,17 @@ fn main() {
         ),
     };
 
-    App::new()
+    let mut app = App::new();
+
+    // The card-theme system's `themes://` asset source must be
+    // registered *before* `DefaultPlugins` builds `AssetPlugin`,
+    // because that plugin freezes the asset-source list at build
+    // time. The matching `AssetSourcesPlugin` (added below) finishes
+    // the wiring after `DefaultPlugins` by populating the embedded
+    // default theme into Bevy's `EmbeddedAssetRegistry`.
+    register_theme_asset_sources(&mut app);
+
+    app
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
@@ -91,6 +102,7 @@ fn main() {
                     ..default()
                 }),
         )
+        .add_plugins(AssetSourcesPlugin)
         .add_plugins(FontPlugin)
         .add_plugins(GamePlugin)
         .add_plugins(TablePlugin)

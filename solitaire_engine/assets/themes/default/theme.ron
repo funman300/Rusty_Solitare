@@ -1,0 +1,77 @@
+// Default card theme manifest — Phase 3 stub.
+//
+// The 53 SVG paths below are deliberate placeholders so the manifest
+// validates against `ThemeManifest::validate` (which requires all 52
+// faces plus a back). The actual SVG art lands in a later phase when
+// the swap to hayeah/playing-cards-assets is complete; until then this
+// file exists so the `embedded://` asset source has something to
+// register, and so source-registration tests have a real RON file to
+// parse.
+//
+// Suit / rank tokens follow `CardKey::manifest_name`:
+//   suits: clubs, diamonds, hearts, spades
+//   ranks: ace, 2, 3, 4, 5, 6, 7, 8, 9, 10, jack, queen, king
+(
+    meta: (
+        id: "default",
+        name: "Default",
+        author: "Solitaire Quest",
+        version: "0.1.0",
+        card_aspect: (2, 3),
+    ),
+    back: "back.svg",
+    faces: {
+        "clubs_ace":     "clubs_ace.svg",
+        "clubs_2":       "clubs_2.svg",
+        "clubs_3":       "clubs_3.svg",
+        "clubs_4":       "clubs_4.svg",
+        "clubs_5":       "clubs_5.svg",
+        "clubs_6":       "clubs_6.svg",
+        "clubs_7":       "clubs_7.svg",
+        "clubs_8":       "clubs_8.svg",
+        "clubs_9":       "clubs_9.svg",
+        "clubs_10":      "clubs_10.svg",
+        "clubs_jack":    "clubs_jack.svg",
+        "clubs_queen":   "clubs_queen.svg",
+        "clubs_king":    "clubs_king.svg",
+        "diamonds_ace":   "diamonds_ace.svg",
+        "diamonds_2":     "diamonds_2.svg",
+        "diamonds_3":     "diamonds_3.svg",
+        "diamonds_4":     "diamonds_4.svg",
+        "diamonds_5":     "diamonds_5.svg",
+        "diamonds_6":     "diamonds_6.svg",
+        "diamonds_7":     "diamonds_7.svg",
+        "diamonds_8":     "diamonds_8.svg",
+        "diamonds_9":     "diamonds_9.svg",
+        "diamonds_10":    "diamonds_10.svg",
+        "diamonds_jack":  "diamonds_jack.svg",
+        "diamonds_queen": "diamonds_queen.svg",
+        "diamonds_king":  "diamonds_king.svg",
+        "hearts_ace":    "hearts_ace.svg",
+        "hearts_2":      "hearts_2.svg",
+        "hearts_3":      "hearts_3.svg",
+        "hearts_4":      "hearts_4.svg",
+        "hearts_5":      "hearts_5.svg",
+        "hearts_6":      "hearts_6.svg",
+        "hearts_7":      "hearts_7.svg",
+        "hearts_8":      "hearts_8.svg",
+        "hearts_9":      "hearts_9.svg",
+        "hearts_10":     "hearts_10.svg",
+        "hearts_jack":   "hearts_jack.svg",
+        "hearts_queen":  "hearts_queen.svg",
+        "hearts_king":   "hearts_king.svg",
+        "spades_ace":    "spades_ace.svg",
+        "spades_2":      "spades_2.svg",
+        "spades_3":      "spades_3.svg",
+        "spades_4":      "spades_4.svg",
+        "spades_5":      "spades_5.svg",
+        "spades_6":      "spades_6.svg",
+        "spades_7":      "spades_7.svg",
+        "spades_8":      "spades_8.svg",
+        "spades_9":      "spades_9.svg",
+        "spades_10":     "spades_10.svg",
+        "spades_jack":   "spades_jack.svg",
+        "spades_queen":  "spades_queen.svg",
+        "spades_king":   "spades_king.svg",
+    },
+)

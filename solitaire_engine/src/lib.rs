@@ -40,6 +40,10 @@ pub mod ui_tooltip;
 pub mod weekly_goals_plugin;
 pub mod win_summary_plugin;
 
+pub use assets::{
+    populate_embedded_default_theme, register_theme_asset_sources, AssetSourcesPlugin,
+    DEFAULT_THEME_MANIFEST_URL, USER_THEMES,
+};
 pub use achievement_plugin::{AchievementPlugin, AchievementsResource, AchievementsScreen};
 pub use challenge_plugin::{
     challenge_progress_label, ChallengeAdvancedEvent, ChallengePlugin, CHALLENGE_UNLOCK_LEVEL,
