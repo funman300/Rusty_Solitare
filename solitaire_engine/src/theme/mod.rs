@@ -16,6 +16,7 @@ pub mod importer;
 pub mod loader;
 pub mod manifest;
 pub mod plugin;
+pub mod registry;
 
 use std::collections::HashMap;
 
@@ -31,6 +32,9 @@ pub use importer::{import_theme, import_theme_into, ImportError, ThemeId};
 pub use loader::{CardThemeLoader, CardThemeLoaderError};
 pub use manifest::ThemeManifest;
 pub use plugin::{set_theme, ActiveTheme, ThemePlugin};
+pub use registry::{
+    build_registry, refresh_registry, ThemeEntry, ThemeRegistry, ThemeRegistryPlugin,
+};
 
 /// Hashable lookup key into [`CardTheme::faces`].
 ///
