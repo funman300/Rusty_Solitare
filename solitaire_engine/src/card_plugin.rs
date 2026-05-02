@@ -29,6 +29,11 @@ use crate::pause_plugin::PausedResource;
 use crate::resources::{DragState, GameStateResource};
 use crate::settings_plugin::{SettingsChangedEvent, SettingsResource};
 use crate::table_plugin::PileMarker;
+use crate::ui_theme::{
+    CARD_SHADOW_ALPHA_DRAG, CARD_SHADOW_ALPHA_IDLE, CARD_SHADOW_COLOR, CARD_SHADOW_LOCAL_Z,
+    CARD_SHADOW_OFFSET_DRAG, CARD_SHADOW_OFFSET_IDLE, CARD_SHADOW_PADDING_DRAG,
+    CARD_SHADOW_PADDING_IDLE,
+};
 
 /// Fraction of card height used as vertical offset between face-up tableau cards.
 pub const TABLEAU_FAN_FRAC: f32 = 0.25;
@@ -132,6 +137,24 @@ pub struct RightClickHighlightTimer(pub f32);
 #[derive(Component, Debug)]
 pub struct StockEmptyLabel;
 
+/// Marker on the chip-background sprite of the stock-pile remaining-count
+/// badge.
+///
+/// The badge is spawned as a child of the stock [`PileMarker`] entity so its
+/// transform tracks the stock pile through resizes. The chip sits in the
+/// top-right corner of the stock pile and is hidden while the stock is empty
+/// (the existing `↺` overlay covers the recycle hint instead).
+#[derive(Component, Debug)]
+pub struct StockCountBadge;
+
+/// Marker on the `Text2d` child of [`StockCountBadge`] showing the numeric
+/// count of cards remaining in the stock pile.
+///
+/// Update systems query this component to write the new count in place rather
+/// than despawning and respawning the text entity each tick.
+#[derive(Component, Debug)]
+pub struct StockCountBadgeText;
+
 // ---------------------------------------------------------------------------
 // Task #34 — Card-flip animation
 // ---------------------------------------------------------------------------
@@ -167,6 +190,72 @@ const FLIP_HALF_SECS: f32 = 0.08;
 /// Marker component for the semi-transparent shadow sprite shown while dragging.
 #[derive(Component, Debug)]
 pub struct ShadowEntity;
+
+/// Marker component for the per-card drop-shadow child sprite.
+///
+/// Every `CardEntity` owns exactly one `CardShadow` child whose `Sprite` is a
+/// neutral-black halo painted slightly down-and-right of the card. Idle state
+/// uses [`CARD_SHADOW_OFFSET_IDLE`] / [`CARD_SHADOW_ALPHA_IDLE`]; while the
+/// parent card is being dragged the shadow is pushed to the deeper
+/// [`CARD_SHADOW_OFFSET_DRAG`] / [`CARD_SHADOW_ALPHA_DRAG`] values so the
+/// stack reads as "lifted" off the felt.
+#[derive(Component, Debug)]
+pub struct CardShadow;
+
+/// Returns the `(offset, padding, alpha)` triple used to paint a per-card
+/// shadow given whether its parent card is currently part of the dragged
+/// stack. Pulled out as a pure helper so the shadow tuning can be unit-tested
+/// without spinning up a Bevy app.
+///
+/// `is_dragged = false` → resting `(IDLE, IDLE, IDLE)`
+/// `is_dragged = true`  → lifted  `(DRAG, DRAG, DRAG)`
+pub fn card_shadow_params(is_dragged: bool) -> (Vec2, Vec2, f32) {
+    if is_dragged {
+        (
+            CARD_SHADOW_OFFSET_DRAG,
+            CARD_SHADOW_PADDING_DRAG,
+            CARD_SHADOW_ALPHA_DRAG,
+        )
+    } else {
+        (
+            CARD_SHADOW_OFFSET_IDLE,
+            CARD_SHADOW_PADDING_IDLE,
+            CARD_SHADOW_ALPHA_IDLE,
+        )
+    }
+}
+
+/// Builds the `Sprite` used for a per-card shadow at the resting state. The
+/// alpha and size both use the idle tokens; `update_card_shadows_on_drag`
+/// retunes them at runtime when the parent card joins / leaves the dragged
+/// stack.
+fn card_shadow_sprite(card_size: Vec2) -> Sprite {
+    let (_offset, padding, alpha) = card_shadow_params(false);
+    Sprite {
+        color: CARD_SHADOW_COLOR.with_alpha(alpha),
+        custom_size: Some(card_size + padding),
+        ..default()
+    }
+}
+
+/// Builds the `Transform` used for a per-card shadow at the resting state.
+/// Local — it is parented to the card entity, so positions are relative.
+fn card_shadow_transform() -> Transform {
+    let (offset, _padding, _alpha) = card_shadow_params(false);
+    Transform::from_xyz(offset.x, offset.y, CARD_SHADOW_LOCAL_Z)
+}
+
+/// Spawns a single `CardShadow` child under the given card entity builder.
+/// Extracted so `spawn_card_entity` and `update_card_entity` can share the
+/// exact same shadow recipe — we never want one path to drift from the other.
+fn add_card_shadow_child(parent: &mut ChildSpawnerCommands, card_size: Vec2) {
+    parent.spawn((
+        CardShadow,
+        card_shadow_sprite(card_size),
+        card_shadow_transform(),
+        Visibility::default(),
+    ));
+}
 
 /// Throttle interval for resize-driven card snap work, in seconds.
 ///
@@ -228,6 +317,7 @@ impl Plugin for CardPlugin {
                     start_flip_anim.after(GameMutation),
                     tick_flip_anim,
                     update_drag_shadow,
+                    update_card_shadows_on_drag.after(sync_cards_on_change),
                     tick_hint_highlight,
                     handle_right_click,
                     tick_right_click_highlights,
@@ -534,6 +624,13 @@ fn spawn_card_entity(
         Transform::from_xyz(pos.x, pos.y, z),
         Visibility::default(),
     ));
+    // Every card gets a subtle drop-shadow child so the play surface reads
+    // as physical instead of flat. Spawned in idle state; the drag-tracking
+    // system retunes its offset / alpha when this card joins the dragged
+    // stack.
+    entity.with_children(|b| {
+        add_card_shadow_child(b, layout.card_size);
+    });
     // When PNG faces are loaded the rank/suit are baked into the image.
     // Only spawn the Text2d overlay in the solid-colour fallback (tests).
     if card_images.is_none() {
@@ -593,10 +690,13 @@ fn update_card_entity(
             .insert(Transform::from_xyz(pos.x, pos.y, z));
     }
 
-    // Despawn any stale children and re-add the label overlay only when
-    // operating in solid-colour mode (no PNG faces).  In image mode the
-    // rank/suit are baked into the PNG, so no Text2d overlay is needed.
+    // Despawn any stale children and re-add the per-card drop shadow plus,
+    // in solid-colour fallback mode, the label overlay. In image mode the
+    // rank/suit are baked into the PNG, so no `Text2d` overlay is needed.
     commands.entity(entity).despawn_related::<Children>();
+    commands.entity(entity).with_children(|b| {
+        add_card_shadow_child(b, layout.card_size);
+    });
     if card_images.is_none() {
         commands.entity(entity).with_children(|b| {
             b.spawn((
@@ -791,6 +891,43 @@ fn update_drag_shadow(
                 ))
                 .id();
             *shadow = Some(e);
+        }
+    }
+}
+
+/// Snaps every per-card [`CardShadow`] between its idle and lifted tunings
+/// based on whether the parent [`CardEntity`] is currently in
+/// [`DragState::cards`]. Runs every frame; the transition is an instant snap
+/// (no lerp) — the existing shake / settle feedback already handles motion
+/// at drag-end, so an additional shadow tween would compete with those cues.
+///
+/// The shadow size is rebuilt from the parent card's current `Sprite`
+/// `custom_size` plus the appropriate padding, so the resize handler does
+/// not need to pre-tune shadow sizes for the drag state — this system fixes
+/// the geometry within one frame.
+fn update_card_shadows_on_drag(
+    drag: Res<DragState>,
+    cards: Query<(&CardEntity, &Sprite, &Children), Without<CardShadow>>,
+    mut shadows: Query<(&mut Sprite, &mut Transform), With<CardShadow>>,
+) {
+    let dragged: HashSet<u32> = drag.cards.iter().copied().collect();
+
+    for (card_entity, card_sprite, children) in cards.iter() {
+        let is_dragged = dragged.contains(&card_entity.card_id);
+        let (offset, padding, alpha) = card_shadow_params(is_dragged);
+        let Some(card_size) = card_sprite.custom_size else {
+            continue;
+        };
+
+        for child in children.iter() {
+            let Ok((mut shadow_sprite, mut shadow_transform)) = shadows.get_mut(child) else {
+                continue;
+            };
+            shadow_sprite.color = CARD_SHADOW_COLOR.with_alpha(alpha);
+            shadow_sprite.custom_size = Some(card_size + padding);
+            shadow_transform.translation.x = offset.x;
+            shadow_transform.translation.y = offset.y;
+            shadow_transform.translation.z = CARD_SHADOW_LOCAL_Z;
         }
     }
 }
@@ -1204,7 +1341,7 @@ fn collect_resize_events(
 /// Scheduled after [`collect_resize_events`] (which itself runs after
 /// `LayoutSystem::UpdateOnResize`) so `LayoutResource` reflects the latest
 /// window size before we read it.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn snap_cards_on_window_resize(
     mut commands: Commands,
     time: Res<Time>,
@@ -1212,9 +1349,16 @@ fn snap_cards_on_window_resize(
     game: Option<Res<GameStateResource>>,
     layout: Option<Res<LayoutResource>>,
     card_images: Option<Res<CardImageSet>>,
-    entities: Query<(Entity, &CardEntity, &mut Sprite, &mut Transform), Without<CardLabel>>,
+    entities: Query<
+        (Entity, &CardEntity, &mut Sprite, &mut Transform),
+        (Without<CardLabel>, Without<CardShadow>),
+    >,
     label_query: Query<&mut TextFont, (With<CardLabel>, Without<StockEmptyLabel>)>,
-    mut pile_markers: Query<(Entity, &PileMarker, &mut Sprite), Without<CardEntity>>,
+    shadow_query: Query<&mut Sprite, (With<CardShadow>, Without<CardEntity>, Without<PileMarker>)>,
+    mut pile_markers: Query<
+        (Entity, &PileMarker, &mut Sprite),
+        (Without<CardEntity>, Without<CardShadow>),
+    >,
     label_children: Query<(Entity, &ChildOf), With<StockEmptyLabel>>,
 ) {
     if throttle.pending.is_none() {
@@ -1242,6 +1386,7 @@ fn snap_cards_on_window_resize(
         card_images.as_deref(),
         entities,
         label_query,
+        shadow_query,
     );
 
     apply_stock_empty_indicator(
@@ -1268,13 +1413,21 @@ fn snap_cards_on_window_resize(
 ///
 /// Any in-flight `CardAnim` slide is removed so a mid-tween card is not
 /// retargeted relative to the previous card-size's position.
+#[allow(clippy::type_complexity)]
 fn resize_cards_in_place(
     commands: &mut Commands,
     game: &GameState,
     layout: &Layout,
     card_images: Option<&CardImageSet>,
-    mut entities: Query<(Entity, &CardEntity, &mut Sprite, &mut Transform), Without<CardLabel>>,
+    mut entities: Query<
+        (Entity, &CardEntity, &mut Sprite, &mut Transform),
+        (Without<CardLabel>, Without<CardShadow>),
+    >,
     mut label_query: Query<&mut TextFont, (With<CardLabel>, Without<StockEmptyLabel>)>,
+    mut shadow_query: Query<
+        &mut Sprite,
+        (With<CardShadow>, Without<CardEntity>, Without<PileMarker>),
+    >,
 ) {
     let positions = card_positions(game, layout);
     let pos_by_id: HashMap<u32, (Vec2, f32)> = positions
@@ -1293,6 +1446,27 @@ fn resize_cards_in_place(
         // Cancel any in-flight slide so it doesn't retarget from a stale
         // mid-animation position computed against the previous card size.
         commands.entity(entity).remove::<CardAnim>();
+    }
+
+    // Resize every per-card shadow halo to match the new card size. Both
+    // idle and drag states scale with the card body, so we preserve the
+    // *current* padding (idle vs drag) by keeping the alpha as-is and only
+    // recomputing the geometry. The drag-tracking system runs every frame
+    // and will retune offset / alpha / padding-mode within one frame if the
+    // drag state diverges from the resized geometry.
+    let idle_padding = CARD_SHADOW_PADDING_IDLE;
+    let drag_padding = CARD_SHADOW_PADDING_DRAG;
+    for mut shadow_sprite in shadow_query.iter_mut() {
+        // Choose padding based on the shadow's current alpha — preserves
+        // a lifted shadow's larger halo across resize without needing to
+        // plumb DragState through the resize handler.
+        let alpha = shadow_sprite.color.alpha();
+        let padding = if alpha >= CARD_SHADOW_ALPHA_DRAG - 0.001 {
+            drag_padding
+        } else {
+            idle_padding
+        };
+        shadow_sprite.custom_size = Some(layout.card_size + padding);
     }
 
     // Only the solid-colour fallback path uses CardLabel/Text2d overlays;
@@ -1925,5 +2099,177 @@ mod tests {
             "after-resize font size should equal layout.card_size.x * FONT_SIZE_FRAC \
              (got {after}, expected {expected})"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Per-card drop-shadow — pure helper + spawn / drag-snap regressions.
+    // -----------------------------------------------------------------------
+
+    /// `card_shadow_params(false)` returns the IDLE token triple.
+    #[test]
+    fn card_shadow_params_idle_returns_idle_tokens() {
+        let (offset, padding, alpha) = card_shadow_params(false);
+        assert_eq!(offset, CARD_SHADOW_OFFSET_IDLE);
+        assert_eq!(padding, CARD_SHADOW_PADDING_IDLE);
+        assert!((alpha - CARD_SHADOW_ALPHA_IDLE).abs() < f32::EPSILON);
+    }
+
+    /// `card_shadow_params(true)` returns the DRAG token triple, and each
+    /// drag value differs from its idle counterpart so the player visibly
+    /// sees the lift.
+    #[test]
+    fn card_shadow_params_drag_returns_drag_tokens_and_differs_from_idle() {
+        let (idle_offset, idle_padding, idle_alpha) = card_shadow_params(false);
+        let (drag_offset, drag_padding, drag_alpha) = card_shadow_params(true);
+
+        assert_eq!(drag_offset, CARD_SHADOW_OFFSET_DRAG);
+        assert_eq!(drag_padding, CARD_SHADOW_PADDING_DRAG);
+        assert!((drag_alpha - CARD_SHADOW_ALPHA_DRAG).abs() < f32::EPSILON);
+
+        assert_ne!(idle_offset, drag_offset, "drag offset must differ from idle");
+        assert_ne!(idle_padding, drag_padding, "drag padding must differ from idle");
+        assert!(
+            drag_alpha > idle_alpha,
+            "drag alpha must be stronger than idle (got drag={drag_alpha}, idle={idle_alpha})"
+        );
+        // Drag offset magnitude should be larger than idle so the parallax
+        // reads as "lifted".
+        assert!(
+            drag_offset.length() > idle_offset.length(),
+            "drag offset magnitude ({}) must exceed idle ({}) so the lift is visible",
+            drag_offset.length(),
+            idle_offset.length(),
+        );
+    }
+
+    /// Every spawned `CardEntity` owns exactly one `CardShadow` child.
+    /// Total counts must match: 52 cards → 52 shadows.
+    #[test]
+    fn cards_spawn_with_shadow_child() {
+        let mut app = app();
+
+        let card_count = app
+            .world_mut()
+            .query::<&CardEntity>()
+            .iter(app.world())
+            .count();
+        assert_eq!(card_count, 52, "fixture should spawn 52 cards");
+
+        let shadow_count = app
+            .world_mut()
+            .query::<&CardShadow>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            shadow_count, 52,
+            "every CardEntity must own exactly one CardShadow child (got {shadow_count})"
+        );
+
+        // Each shadow's parent must be a CardEntity, so the child relation
+        // is wired correctly.
+        let cards: HashSet<bevy::prelude::Entity> = app
+            .world_mut()
+            .query_filtered::<bevy::prelude::Entity, With<CardEntity>>()
+            .iter(app.world())
+            .collect();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<&ChildOf, With<CardShadow>>();
+        for parent in q.iter(app.world()) {
+            assert!(
+                cards.contains(&parent.parent()),
+                "CardShadow parent {:?} is not a CardEntity",
+                parent.parent()
+            );
+        }
+    }
+
+    /// Driving `DragState.cards` with a card id and ticking the app must
+    /// move that card's shadow to the lifted offset and alpha; cards
+    /// outside the dragged set keep the idle tuning.
+    #[test]
+    fn shadow_offset_increases_during_drag() {
+        let mut app = app();
+
+        // Pick any spawned card id and stage it in DragState.
+        let card_id: u32 = {
+            let mut q = app.world_mut().query::<&CardEntity>();
+            q.iter(app.world())
+                .next()
+                .expect("fixture should spawn at least one CardEntity")
+                .card_id
+        };
+
+        // Pick a *different* card id to act as the negative control —
+        // its shadow must remain at the idle offset.
+        let other_id: u32 = {
+            let mut q = app.world_mut().query::<&CardEntity>();
+            q.iter(app.world())
+                .map(|c| c.card_id)
+                .find(|id| *id != card_id)
+                .expect("fixture should spawn more than one CardEntity")
+        };
+
+        // Stage the drag and run one Update so `update_card_shadows_on_drag`
+        // sees the new DragState.
+        app.world_mut().resource_mut::<DragState>().cards = vec![card_id];
+        app.update();
+
+        // Find the shadow whose parent's CardEntity matches `card_id`.
+        let dragged_shadow_offset = shadow_offset_for_card(&mut app, card_id);
+        let other_shadow_offset = shadow_offset_for_card(&mut app, other_id);
+
+        let drag_off = CARD_SHADOW_OFFSET_DRAG;
+        let idle_off = CARD_SHADOW_OFFSET_IDLE;
+
+        assert!(
+            (dragged_shadow_offset.x - drag_off.x).abs() < 1e-3
+                && (dragged_shadow_offset.y - drag_off.y).abs() < 1e-3,
+            "dragged shadow offset should match CARD_SHADOW_OFFSET_DRAG \
+             (got {dragged_shadow_offset:?}, expected {drag_off:?})"
+        );
+        assert!(
+            (other_shadow_offset.x - idle_off.x).abs() < 1e-3
+                && (other_shadow_offset.y - idle_off.y).abs() < 1e-3,
+            "non-dragged shadow offset should remain at CARD_SHADOW_OFFSET_IDLE \
+             (got {other_shadow_offset:?}, expected {idle_off:?})"
+        );
+
+        // Sanity-check: clearing the drag returns the shadow to the idle
+        // offset on the next frame.
+        app.world_mut().resource_mut::<DragState>().clear();
+        app.update();
+        let after_clear = shadow_offset_for_card(&mut app, card_id);
+        assert!(
+            (after_clear.x - idle_off.x).abs() < 1e-3
+                && (after_clear.y - idle_off.y).abs() < 1e-3,
+            "shadow must snap back to idle offset after drag clears \
+             (got {after_clear:?}, expected {idle_off:?})"
+        );
+    }
+
+    /// Helper: given a `card_id`, returns the world-space offset (x, y) of
+    /// its `CardShadow` child relative to the parent card's origin.
+    fn shadow_offset_for_card(app: &mut App, card_id: u32) -> Vec2 {
+        // Map every CardEntity to its (Entity, card_id).
+        let card_entity = {
+            let mut q = app
+                .world_mut()
+                .query::<(bevy::prelude::Entity, &CardEntity)>();
+            q.iter(app.world())
+                .find(|(_, c)| c.card_id == card_id)
+                .map(|(e, _)| e)
+                .expect("card_id not found in spawned CardEntity set")
+        };
+
+        let mut q = app
+            .world_mut()
+            .query_filtered::<(&ChildOf, &Transform), With<CardShadow>>();
+        for (parent, transform) in q.iter(app.world()) {
+            if parent.parent() == card_entity {
+                return Vec2::new(transform.translation.x, transform.translation.y);
+            }
+        }
+        panic!("no CardShadow child found for card_id {card_id}");
     }
 }

@@ -16,6 +16,7 @@
 //! changing the constant API.
 
 use bevy::color::Color;
+use bevy::math::Vec2;
 use bevy::prelude::Val;
 use solitaire_data::AnimSpeed;
 
@@ -118,6 +119,82 @@ pub const DROP_TARGET_OUTLINE_PX: f32 = 3.0;
 /// the i32 `Z_*` UI-Node tokens above — those are `ZIndex` values for
 /// `bevy::ui`, while this is a 2D `Sprite` z coordinate.
 pub const Z_DROP_OVERLAY: f32 = 50.0;
+
+/// Background colour of the stock-pile remaining-count chip.
+///
+/// Reuses `BG_ELEVATED_HI` so the chip reads as one rung above the
+/// translucent stock pile marker without introducing a new palette
+/// value. The badge sits on the stock corner so the player knows how
+/// many cards remain before a recycle.
+pub const STOCK_BADGE_BG: Color = BG_ELEVATED_HI;
+
+/// Foreground (text) colour of the stock-pile remaining-count chip.
+///
+/// `ACCENT_PRIMARY` keeps the chip readable against the elevated
+/// purple background and matches the Balatro accent already used for
+/// other "look here" callouts.
+pub const STOCK_BADGE_FG: Color = ACCENT_PRIMARY;
+
+/// Sprite-space `Transform.z` for the stock-pile remaining-count chip.
+///
+/// Sits above the stock pile marker (`Z_PILE_MARKER` = `-1`) and any
+/// face-down stock cards (which start at `0`), but well below
+/// [`Z_DROP_OVERLAY`] (`50.0`) so the green drop-target wash always
+/// renders on top while a card is being dragged. Like `Z_DROP_OVERLAY`,
+/// this is a 2D `Sprite` z coordinate, not a `bevy::ui` `ZIndex`.
+pub const Z_STOCK_BADGE: f32 = 30.0;
+
+// ---------------------------------------------------------------------------
+// Card drop-shadow — the subtle dark halo painted beneath every card so the
+// play surface reads as physical instead of a flat collage of stickers. Idle
+// values are deliberately low-contrast (small offset, ~25% alpha) so resting
+// cards feel grounded without competing with focus rings or drop overlays.
+// Drag values are slightly stronger (further offset, ~40% alpha, larger
+// halo) so the dragged stack visually "lifts" off the felt.
+// ---------------------------------------------------------------------------
+
+/// RGB base for the per-card drop shadow. Always neutral black — never
+/// suit-tinted — so the shadow never carries colour information that a
+/// colour-blind player would rely on to identify a card. Alpha is applied
+/// separately via [`CARD_SHADOW_ALPHA_IDLE`] / [`CARD_SHADOW_ALPHA_DRAG`].
+pub const CARD_SHADOW_COLOR: Color = Color::srgb(0.0, 0.0, 0.0);
+
+/// Alpha for the resting-state card shadow. Low enough that 52 stacked
+/// shadows do not darken the felt into a uniform smear, high enough that
+/// each card reads as separated from the surface.
+pub const CARD_SHADOW_ALPHA_IDLE: f32 = 0.25;
+
+/// Alpha for the lifted/dragged card shadow. Stronger than the idle value
+/// so the dragged stack visibly "casts more shadow" while the player holds
+/// it above the table.
+pub const CARD_SHADOW_ALPHA_DRAG: f32 = 0.40;
+
+/// World-space pixel offset of the resting-state card shadow relative to
+/// its parent card centre. Down-and-right matches a soft top-left light
+/// source — the same convention used by the elevated-surface tones in the
+/// rest of the palette.
+pub const CARD_SHADOW_OFFSET_IDLE: Vec2 = Vec2::new(2.0, -3.0);
+
+/// World-space pixel offset of the lifted/dragged card shadow. Roughly
+/// double the idle offset so the parallax reads as "the card is further
+/// from the table".
+pub const CARD_SHADOW_OFFSET_DRAG: Vec2 = Vec2::new(4.0, -6.0);
+
+/// Padding in pixels added to each axis of the card size when sizing the
+/// resting-state shadow sprite. The shadow extends slightly past every
+/// edge of the card so the dark border reads as a halo rather than a
+/// matte rectangle behind the card.
+pub const CARD_SHADOW_PADDING_IDLE: Vec2 = Vec2::new(4.0, 4.0);
+
+/// Padding added to the card size when sizing the lifted/dragged shadow.
+/// A slightly larger halo at the drag state reinforces the "lifted off
+/// the felt" cue alongside the deeper offset and higher alpha.
+pub const CARD_SHADOW_PADDING_DRAG: Vec2 = Vec2::new(8.0, 8.0);
+
+/// Local `Transform.z` for the shadow child sprite, relative to its
+/// parent `CardEntity`. Slightly negative so the shadow always renders
+/// below the card itself even though it shares the parent's world z.
+pub const CARD_SHADOW_LOCAL_Z: f32 = -0.05;
 
 /// Subtle border — default popover, card, and idle button outline.
 pub const BORDER_SUBTLE: Color = Color::srgba(0.647, 0.549, 1.000, 0.12);
