@@ -113,6 +113,10 @@ default card back is original work; the UI font is FiraMono-Medium (OFL).
 All audio is synthesized programmatically by this project. See
 [CREDITS.md](CREDITS.md) for the full list and license details.
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
