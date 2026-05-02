@@ -83,6 +83,26 @@ pub struct FoundationCompletedEvent {
     pub suit: Suit,
 }
 
+/// Fired by `StatsPlugin` when the player's `win_streak_current`
+/// crosses one of the milestone thresholds in
+/// [`crate::ui_theme::STREAK_MILESTONES`] (currently 3, 5, 10).
+///
+/// Fires only on the threshold crossing — i.e. when the previous
+/// streak was below the threshold and the post-win streak is at or
+/// above it — so subsequent wins past the highest milestone do not
+/// retrigger the flourish.
+///
+/// Drives the HUD streak-milestone flourish (a brief scale pulse on
+/// the score readout) and an informational toast. UI/audio cue only;
+/// not persisted, not synchronised.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct WinStreakMilestoneEvent {
+    /// The new `win_streak_current` value at the moment the
+    /// threshold was crossed. Always equal to a value in
+    /// [`crate::ui_theme::STREAK_MILESTONES`].
+    pub streak: u32,
+}
+
 /// Fired when a card's face-up state changes during gameplay.
 #[derive(Message, Debug, Clone, Copy)]
 pub struct CardFlippedEvent(pub u32);

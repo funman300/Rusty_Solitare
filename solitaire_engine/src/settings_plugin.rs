@@ -18,7 +18,7 @@ use bevy::window::{WindowMoved, WindowResized};
 use solitaire_core::game_state::DrawMode;
 use solitaire_data::{
     load_settings_from, save_settings_to, settings_file_path, settings::Theme, AnimSpeed, Settings,
-    WindowGeometry,
+    WindowGeometry, TOOLTIP_DELAY_STEP_SECS,
 };
 
 use crate::events::{ManualSyncRequestEvent, ToggleSettingsRequestEvent};
@@ -122,6 +122,10 @@ struct BackgroundText;
 #[derive(Component, Debug)]
 struct ColorBlindText;
 
+/// Marks the `Text` node showing the live tooltip-delay value.
+#[derive(Component, Debug)]
+struct TooltipDelayText;
+
 /// Marks the scrollable inner card so the mouse-wheel system can target it.
 #[derive(Component, Debug)]
 struct SettingsPanelScrollable;
@@ -139,6 +143,10 @@ enum SettingsButton {
     MusicUp,
     ToggleDrawMode,
     CycleAnimSpeed,
+    /// Decrement the tooltip-hover dwell delay by one step.
+    TooltipDelayDown,
+    /// Increment the tooltip-hover dwell delay by one step.
+    TooltipDelayUp,
     ToggleTheme,
     ToggleColorBlind,
     SyncNow,
@@ -169,6 +177,8 @@ impl SettingsButton {
             // Gameplay section
             SettingsButton::ToggleDrawMode => 30,
             SettingsButton::CycleAnimSpeed => 40,
+            SettingsButton::TooltipDelayDown => 45,
+            SettingsButton::TooltipDelayUp => 46,
             // Cosmetic section
             SettingsButton::ToggleTheme => 50,
             SettingsButton::ToggleColorBlind => 60,
@@ -258,6 +268,7 @@ impl Plugin for SettingsPlugin {
                     update_background_text,
                     update_anim_speed_text,
                     update_color_blind_text,
+                    update_tooltip_delay_text,
                     attach_focusable_to_settings_buttons,
                     scroll_focus_into_view,
                 ),
@@ -483,6 +494,21 @@ fn update_color_blind_text(
     }
 }
 
+/// Refreshes the live tooltip-delay value in the Gameplay section
+/// whenever `SettingsResource` changes (slider buttons, hand-edited
+/// settings.json reload, etc.).
+fn update_tooltip_delay_text(
+    settings: Res<SettingsResource>,
+    mut text_nodes: Query<&mut Text, With<TooltipDelayText>>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+    for mut text in &mut text_nodes {
+        **text = tooltip_delay_label(settings.0.tooltip_delay_secs);
+    }
+}
+
 fn card_back_label(idx: usize) -> String {
     if idx == 0 {
         "Default".to_string()
@@ -606,6 +632,24 @@ fn handle_settings_buttons(
                     **t = anim_speed_label(&settings.0.animation_speed);
                 }
             }
+            SettingsButton::TooltipDelayDown => {
+                let before = settings.0.tooltip_delay_secs;
+                let after = settings.0.adjust_tooltip_delay(-TOOLTIP_DELAY_STEP_SECS);
+                if (before - after).abs() > f32::EPSILON {
+                    persist(&path, &settings.0);
+                    changed.write(SettingsChangedEvent(settings.0.clone()));
+                    // The Text node is refreshed by `update_tooltip_delay_text`
+                    // on the next frame via `settings.is_changed()`.
+                }
+            }
+            SettingsButton::TooltipDelayUp => {
+                let before = settings.0.tooltip_delay_secs;
+                let after = settings.0.adjust_tooltip_delay(TOOLTIP_DELAY_STEP_SECS);
+                if (before - after).abs() > f32::EPSILON {
+                    persist(&path, &settings.0);
+                    changed.write(SettingsChangedEvent(settings.0.clone()));
+                }
+            }
             SettingsButton::ToggleTheme => {
                 settings.0.theme = match settings.0.theme {
                     Theme::Green => Theme::Blue,
@@ -678,6 +722,17 @@ fn theme_label(theme: &Theme) -> String {
 
 fn color_blind_label(enabled: bool) -> String {
     if enabled { "ON".into() } else { "OFF".into() }
+}
+
+/// Formats the tooltip-hover delay for display in the Settings panel.
+/// `0.0` reads as `"Instant"` so the zero-delay case has a name; any
+/// other value prints as `"{n:.1} s"` (e.g. `"0.5 s"`, `"1.2 s"`).
+fn tooltip_delay_label(secs: f32) -> String {
+    if secs <= 0.0 {
+        "Instant".into()
+    } else {
+        format!("{secs:.1} s")
+    }
 }
 
 /// Auto-attaches [`Focusable`] to every bespoke Settings button — icon
@@ -1003,6 +1058,11 @@ fn spawn_settings_panel(
                 "Cycle animation speed: Normal, Fast, Instant.",
                 font_res,
             );
+            tooltip_delay_row(
+                body,
+                settings.tooltip_delay_secs,
+                font_res,
+            );
 
             // --- Cosmetic ---
             section_label(body, "Cosmetic", font_res);
@@ -1126,6 +1186,53 @@ fn volume_row<Marker: Component>(
             ));
             icon_button(row, "−", btn_down, tooltip_down, font_res);
             icon_button(row, "+", btn_up, tooltip_up, font_res);
+        });
+}
+
+/// `Tooltip Delay  0.5 s  [−]  [+]` — slider row for the player-tunable
+/// tooltip-hover dwell. Mirrors [`volume_row`] (label, current value,
+/// decrement, increment) but formats the value via [`tooltip_delay_label`]
+/// so `0.0` reads as `"Instant"` and other values as `"{n:.1} s"`.
+fn tooltip_delay_row(
+    parent: &mut ChildSpawnerCommands,
+    value_secs: f32,
+    font_res: Option<&FontResource>,
+) {
+    let label_font = label_text_font(font_res);
+    let value_font = value_text_font(font_res);
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: VAL_SPACE_2,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                Text::new("Tooltip Delay".to_string()),
+                label_font,
+                TextColor(TEXT_SECONDARY),
+            ));
+            row.spawn((
+                TooltipDelayText,
+                Text::new(tooltip_delay_label(value_secs)),
+                value_font,
+                TextColor(TEXT_PRIMARY),
+            ));
+            icon_button(
+                row,
+                "−",
+                SettingsButton::TooltipDelayDown,
+                "Shorten the hover delay before tooltips appear.",
+                font_res,
+            );
+            icon_button(
+                row,
+                "+",
+                SettingsButton::TooltipDelayUp,
+                "Lengthen the hover delay before tooltips appear.",
+                font_res,
+            );
         });
 }
 

@@ -19,6 +19,7 @@ use crate::auto_complete_plugin::AutoCompleteState;
 use crate::challenge_plugin::challenge_progress_label;
 use crate::events::{
     ForfeitEvent, GameWonEvent, InfoToastEvent, NewGameRequestEvent, ToggleStatsRequestEvent,
+    WinStreakMilestoneEvent,
 };
 use crate::game_plugin::GameMutation;
 use crate::progress_plugin::ProgressResource;
@@ -29,9 +30,9 @@ use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
 };
 use crate::ui_theme::{
-    ACCENT_PRIMARY, BORDER_SUBTLE, RADIUS_SM, STATE_INFO, STATE_WARNING, TEXT_PRIMARY,
-    TEXT_SECONDARY, TYPE_BODY, TYPE_BODY_LG, TYPE_CAPTION, TYPE_HEADLINE, VAL_SPACE_2, VAL_SPACE_3,
-    VAL_SPACE_4, Z_MODAL_PANEL,
+    ACCENT_PRIMARY, BORDER_SUBTLE, RADIUS_SM, STATE_INFO, STATE_WARNING, STREAK_MILESTONES,
+    TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY, TYPE_BODY_LG, TYPE_CAPTION, TYPE_HEADLINE, VAL_SPACE_2,
+    VAL_SPACE_3, VAL_SPACE_4, Z_MODAL_PANEL,
 };
 
 /// Bevy resource wrapping the current stats.
@@ -93,6 +94,7 @@ impl Plugin for StatsPlugin {
             .add_message::<ForfeitEvent>()
             .add_message::<InfoToastEvent>()
             .add_message::<ToggleStatsRequestEvent>()
+            .add_message::<WinStreakMilestoneEvent>()
             // record_abandoned must read `move_count` BEFORE handle_new_game
             // clobbers it with a fresh game. These are NOT in StatsUpdate because
             // StatsUpdate (as a set) is ordered after GameMutation by external
@@ -130,13 +132,53 @@ fn update_stats_on_win(
     game: Res<GameStateResource>,
     mut stats: ResMut<StatsResource>,
     path: Res<StatsStoragePath>,
+    mut milestone: MessageWriter<WinStreakMilestoneEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
 ) {
     for ev in events.read() {
+        let prev_streak = stats.0.win_streak_current;
         stats
             .0
             .update_on_win(ev.score, ev.time_seconds, &game.0.draw_mode);
+        let new_streak = stats.0.win_streak_current;
+        // Fire the streak-milestone event only on the threshold
+        // crossing — `prev < threshold && new >= threshold`. This
+        // guarantees the flourish never retriggers at every win past
+        // the highest milestone.
+        if let Some(crossed) = streak_milestone_crossed(prev_streak, new_streak) {
+            milestone.write(WinStreakMilestoneEvent { streak: crossed });
+            toast.write(InfoToastEvent(format!(
+                "Win streak: {crossed}! \u{1F525}"
+            )));
+        }
         persist(&path, &stats.0, "win");
     }
+}
+
+/// Returns the milestone value that the player just crossed, if any.
+///
+/// A milestone is "crossed" when `prev < threshold && new >= threshold`
+/// for some `threshold` in [`STREAK_MILESTONES`]. Returns the largest
+/// such threshold (so a single win that vaults the player from a
+/// streak of 0 directly to 5 — implausible, but defensive — fires the
+/// most-celebrated milestone, not the smallest).
+///
+/// Returns `None` when no threshold was crossed, i.e. either:
+/// - the streak did not change,
+/// - the streak rose but stayed below every threshold, or
+/// - the streak rose past a threshold that `prev` was already at or
+///   above.
+///
+/// Pure function exposed for unit testing without Bevy.
+pub fn streak_milestone_crossed(prev: u32, new: u32) -> Option<u32> {
+    if new <= prev {
+        return None;
+    }
+    STREAK_MILESTONES
+        .iter()
+        .copied()
+        .filter(|&t| prev < t && new >= t)
+        .max()
 }
 
 fn update_stats_on_new_game(
@@ -893,6 +935,122 @@ mod tests {
         assert!(
             !messages.iter().any(|m| m.contains("broken")),
             "expected no streak-broken toast for streak of 1, got: {messages:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Streak-milestone flourish — pure helper + event-firing tests
+    // -----------------------------------------------------------------------
+
+    /// Pure helper: every threshold in `STREAK_MILESTONES` (3, 5, 10) must
+    /// fire when the streak crosses it from below.
+    #[test]
+    fn streak_milestone_helper_fires_at_each_threshold() {
+        for &threshold in STREAK_MILESTONES {
+            assert_eq!(
+                streak_milestone_crossed(threshold - 1, threshold),
+                Some(threshold),
+                "expected milestone {threshold} to fire when crossed from below",
+            );
+        }
+    }
+
+    /// Pure helper: rising past 10 to 11, 12, … must NOT fire — the
+    /// flourish is a threshold-crossing event, not a "every win past 10"
+    /// event.
+    #[test]
+    fn streak_milestone_helper_does_not_fire_past_highest() {
+        // prev=10 → new=11: above the highest threshold, no crossing.
+        assert_eq!(streak_milestone_crossed(10, 11), None);
+        // prev=15 → new=16: well past every threshold, no crossing.
+        assert_eq!(streak_milestone_crossed(15, 16), None);
+        // prev=2 → new=2: no change → no crossing.
+        assert_eq!(streak_milestone_crossed(2, 2), None);
+    }
+
+    /// Pure helper: rising 1 → 2 stays below the lowest threshold (3),
+    /// must NOT fire.
+    #[test]
+    fn streak_milestone_helper_does_not_fire_below_threshold() {
+        assert_eq!(streak_milestone_crossed(1, 2), None);
+        assert_eq!(streak_milestone_crossed(0, 1), None);
+    }
+
+    /// Integration: pre-set streak to 2, fire a win that bumps it to 3,
+    /// assert exactly one `WinStreakMilestoneEvent { streak: 3 }` is
+    /// written by the win handler.
+    #[test]
+    fn streak_milestone_event_fires_at_threshold_crossing() {
+        let mut app = headless_app();
+        {
+            let mut stats = app.world_mut().resource_mut::<StatsResource>();
+            stats.0.win_streak_current = 2;
+        }
+        app.world_mut().write_message(GameWonEvent {
+            score: 500,
+            time_seconds: 90,
+        });
+        app.update();
+
+        let events = app.world().resource::<Messages<WinStreakMilestoneEvent>>();
+        let mut reader = events.get_cursor();
+        let collected: Vec<u32> = reader.read(events).map(|e| e.streak).collect();
+
+        assert_eq!(
+            collected,
+            vec![3],
+            "expected one WinStreakMilestoneEvent {{ streak: 3 }} after crossing 2 → 3",
+        );
+    }
+
+    /// Integration: pre-set streak to 1, fire a win that bumps it to 2 —
+    /// no threshold is crossed, no event must be fired.
+    #[test]
+    fn streak_milestone_event_does_not_fire_at_non_threshold() {
+        let mut app = headless_app();
+        {
+            let mut stats = app.world_mut().resource_mut::<StatsResource>();
+            stats.0.win_streak_current = 1;
+        }
+        app.world_mut().write_message(GameWonEvent {
+            score: 500,
+            time_seconds: 90,
+        });
+        app.update();
+
+        let events = app.world().resource::<Messages<WinStreakMilestoneEvent>>();
+        let mut reader = events.get_cursor();
+        let collected: Vec<u32> = reader.read(events).map(|e| e.streak).collect();
+
+        assert!(
+            collected.is_empty(),
+            "expected no WinStreakMilestoneEvent for non-threshold streak crossing 1 → 2, got {collected:?}",
+        );
+    }
+
+    /// Integration: pre-set streak to 10, fire a win that bumps it to 11.
+    /// Past the highest threshold, no event must fire — the flourish
+    /// is reserved for the threshold crossing itself.
+    #[test]
+    fn streak_milestone_event_does_not_fire_past_10() {
+        let mut app = headless_app();
+        {
+            let mut stats = app.world_mut().resource_mut::<StatsResource>();
+            stats.0.win_streak_current = 10;
+        }
+        app.world_mut().write_message(GameWonEvent {
+            score: 500,
+            time_seconds: 90,
+        });
+        app.update();
+
+        let events = app.world().resource::<Messages<WinStreakMilestoneEvent>>();
+        let mut reader = events.get_cursor();
+        let collected: Vec<u32> = reader.read(events).map(|e| e.streak).collect();
+
+        assert!(
+            collected.is_empty(),
+            "expected no WinStreakMilestoneEvent past the highest threshold, got {collected:?}",
         );
     }
 }

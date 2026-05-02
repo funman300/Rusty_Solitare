@@ -19,16 +19,17 @@ use crate::settings_plugin::SettingsResource;
 use crate::layout::HUD_BAND_HEIGHT;
 use crate::ui_theme::{
     scaled_duration, ACCENT_PRIMARY, ACCENT_SECONDARY, BG_ELEVATED, BG_ELEVATED_HI,
-    BG_ELEVATED_PRESSED, BG_HUD_BAND, BORDER_SUBTLE, MOTION_SCORE_PULSE_SECS, RADIUS_MD, RADIUS_SM,
-    STATE_DANGER, STATE_INFO, STATE_SUCCESS, STATE_WARNING, TEXT_PRIMARY, TEXT_SECONDARY,
-    TYPE_BODY, TYPE_BODY_LG, TYPE_CAPTION, TYPE_HEADLINE, VAL_SPACE_1, VAL_SPACE_2, VAL_SPACE_3,
+    BG_ELEVATED_PRESSED, BG_HUD_BAND, BORDER_SUBTLE, MOTION_SCORE_PULSE_SECS,
+    MOTION_STREAK_FLOURISH_SECS, RADIUS_MD, RADIUS_SM, STATE_DANGER, STATE_INFO, STATE_SUCCESS,
+    STATE_WARNING, STREAK_FLOURISH_PEAK_SCALE, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY,
+    TYPE_BODY_LG, TYPE_CAPTION, TYPE_HEADLINE, VAL_SPACE_1, VAL_SPACE_2, VAL_SPACE_3,
 };
 use crate::events::{
     HelpRequestEvent, InfoToastEvent, NewGameRequestEvent, PauseRequestEvent,
     StartChallengeRequestEvent, StartDailyChallengeRequestEvent, StartTimeAttackRequestEvent,
     StartZenRequestEvent, ToggleAchievementsRequestEvent, ToggleLeaderboardRequestEvent,
     ToggleProfileRequestEvent, ToggleSettingsRequestEvent, ToggleStatsRequestEvent,
-    UndoRequestEvent,
+    UndoRequestEvent, WinStreakMilestoneEvent,
 };
 use crate::font_plugin::FontResource;
 use crate::game_plugin::GameMutation;
@@ -128,6 +129,51 @@ pub struct ScoreFloater {
     /// Total lifetime. Zero under `AnimSpeed::Instant` — the system
     /// despawns it on first tick.
     pub duration: f32,
+}
+
+/// Drives the streak-milestone flourish: scales the [`HudScore`] text
+/// from `1.0 → STREAK_FLOURISH_PEAK_SCALE → 1.0` over
+/// [`MOTION_STREAK_FLOURISH_SECS`] (scaled by
+/// [`AnimSpeed`](solitaire_data::AnimSpeed)) and tints it
+/// [`ACCENT_SECONDARY`] for the same window before restoring the
+/// original colour.
+///
+/// The streak readout currently lives in the Stats overlay (press
+/// `S`) — there is no always-on HUD streak counter — so the flourish
+/// piggybacks on the score readout, which is the most prominent
+/// always-visible HUD number. Mirrors the `FoundationFlourish`
+/// pattern: triangular scale curve, fixed duration, restores state
+/// when the timer expires.
+///
+/// Inserted on `HudScore` entities by `start_streak_flourish` when a
+/// `WinStreakMilestoneEvent` fires; removed once `elapsed >=
+/// duration` so the readout returns to its rest state for the next
+/// frame's transform sync.
+///
+/// Coexists with [`ScorePulse`]: the streak flourish lives on a
+/// dedicated marker so a streak-crossing win that also ticks the
+/// score (every win does) doesn't have the two animations stomp on
+/// each other's `Transform.scale` writes — the streak flourish runs
+/// in a `Without<ScorePulse>` query so only the loudest of the two
+/// celebrations is active at a time.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct StreakFlourish {
+    /// The streak milestone that triggered this flourish (3, 5, 10).
+    /// Carried for diagnostic logging only — the visual is identical
+    /// for every threshold so play-testing can decide later whether
+    /// to differentiate.
+    pub streak: u32,
+    /// Seconds elapsed since the flourish began.
+    pub elapsed: f32,
+    /// Total animation length in seconds. Zero under
+    /// [`AnimSpeed::Instant`](solitaire_data::AnimSpeed) — the system
+    /// snaps the scale back to 1.0 on the first tick so no half-state
+    /// is ever shown.
+    pub duration: f32,
+    /// The score readout's colour before the flourish began —
+    /// restored when the timer expires so the readout returns to its
+    /// resting `TEXT_PRIMARY` (or whatever it was) tint.
+    pub original_color: Color,
 }
 
 /// Tracks the score from the previous frame so the HUD can detect
@@ -251,6 +297,7 @@ impl Plugin for HudPlugin {
             .add_message::<ToggleProfileRequestEvent>()
             .add_message::<ToggleSettingsRequestEvent>()
             .add_message::<ToggleLeaderboardRequestEvent>()
+            .add_message::<WinStreakMilestoneEvent>()
             .init_resource::<PreviousScore>()
             .init_resource::<HudActionFade>()
             .add_systems(Startup, (spawn_hud_band, spawn_hud, spawn_action_buttons))
@@ -264,6 +311,12 @@ impl Plugin for HudPlugin {
                     advance_score_pulse,
                     advance_score_floater,
                 )
+                    .chain()
+                    .after(GameMutation),
+            )
+            .add_systems(
+                Update,
+                (start_streak_flourish, advance_streak_flourish)
                     .chain()
                     .after(GameMutation),
             )
@@ -1285,6 +1338,148 @@ fn advance_score_floater(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Streak-milestone flourish
+//
+// Per the 2026-04-30 UX overhaul plan, the foundation flourish is the per-suit
+// completion celebration; the streak flourish is its lifetime equivalent —
+// when the player's `win_streak_current` crosses 3, 5, or 10, the HUD score
+// readout pulses larger than a normal score-change pulse and tints magenta
+// (`ACCENT_SECONDARY`) before snapping back to its resting state.
+//
+// Why the score readout: there is no always-on streak number on the HUD
+// today (the readout lives in the Stats overlay), and the score is the
+// most prominent always-visible HUD figure. The accompanying `InfoToastEvent`
+// fired by `stats_plugin` carries the explicit "Win streak: N!" text so a
+// player who isn't watching the score still sees the celebration land.
+// ---------------------------------------------------------------------------
+
+/// Pure helper for unit tests — returns the per-frame scale factor for
+/// the streak flourish at `elapsed_secs` over `duration_secs`.
+///
+/// Triangular curve, mirroring [`foundation_flourish_scale`](crate::feedback_anim_plugin::foundation_flourish_scale):
+/// at `t = 0.0` returns `1.0`, at `t = 0.5` returns
+/// [`STREAK_FLOURISH_PEAK_SCALE`], at `t = 1.0` returns `1.0`.
+/// Out-of-range values are clamped so the score readout never freezes
+/// at a non-1.0 scale on the frame after the flourish ends.
+///
+/// Returns `1.0` whenever `duration_secs <= 0.0` so callers running
+/// under `AnimSpeed::Instant` (zeroed durations) skip the flourish
+/// without dividing by zero.
+pub fn streak_flourish_scale(elapsed_secs: f32, duration_secs: f32) -> f32 {
+    if duration_secs <= 0.0 {
+        return 1.0;
+    }
+    let t = (elapsed_secs / duration_secs).clamp(0.0, 1.0);
+    let peak = STREAK_FLOURISH_PEAK_SCALE;
+    if t < 0.5 {
+        // Climb from 1.0 at t=0 to peak at t=0.5.
+        1.0 + (peak - 1.0) * (t / 0.5)
+    } else {
+        // Descend from peak at t=0.5 back to 1.0 at t=1.0.
+        peak - (peak - 1.0) * ((t - 0.5) / 0.5)
+    }
+}
+
+/// Inserts a [`StreakFlourish`] on every [`HudScore`] entity when a
+/// [`WinStreakMilestoneEvent`] fires. Captures the readout's current
+/// `TextColor` so `advance_streak_flourish` can restore it when the
+/// timer expires; reuses any existing flourish's `original_color` so
+/// re-entering the system mid-flourish doesn't snapshot the magenta
+/// tint as the new "original".
+///
+/// Removes any concurrent [`ScorePulse`] from the same entity so the
+/// flourish takes over the scale slot cleanly — score pulses last
+/// 250 ms, the flourish 600 ms, and the streak crossing always
+/// coincides with a positive score delta, so the flourish is the
+/// louder of the two celebrations.
+fn start_streak_flourish(
+    mut events: MessageReader<WinStreakMilestoneEvent>,
+    settings: Option<Res<SettingsResource>>,
+    score_q: Query<(Entity, &TextColor, Option<&StreakFlourish>), With<HudScore>>,
+    mut commands: Commands,
+) {
+    let Some(latest) = events.read().last() else {
+        return;
+    };
+    let speed = settings
+        .as_ref()
+        .map(|s| s.0.animation_speed)
+        .unwrap_or_default();
+    let duration = scaled_duration(MOTION_STREAK_FLOURISH_SECS, speed);
+    for (entity, color, existing) in &score_q {
+        let original_color = existing.map_or(color.0, |f| f.original_color);
+        commands
+            .entity(entity)
+            .remove::<ScorePulse>()
+            .insert(StreakFlourish {
+                streak: latest.streak,
+                elapsed: 0.0,
+                duration,
+                original_color,
+            });
+    }
+}
+
+/// Advances every [`StreakFlourish`], scaling its entity's `Transform`
+/// using [`streak_flourish_scale`] and lerping the `TextColor` toward
+/// [`ACCENT_SECONDARY`] for the first half then back to the captured
+/// `original_color`. Removes the component once `elapsed >= duration`
+/// (or immediately under [`AnimSpeed::Instant`](solitaire_data::AnimSpeed)
+/// where duration is 0) and pins the scale back to 1.0 / restores the
+/// original colour so no half-state is ever shown.
+///
+/// Filtered with `Without<ScorePulse>` so the streak flourish never
+/// races a score pulse for the same `Transform.scale` slot —
+/// `start_streak_flourish` strips any concurrent `ScorePulse` from the
+/// score entity before this system runs, so the filter is purely a
+/// belt-and-braces invariant.
+fn advance_streak_flourish(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut q: Query<
+        (Entity, &mut StreakFlourish, &mut Transform, &mut TextColor),
+        Without<ScorePulse>,
+    >,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut anim, mut transform, mut color) in &mut q {
+        let t = if anim.duration <= 0.0 {
+            1.0
+        } else {
+            anim.elapsed += dt;
+            (anim.elapsed / anim.duration).clamp(0.0, 1.0)
+        };
+        let scale = streak_flourish_scale(anim.elapsed, anim.duration);
+        transform.scale = Vec3::new(scale, scale, 1.0);
+        // Tint mix: full magenta at t=0..=0.5, fades back to the
+        // original colour over t=0.5..=1.0.
+        let mix = if t < 0.5 { 1.0 } else { 1.0 - (t - 0.5) / 0.5 };
+        color.0 = lerp_text_color(anim.original_color, ACCENT_SECONDARY, mix);
+        if t >= 1.0 {
+            transform.scale = Vec3::ONE;
+            color.0 = anim.original_color;
+            commands.entity(entity).remove::<StreakFlourish>();
+        }
+    }
+}
+
+/// sRGB-space linear interpolation between two `Color`s — small local
+/// helper so `advance_streak_flourish` stays readable. sRGB-space
+/// lerping is fine for a brief decorative tint (a perceptually-uniform
+/// space would be overkill).
+fn lerp_text_color(from: Color, to: Color, t: f32) -> Color {
+    let from = from.to_srgba();
+    let to = to.to_srgba();
+    let t = t.clamp(0.0, 1.0);
+    Color::srgba(
+        from.red + (to.red - from.red) * t,
+        from.green + (to.green - from.green) * t,
+        from.blue + (to.blue - from.blue) * t,
+        from.alpha + (to.alpha - from.alpha) * t,
+    )
+}
+
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn update_hud(
     game: Res<GameStateResource>,
@@ -2089,6 +2284,45 @@ mod tests {
         // Values outside [0,1] are clamped before the curve runs.
         assert!((score_pulse_scale(-0.2) - 1.0).abs() < 1e-6);
         assert!((score_pulse_scale(2.0) - 1.0).abs() < 1e-6);
+    }
+
+    /// Streak flourish curve must be 1.0 at t=0, peak at t=0.5, and
+    /// return to 1.0 at t=duration. Mirrors the `foundation_flourish_scale`
+    /// curve test — the two animations share a triangular shape so a
+    /// future tweak that desyncs them shows up here.
+    #[test]
+    fn streak_flourish_scale_curves_through_one_one_one() {
+        let dur = MOTION_STREAK_FLOURISH_SECS;
+        assert!(
+            (streak_flourish_scale(0.0, dur) - 1.0).abs() < 1e-5,
+            "streak flourish scale at t=0 must be 1.0",
+        );
+        assert!(
+            (streak_flourish_scale(dur / 2.0, dur) - STREAK_FLOURISH_PEAK_SCALE).abs() < 1e-5,
+            "streak flourish scale at midpoint must be STREAK_FLOURISH_PEAK_SCALE",
+        );
+        assert!(
+            (streak_flourish_scale(dur, dur) - 1.0).abs() < 1e-5,
+            "streak flourish scale at t=duration must return to 1.0",
+        );
+    }
+
+    /// Out-of-range values are clamped, not extrapolated. Matches the
+    /// foundation flourish's clamp behaviour so the score readout never
+    /// freezes at a non-1.0 scale on the frame after the flourish ends.
+    #[test]
+    fn streak_flourish_scale_clamps_out_of_range() {
+        let dur = MOTION_STREAK_FLOURISH_SECS;
+        assert!((streak_flourish_scale(-1.0, dur) - 1.0).abs() < 1e-5);
+        assert!((streak_flourish_scale(dur * 5.0, dur) - 1.0).abs() < 1e-5);
+    }
+
+    /// Zero duration (e.g. `AnimSpeed::Instant`) returns identity, never
+    /// divides by zero.
+    #[test]
+    fn streak_flourish_scale_zero_duration_is_one() {
+        assert!((streak_flourish_scale(0.0, 0.0) - 1.0).abs() < 1e-5);
+        assert!((streak_flourish_scale(0.5, 0.0) - 1.0).abs() < 1e-5);
     }
 
     // -----------------------------------------------------------------------

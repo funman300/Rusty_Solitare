@@ -143,6 +143,14 @@ pub struct Settings {
     /// so the toast still does not fire for them.
     #[serde(default)]
     pub shown_achievement_onboarding: bool,
+    /// Hover delay (seconds) before a tooltip appears. Range
+    /// `[0.0, 1.5]`; default matches `MOTION_TOOLTIP_DELAY_SECS` (0.5 s).
+    /// `0.0` means tooltips fire on the very next tick after hover —
+    /// the "Instant" setting. Older `settings.json` files written before
+    /// this field existed deserialize cleanly to the default via
+    /// `#[serde(default = "default_tooltip_delay")]`.
+    #[serde(default = "default_tooltip_delay")]
+    pub tooltip_delay_secs: f32,
 }
 
 fn default_draw_mode() -> DrawMode {
@@ -161,6 +169,26 @@ fn default_theme_id() -> String {
     "default".to_string()
 }
 
+/// Default tooltip-hover dwell delay in seconds. Mirrors
+/// `solitaire_engine::ui_theme::MOTION_TOOLTIP_DELAY_SECS` so legacy
+/// `settings.json` files load to the existing baseline. The constant
+/// lives in the engine crate (which the data crate cannot depend on),
+/// so the value is duplicated here — kept in sync by the
+/// `settings_tooltip_delay_default_is_existing_baseline` test in
+/// `solitaire_engine::settings_plugin`.
+fn default_tooltip_delay() -> f32 {
+    0.5
+}
+
+/// Lower bound of the player-tunable tooltip delay slider, in seconds.
+pub const TOOLTIP_DELAY_MIN_SECS: f32 = 0.0;
+
+/// Upper bound of the player-tunable tooltip delay slider, in seconds.
+pub const TOOLTIP_DELAY_MAX_SECS: f32 = 1.5;
+
+/// Increment applied by the tooltip-delay decrement / increment buttons.
+pub const TOOLTIP_DELAY_STEP_SECS: f32 = 0.1;
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -177,17 +205,22 @@ impl Default for Settings {
             window_geometry: None,
             selected_theme_id: default_theme_id(),
             shown_achievement_onboarding: false,
+            tooltip_delay_secs: default_tooltip_delay(),
         }
     }
 }
 
 impl Settings {
-    /// Clamps both `sfx_volume` and `music_volume` into `[0.0, 1.0]` after
-    /// deserialization or hand-editing of `settings.json`.
+    /// Clamps `sfx_volume`, `music_volume`, and `tooltip_delay_secs` into
+    /// their respective ranges after deserialization or hand-editing of
+    /// `settings.json`.
     pub fn sanitized(self) -> Self {
         Self {
             sfx_volume: self.sfx_volume.clamp(0.0, 1.0),
             music_volume: self.music_volume.clamp(0.0, 1.0),
+            tooltip_delay_secs: self
+                .tooltip_delay_secs
+                .clamp(TOOLTIP_DELAY_MIN_SECS, TOOLTIP_DELAY_MAX_SECS),
             ..self
         }
     }
@@ -202,6 +235,15 @@ impl Settings {
     pub fn adjust_music_volume(&mut self, delta: f32) -> f32 {
         self.music_volume = (self.music_volume + delta).clamp(0.0, 1.0);
         self.music_volume
+    }
+
+    /// Adjust the tooltip-hover dwell delay by `delta` seconds, clamped
+    /// to `[TOOLTIP_DELAY_MIN_SECS, TOOLTIP_DELAY_MAX_SECS]`. Returns the
+    /// new value.
+    pub fn adjust_tooltip_delay(&mut self, delta: f32) -> f32 {
+        self.tooltip_delay_secs = (self.tooltip_delay_secs + delta)
+            .clamp(TOOLTIP_DELAY_MIN_SECS, TOOLTIP_DELAY_MAX_SECS);
+        self.tooltip_delay_secs
     }
 }
 
@@ -253,6 +295,7 @@ mod tests {
         assert_eq!(s.animation_speed, AnimSpeed::Normal);
         assert_eq!(s.theme, Theme::Green);
         assert_eq!(s.sync_backend, SyncBackend::Local);
+        assert!((s.tooltip_delay_secs - default_tooltip_delay()).abs() < 1e-6);
     }
 
     #[test]
@@ -331,6 +374,7 @@ mod tests {
             window_geometry: None,
             selected_theme_id: "default".to_string(),
             shown_achievement_onboarding: false,
+            tooltip_delay_secs: default_tooltip_delay(),
         };
         save_settings_to(&path, &s).expect("save");
         let loaded = load_settings_from(&path);
@@ -562,5 +606,87 @@ mod tests {
             !s.shown_achievement_onboarding,
             "legacy settings.json missing shown_achievement_onboarding must deserialize to false"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // tooltip_delay_secs — player-tunable tooltip hover delay
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn settings_tooltip_delay_default_is_existing_baseline() {
+        // The existing baseline pre-slider is 0.5 s, matching the
+        // `MOTION_TOOLTIP_DELAY_SECS` constant in
+        // `solitaire_engine::ui_theme`. The default must not regress.
+        let s = Settings::default();
+        assert!(
+            (s.tooltip_delay_secs - 0.5).abs() < 1e-6,
+            "tooltip_delay_secs default must be 0.5 (the pre-slider baseline), got {}",
+            s.tooltip_delay_secs
+        );
+    }
+
+    #[test]
+    fn settings_tooltip_delay_round_trip() {
+        let path = tmp_path("tooltip_delay_round_trip");
+        let _ = fs::remove_file(&path);
+        let s = Settings {
+            tooltip_delay_secs: 1.2,
+            ..Settings::default()
+        };
+        save_settings_to(&path, &s).expect("save");
+        let loaded = load_settings_from(&path);
+        assert!(
+            (loaded.tooltip_delay_secs - 1.2).abs() < 1e-6,
+            "tooltip_delay_secs must survive serde round-trip; got {}",
+            loaded.tooltip_delay_secs
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn legacy_settings_without_tooltip_delay_deserializes_to_default() {
+        // A settings.json written before this field existed must
+        // deserialize cleanly to the existing 0.5 s baseline rather
+        // than failing the whole load or yielding a zero value.
+        let json = br#"{ "sfx_volume": 0.7, "first_run_complete": true }"#;
+        let s: Settings = serde_json::from_slice(json).unwrap_or_default();
+        assert!(
+            (s.tooltip_delay_secs - default_tooltip_delay()).abs() < 1e-6,
+            "legacy settings.json missing tooltip_delay_secs must deserialize to default ({}), got {}",
+            default_tooltip_delay(),
+            s.tooltip_delay_secs
+        );
+    }
+
+    #[test]
+    fn adjust_tooltip_delay_clamps_to_range() {
+        let mut s = Settings { tooltip_delay_secs: 0.5, ..Default::default() };
+        // Step up to 0.6.
+        assert!((s.adjust_tooltip_delay(0.1) - 0.6).abs() < 1e-6);
+        // Big positive jump clamps to TOOLTIP_DELAY_MAX_SECS.
+        assert!((s.adjust_tooltip_delay(5.0) - TOOLTIP_DELAY_MAX_SECS).abs() < 1e-6);
+        // Big negative jump clamps to TOOLTIP_DELAY_MIN_SECS.
+        assert!((s.adjust_tooltip_delay(-99.0) - TOOLTIP_DELAY_MIN_SECS).abs() < 1e-6);
+        // Confirm the floor is exactly zero.
+        assert_eq!(s.tooltip_delay_secs, 0.0);
+    }
+
+    #[test]
+    fn sanitized_clamps_out_of_range_tooltip_delay() {
+        // Negative or oversized values from a hand-edited file must be
+        // clamped on load.
+        let s = Settings {
+            tooltip_delay_secs: -0.4,
+            ..Settings::default()
+        }
+        .sanitized();
+        assert_eq!(s.tooltip_delay_secs, TOOLTIP_DELAY_MIN_SECS);
+
+        let s2 = Settings {
+            tooltip_delay_secs: 99.0,
+            ..Settings::default()
+        }
+        .sanitized();
+        assert_eq!(s2.tooltip_delay_secs, TOOLTIP_DELAY_MAX_SECS);
     }
 }

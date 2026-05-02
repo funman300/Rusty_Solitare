@@ -361,6 +361,14 @@ pub const MOTION_CASCADE_STAGGER_SECS: f32 = 0.06;
 /// (overshoot) plus ±15° Z-rotation. 500 ms.
 pub const MOTION_CASCADE_SLIDE_SECS: f32 = 0.50;
 
+/// Per-line stagger between score-breakdown rows during the win modal
+/// reveal animation, in seconds.
+pub const MOTION_SCORE_BREAKDOWN_STAGGER_SECS: f32 = 0.15;
+
+/// Per-line fade-in duration during the win modal score reveal, in
+/// seconds.
+pub const MOTION_SCORE_BREAKDOWN_FADE_SECS: f32 = 0.12;
+
 /// Screen shake on win — wider and longer than the old 0.6 s / 8 px.
 /// 800 ms.
 pub const MOTION_WIN_SHAKE_SECS: f32 = 0.80;
@@ -394,6 +402,23 @@ pub const MOTION_FOUNDATION_FLOURISH_SECS: f32 = 0.4;
 /// foundation-completion flourish. The triangular curve climbs from
 /// 1.0 at `t=0` to this value at `t=0.5` and back to 1.0 at `t=1.0`.
 pub const FOUNDATION_FLOURISH_PEAK_SCALE: f32 = 1.15;
+
+/// Total duration of the streak-milestone flourish on the HUD score
+/// readout, in seconds. Mirrors the foundation flourish in feel — a
+/// brief celebratory pulse that does not block subsequent gameplay.
+pub const MOTION_STREAK_FLOURISH_SECS: f32 = 0.6;
+
+/// Peak scale magnification reached at the midpoint of the streak
+/// flourish (1.0 → this → 1.0). Larger than the foundation flourish
+/// peak so the lifetime-streak celebration reads as a bigger deal than
+/// the per-suit completion.
+pub const STREAK_FLOURISH_PEAK_SCALE: f32 = 1.20;
+
+/// Win-streak counts that trigger the flourish. The flourish fires
+/// only when the streak crosses a threshold from below — never at
+/// every win past the highest threshold. Static for now; could become
+/// a `Settings`-tunable list later if play-testing surfaces it.
+pub const STREAK_MILESTONES: &[u32] = &[3, 5, 10];
 
 /// Loading-ellipsis cycle — `.`/`..`/`...` toggles every step.
 /// 400 ms.

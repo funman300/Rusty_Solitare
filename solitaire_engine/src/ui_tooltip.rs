@@ -34,6 +34,7 @@ use bevy::prelude::*;
 use bevy::ui::{ComputedNode, UiGlobalTransform};
 
 use crate::font_plugin::FontResource;
+use crate::settings_plugin::SettingsResource;
 use crate::ui_theme::{
     BG_ELEVATED_HI, BORDER_SUBTLE, MOTION_TOOLTIP_DELAY_SECS, RADIUS_SM, TEXT_PRIMARY,
     TYPE_CAPTION, VAL_SPACE_2, Z_TOOLTIP,
@@ -136,6 +137,23 @@ struct TooltipText;
 /// pixels. Small enough to read as "attached"; big enough to clear the
 /// target's own border.
 const TOOLTIP_GAP_PX: f32 = 4.0;
+
+/// Pure helper: returns `true` once `elapsed_secs` has met or exceeded
+/// the player-configured `delay_secs`, so the tooltip should be revealed.
+///
+/// Treating "elapsed >= delay" as the show condition (rather than
+/// strictly greater than) is what makes a `delay_secs == 0.0` setting
+/// behave as advertised: on the very first tick after hover starts,
+/// `elapsed_secs` is `0.0` and the tooltip appears immediately. With a
+/// strict `>` the zero-delay case would still wait one tick.
+///
+/// Extracted so the comparison can be unit-tested without spinning up
+/// a Bevy `App` — `Time<Virtual>` clamps each tick to 250 ms under
+/// `MinimalPlugins`, which makes precise sub-second timing assertions
+/// awkward.
+pub(crate) fn tooltip_should_show(elapsed_secs: f32, delay_secs: f32) -> bool {
+    elapsed_secs >= delay_secs
+}
 
 // ---------------------------------------------------------------------------
 // Systems
@@ -257,6 +275,7 @@ fn track_tooltip_hover(
 fn show_or_hide_tooltip(
     time: Res<Time>,
     state: Res<TooltipState>,
+    settings: Option<Res<SettingsResource>>,
     tooltips: Query<(&Tooltip, &UiGlobalTransform, &ComputedNode)>,
     tooltip_text_only: Query<&Tooltip>,
     mut overlay_q: Query<(&mut Node, &mut Visibility, &Children), With<TooltipOverlay>>,
@@ -280,9 +299,15 @@ fn show_or_hide_tooltip(
         return;
     };
 
+    // Player-configurable dwell delay; falls back to the design-token
+    // default when `SettingsResource` is absent (test harnesses running
+    // `UiTooltipPlugin` under `MinimalPlugins` without `SettingsPlugin`).
+    let delay_secs = settings
+        .as_ref()
+        .map(|s| s.0.tooltip_delay_secs)
+        .unwrap_or(MOTION_TOOLTIP_DELAY_SECS);
     let elapsed = time.elapsed().saturating_sub(started_at);
-    let delay = Duration::from_secs_f32(MOTION_TOOLTIP_DELAY_SECS);
-    if elapsed < delay {
+    if !tooltip_should_show(elapsed.as_secs_f32(), delay_secs) {
         hide(&mut visibility);
         return;
     }
@@ -549,5 +574,31 @@ mod tests {
             "B label",
             "overlay text must update to the new hovered entity's Tooltip string"
         );
+    }
+
+    /// Test 5: `tooltip_should_show` is the pure helper that the system
+    /// uses to gate the reveal — exercising it directly avoids the
+    /// `Time<Virtual>` 250 ms clamp that makes precise sub-second
+    /// timing assertions in `MinimalPlugins` fiddly. The four cases
+    /// below cover the boundary semantics:
+    ///
+    /// * `delay = 0.0` ("Instant") must show on the first tick.
+    /// * `elapsed < delay` must NOT show.
+    /// * `elapsed == delay` must show (boundary inclusive).
+    /// * `elapsed > delay` must show.
+    #[test]
+    fn tooltip_should_show_respects_delay() {
+        // delay == 0 ("Instant"): any elapsed (including zero) shows.
+        assert!(tooltip_should_show(0.0, 0.0), "instant delay must show on first tick");
+        assert!(tooltip_should_show(0.5, 0.0));
+
+        // Standard non-zero delay.
+        assert!(!tooltip_should_show(0.4, 0.5), "elapsed < delay must hide");
+        assert!(tooltip_should_show(0.5, 0.5), "elapsed == delay must show (boundary)");
+        assert!(tooltip_should_show(0.6, 0.5), "elapsed > delay must show");
+
+        // Larger delay (max-end of the slider).
+        assert!(!tooltip_should_show(1.0, 1.5));
+        assert!(tooltip_should_show(1.5, 1.5));
     }
 }

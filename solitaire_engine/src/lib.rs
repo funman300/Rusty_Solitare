@@ -89,14 +89,15 @@ pub use events::{
     StartDailyChallengeRequestEvent, StartTimeAttackRequestEvent, StartZenRequestEvent,
     StateChangedEvent, SyncCompleteEvent, ToggleAchievementsRequestEvent,
     ToggleLeaderboardRequestEvent, ToggleProfileRequestEvent, ToggleSettingsRequestEvent,
-    ToggleStatsRequestEvent, UndoRequestEvent, XpAwardedEvent,
+    ToggleStatsRequestEvent, UndoRequestEvent, WinStreakMilestoneEvent, XpAwardedEvent,
 };
 pub use game_plugin::{ConfirmNewGameScreen, GameMutation, GameOverScreen, GamePlugin, GameStatePath};
 pub use help_plugin::{HelpPlugin, HelpScreen};
 pub use home_plugin::{HomePlugin, HomeScreen};
 pub use hud_plugin::{
-    ActionButton, HelpButton, HudAutoComplete, HudPlugin, MenuButton, MenuOption, MenuPopover,
-    ModeOption, ModesButton, ModesPopover, NewGameButton, PauseButton, UndoButton,
+    streak_flourish_scale, ActionButton, HelpButton, HudAutoComplete, HudPlugin, MenuButton,
+    MenuOption, MenuPopover, ModeOption, ModesButton, ModesPopover, NewGameButton, PauseButton,
+    StreakFlourish, UndoButton,
 };
 pub use leaderboard_plugin::{LeaderboardPlugin, LeaderboardResource, LeaderboardScreen};
 pub use input_plugin::InputPlugin;

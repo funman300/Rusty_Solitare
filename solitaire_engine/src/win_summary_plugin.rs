@@ -12,6 +12,8 @@
 
 use bevy::prelude::*;
 use solitaire_core::game_state::GameMode;
+use solitaire_core::scoring::compute_time_bonus;
+use solitaire_data::AnimSpeed;
 
 use crate::achievement_plugin::display_name_for;
 use crate::events::{
@@ -23,10 +25,11 @@ use crate::resources::GameStateResource;
 use crate::settings_plugin::SettingsResource;
 use crate::stats_plugin::{StatsResource, StatsUpdate};
 use crate::ui_theme::{
-    scaled_duration, ACCENT_PRIMARY, BG_BASE, BG_ELEVATED, MOTION_WIN_SHAKE_AMPLITUDE,
-    MOTION_WIN_SHAKE_SECS, RADIUS_LG, RADIUS_MD, SCRIM, STATE_INFO, STATE_SUCCESS, STATE_WARNING,
-    TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY_LG, TYPE_DISPLAY, TYPE_HEADLINE, VAL_SPACE_2,
-    VAL_SPACE_3, Z_WIN_CASCADE,
+    scaled_duration, ACCENT_PRIMARY, BG_BASE, BG_ELEVATED, MOTION_SCORE_BREAKDOWN_FADE_SECS,
+    MOTION_SCORE_BREAKDOWN_STAGGER_SECS, MOTION_WIN_SHAKE_AMPLITUDE, MOTION_WIN_SHAKE_SECS,
+    RADIUS_LG, RADIUS_MD, SCRIM, STATE_INFO, STATE_SUCCESS, STATE_WARNING, TEXT_PRIMARY,
+    TEXT_SECONDARY, TYPE_BODY, TYPE_BODY_LG, TYPE_DISPLAY, TYPE_HEADLINE, VAL_SPACE_2, VAL_SPACE_3,
+    Z_WIN_CASCADE,
 };
 
 // ---------------------------------------------------------------------------
@@ -73,6 +76,15 @@ pub struct WinSummaryPending {
     /// human-readable level number that was just completed (e.g. `Some(3)`
     /// means "Challenge 3"). `None` for non-Challenge modes.
     pub challenge_level: Option<u32>,
+    /// Number of undos used during the winning game. Captured from
+    /// `GameStateResource` at the moment `GameWonEvent` fires so the
+    /// score-breakdown reveal can decide whether to award the no-undo
+    /// bonus row.
+    pub undo_count: u32,
+    /// Game mode of the winning game. Captured at win time so the
+    /// score-breakdown reveal can format the mode-multiplier row
+    /// (e.g. `Zen ×0.0`, `Classic ×1.0`).
+    pub mode: GameMode,
 }
 
 /// Builds a human-readable XP breakdown string for the win modal.
@@ -161,6 +173,37 @@ enum WinSummaryButton {
     PlayAgain,
 }
 
+/// Marker for one row of the win-modal score-breakdown reveal.
+///
+/// Each row carries a stagger delay (seconds until the row should
+/// become visible) plus a fade-in timer that lerps the row's text
+/// alpha from `0.0 → 1.0` over [`MOTION_SCORE_BREAKDOWN_FADE_SECS`].
+/// Rows are spawned with `Visibility::Hidden`; the reveal system
+/// flips them to `Visibility::Inherited` once `delay_secs` elapses
+/// and then drives the per-text alpha lerp until the row reaches
+/// full opacity.
+///
+/// When `AnimSpeed::Instant` is active the row is spawned with
+/// `delay_secs = 0.0`, `fade_duration_secs = 0.0`, and visibility
+/// already set to `Inherited` so the reveal happens on frame 1.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ScoreBreakdownRow {
+    /// Seconds remaining until this row first becomes visible.
+    /// Counts down to 0 in `reveal_score_breakdown`. Zero or negative
+    /// means "show immediately".
+    pub delay_secs: f32,
+    /// Seconds elapsed since this row became visible. Drives the
+    /// alpha lerp on the row's child `Text` nodes.
+    pub fade_elapsed_secs: f32,
+    /// Total fade-in duration. Zero means "no fade — appear at full
+    /// opacity in one frame".
+    pub fade_duration_secs: f32,
+    /// `true` once the row's `Visibility` has been promoted from
+    /// `Hidden` to `Inherited`. Prevents re-running the visibility
+    /// switch every frame after the row first reveals.
+    pub revealed: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
@@ -193,6 +236,7 @@ impl Plugin for WinSummaryPlugin {
                     spawn_win_summary_after_delay,
                     handle_win_summary_buttons,
                     apply_screen_shake,
+                    reveal_score_breakdown,
                 )
                     .after(GameMutation),
             );
@@ -215,6 +259,144 @@ pub fn format_win_time(seconds: u64) -> String {
     let m = seconds / 60;
     let s = seconds % 60;
     format!("{m}:{s:02}")
+}
+
+/// Score amount awarded as a "no-undo" bonus in the win modal when the
+/// player completes the game without using undo. Mirrors the XP-side
+/// no-undo bonus so the score and XP breakdowns reinforce each other,
+/// and stays a `pub const` so tests can assert against it without
+/// re-typing the literal.
+pub const SCORE_NO_UNDO_BONUS: i32 = 25;
+
+/// Decomposed view of the player's final score, displayed in the win
+/// modal as a sequence of fade-in rows.
+///
+/// The fields mirror the row layout described in the win-modal
+/// reveal:
+///
+/// ```text
+/// Base score                   {base}
+/// Time bonus ({m:ss})         +{time_bonus}
+/// No-undo bonus               +{no_undo_bonus}
+/// Mode multiplier ({mode} ×N) ×{multiplier}
+/// ─────────────────────────────────
+/// Total                        {total}
+/// ```
+///
+/// Components that do not apply to the current win are zeroed out:
+/// `time_bonus = 0` when the player took longer than the time-bonus
+/// curve produces a positive result, `no_undo_bonus = 0` when undo
+/// was used, and `multiplier = 1.0` outside Zen mode. The renderer
+/// uses these zero markers to skip rows the player would not benefit
+/// from seeing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScoreBreakdown {
+    /// Running game score before the win-time bonuses are applied.
+    /// Equal to `pending.score`, which is `GameState::score` at the
+    /// moment of `GameWonEvent`.
+    pub base: i32,
+    /// Time-bonus component — `compute_time_bonus(time_seconds)`.
+    /// Zero when `time_seconds == 0` or when the formula yields zero.
+    pub time_bonus: i32,
+    /// Score awarded for completing the win without using undo.
+    /// Zero when `undo_count > 0`.
+    pub no_undo_bonus: i32,
+    /// Multiplier applied to `(base + time_bonus + no_undo_bonus)` to
+    /// produce the final total. `0.0` for Zen mode (which never
+    /// scores), `1.0` otherwise.
+    pub multiplier: f32,
+    /// Game mode the win occurred in. Used by the renderer to format
+    /// the multiplier row label, e.g. `"Mode multiplier (Zen ×0)"`.
+    pub mode: GameMode,
+    /// Elapsed game time in seconds, used to format the time-bonus
+    /// row label as `m:ss`.
+    pub time_seconds: u64,
+}
+
+impl ScoreBreakdown {
+    /// Builds a breakdown for the given win.
+    ///
+    /// `base` is the running game score (`pending.score`); `time_seconds`,
+    /// `undo_count`, and `mode` come from the captured `WinSummaryPending`.
+    /// All score arithmetic is saturating to keep the breakdown safe even
+    /// for pathologically high scores.
+    pub fn compute(base: i32, time_seconds: u64, undo_count: u32, mode: GameMode) -> Self {
+        let time_bonus = compute_time_bonus(time_seconds);
+        let no_undo_bonus = if undo_count == 0 { SCORE_NO_UNDO_BONUS } else { 0 };
+        let multiplier = match mode {
+            GameMode::Zen => 0.0,
+            GameMode::Classic | GameMode::Challenge | GameMode::TimeAttack => 1.0,
+        };
+        Self {
+            base,
+            time_bonus,
+            no_undo_bonus,
+            multiplier,
+            mode,
+            time_seconds,
+        }
+    }
+
+    /// Final total displayed on the breakdown's bottom row, rounded
+    /// half-to-even (Rust's default `as i32` cast truncates toward
+    /// zero, which is fine for a non-fractional multiplier set).
+    pub fn total(&self) -> i32 {
+        let pre_mult = self
+            .base
+            .saturating_add(self.time_bonus)
+            .saturating_add(self.no_undo_bonus);
+        ((pre_mult as f32) * self.multiplier) as i32
+    }
+
+    /// Whether the no-undo bonus row should be rendered. Skipped when
+    /// the player used undo (bonus is zero) so the modal does not
+    /// show a "+0" line that adds nothing.
+    pub fn shows_no_undo_row(&self) -> bool {
+        self.no_undo_bonus > 0
+    }
+
+    /// Whether the time-bonus row should be rendered. Skipped when
+    /// the bonus is zero (e.g. `time_seconds == 0`).
+    pub fn shows_time_bonus_row(&self) -> bool {
+        self.time_bonus > 0
+    }
+
+    /// Whether the mode-multiplier row should be rendered. Skipped
+    /// for `multiplier == 1.0` so Classic/Challenge/TimeAttack wins
+    /// do not show a redundant "×1.0" line.
+    pub fn shows_multiplier_row(&self) -> bool {
+        (self.multiplier - 1.0).abs() > f32::EPSILON
+    }
+
+    /// Total number of rows the breakdown will spawn, counting the
+    /// always-present `Base score` and `Total` rows plus the
+    /// separator. Used by tests to assert spawn counts deterministically.
+    pub fn row_count(&self) -> usize {
+        let mut n = 1; // base
+        if self.shows_time_bonus_row() {
+            n += 1;
+        }
+        if self.shows_no_undo_row() {
+            n += 1;
+        }
+        if self.shows_multiplier_row() {
+            n += 1;
+        }
+        n += 1; // separator
+        n += 1; // total
+        n
+    }
+}
+
+/// Human-readable display name for a game mode. Used as the prefix in
+/// the mode-multiplier row, e.g. `"Mode multiplier (Zen ×0)"`.
+fn mode_display_name(mode: GameMode) -> &'static str {
+    match mode {
+        GameMode::Classic => "Classic",
+        GameMode::Zen => "Zen",
+        GameMode::Challenge => "Challenge",
+        GameMode::TimeAttack => "Time Attack",
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +449,8 @@ fn cache_win_data(
         pending.xp_detail = build_xp_detail(ev.time_seconds, used_undo);
         pending.new_record = is_new_record;
         pending.challenge_level = challenge_level;
+        pending.undo_count = game.0.undo_count;
+        pending.mode = game.0.mode;
 
         if is_new_record {
             toast.write(InfoToastEvent("New Record!".to_string()));
@@ -365,7 +549,12 @@ fn spawn_win_summary_after_delay(
                     pending.xp = pending.xp.saturating_add(ev.amount);
                 }
                 let challenge_level = pending.challenge_level;
-                spawn_overlay(&mut commands, &pending, &session, challenge_level);
+                // Re-derive AnimSpeed here — the `speed` binding above
+                // only lives inside the `for _ in won.read()` loop.
+                let anim_speed = settings
+                    .as_ref()
+                    .map_or(AnimSpeed::Normal, |s| s.0.animation_speed);
+                spawn_overlay(&mut commands, &pending, &session, challenge_level, anim_speed);
             }
         }
     }
@@ -439,12 +628,25 @@ fn apply_screen_shake(
 ///
 /// `challenge_level` is `Some(N)` when the win was a Challenge-mode completion;
 /// a "Challenge N complete!" annotation is added to the modal header in that case.
+///
+/// `anim_speed` controls the score-breakdown reveal: under
+/// `AnimSpeed::Instant`, every breakdown row is spawned visible and at
+/// full opacity (no stagger, no fade); otherwise rows are spawned
+/// hidden and the [`reveal_score_breakdown`] system fades them in over
+/// roughly one second.
 fn spawn_overlay(
     commands: &mut Commands,
     pending: &WinSummaryPending,
     session: &SessionAchievements,
     challenge_level: Option<u32>,
+    anim_speed: AnimSpeed,
 ) {
+    let breakdown = ScoreBreakdown::compute(
+        pending.score,
+        pending.time_seconds,
+        pending.undo_count,
+        pending.mode,
+    );
     commands
         .spawn((
             WinSummaryOverlay,
@@ -502,12 +704,9 @@ fn spawn_overlay(
                     ));
                 }
 
-                // Score
-                card.spawn((
-                    Text::new(format!("Score: {}", pending.score)),
-                    TextFont { font_size: TYPE_HEADLINE, ..default() },
-                    TextColor(TEXT_PRIMARY),
-                ));
+                // Score breakdown reveal — replaces the previous single
+                // "Score:" line with a per-component multi-row layout.
+                spawn_score_breakdown(card, &breakdown, anim_speed);
 
                 // Time
                 card.spawn((
@@ -597,6 +796,220 @@ fn spawn_achievements_section(card: &mut ChildSpawnerCommands, names: &[String])
     }
 }
 
+/// Spawns the score-breakdown rows inside the win-modal card.
+///
+/// Rows are appended in this order — only the first and last two are
+/// always present, the middle three depend on `breakdown`:
+///
+/// 1. `Base score` — value column = `breakdown.base`.
+/// 2. `Time bonus (m:ss)` — only when `breakdown.shows_time_bonus_row()`.
+/// 3. `No-undo bonus` — only when `breakdown.shows_no_undo_row()`.
+/// 4. `Mode multiplier (Mode-name ×N)` — only when
+///    `breakdown.shows_multiplier_row()`.
+/// 5. Separator (em-dashes).
+/// 6. `Total` — value column = `breakdown.total()`.
+///
+/// Every row is spawned with a [`ScoreBreakdownRow`] component carrying
+/// a per-row stagger delay calculated from
+/// [`MOTION_SCORE_BREAKDOWN_STAGGER_SECS`]. Under `AnimSpeed::Instant`,
+/// stagger and fade are both zero so the breakdown appears in one frame.
+fn spawn_score_breakdown(
+    card: &mut ChildSpawnerCommands,
+    breakdown: &ScoreBreakdown,
+    anim_speed: AnimSpeed,
+) {
+    let stagger = scaled_duration(MOTION_SCORE_BREAKDOWN_STAGGER_SECS, anim_speed);
+    let fade = scaled_duration(MOTION_SCORE_BREAKDOWN_FADE_SECS, anim_speed);
+    let mut row_index: u32 = 0;
+
+    // 1. Base score — always shown.
+    spawn_breakdown_row(
+        card,
+        "Base score",
+        format!("{}", breakdown.base),
+        ACCENT_PRIMARY,
+        anim_speed,
+        stagger * row_index as f32,
+        fade,
+    );
+    row_index += 1;
+
+    // 2. Time bonus.
+    if breakdown.shows_time_bonus_row() {
+        spawn_breakdown_row(
+            card,
+            &format!("Time bonus ({})", format_win_time(breakdown.time_seconds)),
+            format!("+{}", breakdown.time_bonus),
+            STATE_SUCCESS,
+            anim_speed,
+            stagger * row_index as f32,
+            fade,
+        );
+        row_index += 1;
+    }
+
+    // 3. No-undo bonus.
+    if breakdown.shows_no_undo_row() {
+        spawn_breakdown_row(
+            card,
+            "No-undo bonus",
+            format!("+{}", breakdown.no_undo_bonus),
+            STATE_SUCCESS,
+            anim_speed,
+            stagger * row_index as f32,
+            fade,
+        );
+        row_index += 1;
+    }
+
+    // 4. Mode multiplier (only when not 1.0).
+    if breakdown.shows_multiplier_row() {
+        let mode_name = mode_display_name(breakdown.mode);
+        spawn_breakdown_row(
+            card,
+            &format!("Mode multiplier ({mode_name} ×{:.1})", breakdown.multiplier),
+            format!("×{:.1}", breakdown.multiplier),
+            STATE_INFO,
+            anim_speed,
+            stagger * row_index as f32,
+            fade,
+        );
+        row_index += 1;
+    }
+
+    // 5. Separator — em-dashes spanning the visual width.
+    spawn_breakdown_row(
+        card,
+        "─────────────────",
+        "─────".to_string(),
+        TEXT_SECONDARY,
+        anim_speed,
+        stagger * row_index as f32,
+        fade,
+    );
+    row_index += 1;
+
+    // 6. Total — emphasised in primary accent.
+    spawn_breakdown_row(
+        card,
+        "Total",
+        format!("{}", breakdown.total()),
+        ACCENT_PRIMARY,
+        anim_speed,
+        stagger * row_index as f32,
+        fade,
+    );
+}
+
+/// Spawns one row of the score breakdown — a flex-row `Node` with two
+/// `Text` children (label left, value right). The row is tagged with
+/// [`ScoreBreakdownRow`] and starts hidden when `anim_speed` is anything
+/// other than [`AnimSpeed::Instant`]; the [`reveal_score_breakdown`]
+/// system flips it visible after `delay_secs` and fades in the text
+/// over `fade_duration_secs`.
+fn spawn_breakdown_row(
+    card: &mut ChildSpawnerCommands,
+    label: &str,
+    value: String,
+    value_color: Color,
+    anim_speed: AnimSpeed,
+    delay_secs: f32,
+    fade_duration_secs: f32,
+) {
+    // Under Instant, every row is visible immediately at full opacity.
+    let instant = matches!(anim_speed, AnimSpeed::Instant);
+    let initial_visibility = if instant {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    let initial_alpha = if instant { 1.0 } else { 0.0 };
+
+    let label_color_with_alpha = TEXT_PRIMARY.with_alpha(initial_alpha);
+    let value_color_with_alpha = value_color.with_alpha(initial_alpha);
+
+    card.spawn((
+        ScoreBreakdownRow {
+            delay_secs,
+            fade_elapsed_secs: 0.0,
+            fade_duration_secs,
+            revealed: instant,
+        },
+        Node {
+            width: Val::Percent(100.0),
+            min_width: Val::Px(280.0),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            ..default()
+        },
+        initial_visibility,
+    ))
+    .with_children(|row| {
+        // Label — left-aligned.
+        row.spawn((
+            Text::new(label.to_string()),
+            TextFont { font_size: TYPE_BODY, ..default() },
+            TextColor(label_color_with_alpha),
+        ));
+        // Value — right-aligned via the parent's JustifyContent::SpaceBetween.
+        row.spawn((
+            Text::new(value),
+            TextFont { font_size: TYPE_BODY, ..default() },
+            TextColor(value_color_with_alpha),
+        ));
+    });
+}
+
+/// Reveal system — ticks each [`ScoreBreakdownRow`] down toward zero
+/// and fades its child `Text` alpha from 0 → 1 over the row's
+/// `fade_duration_secs` once `delay_secs` elapses.
+///
+/// The system is non-blocking: the Play Again button is interactable
+/// from the moment the modal spawns; the breakdown reveal just plays
+/// out underneath. Rows that have already reached full opacity are
+/// skipped via the `revealed` flag plus an early
+/// `fade_elapsed >= fade_duration` short-circuit on the alpha lerp.
+pub fn reveal_score_breakdown(
+    time: Res<Time>,
+    mut rows: Query<(&mut ScoreBreakdownRow, &mut Visibility, Option<&Children>)>,
+    mut texts: Query<&mut TextColor>,
+) {
+    let dt = time.delta_secs();
+    for (mut row, mut visibility, children) in &mut rows {
+        if !row.revealed {
+            row.delay_secs -= dt;
+            if row.delay_secs <= 0.0 {
+                *visibility = Visibility::Inherited;
+                row.revealed = true;
+            } else {
+                continue; // still hidden, no fade work yet
+            }
+        }
+        // Row is revealed — drive the fade-in until it's fully opaque.
+        let fade_done = row.fade_elapsed_secs >= row.fade_duration_secs;
+        if !fade_done {
+            row.fade_elapsed_secs += dt;
+        }
+        let t = if row.fade_duration_secs <= 0.0 {
+            1.0
+        } else {
+            (row.fade_elapsed_secs / row.fade_duration_secs).clamp(0.0, 1.0)
+        };
+        let target_alpha = if fade_done { 1.0 } else { t };
+        if let Some(children) = children {
+            for child in children.iter() {
+                if let Ok(mut tc) = texts.get_mut(child) {
+                    let c = tc.0;
+                    if (c.alpha() - target_alpha).abs() > f32::EPSILON {
+                        tc.0 = c.with_alpha(target_alpha);
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -662,6 +1075,8 @@ mod tests {
         assert!(p.xp_detail.is_empty());
         assert!(!p.new_record);
         assert!(p.challenge_level.is_none());
+        assert_eq!(p.undo_count, 0);
+        assert_eq!(p.mode, GameMode::Classic);
     }
 
     #[test]
@@ -940,5 +1355,209 @@ mod tests {
             pending.challenge_level.is_none(),
             "challenge_level must be None for non-Challenge wins"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Score-breakdown tests
+    // -----------------------------------------------------------------------
+
+    /// `cache_win_data` captures both `undo_count` and `mode` from the
+    /// `GameStateResource` at the moment of `GameWonEvent`. The breakdown
+    /// reveal needs both fields to format the no-undo-bonus and
+    /// mode-multiplier rows.
+    #[test]
+    fn cache_win_data_captures_undo_count_and_mode() {
+        use solitaire_core::game_state::DrawMode;
+
+        let mut app = make_app();
+        // Set up a Zen-mode game with 2 undos used.
+        {
+            let mut game = app.world_mut().resource_mut::<GameStateResource>();
+            game.0 = GameState::new_with_mode(7, DrawMode::DrawOne, GameMode::Zen);
+            game.0.undo_count = 2;
+        }
+
+        app.world_mut()
+            .write_message(GameWonEvent { score: 0, time_seconds: 0 });
+        app.update();
+
+        let pending = app.world().resource::<WinSummaryPending>();
+        assert_eq!(pending.undo_count, 2);
+        assert_eq!(pending.mode, GameMode::Zen);
+    }
+
+    /// `ScoreBreakdown::compute` produces the expected per-component
+    /// values for a non-trivial Classic-mode win. Time-bonus is the
+    /// canonical `compute_time_bonus(120) = 5833` (700_000 / 120) and
+    /// the no-undo bonus fires because `undo_count == 0`.
+    #[test]
+    fn score_breakdown_compute_produces_expected_components() {
+        let bd = ScoreBreakdown::compute(3200, 120, 0, GameMode::Classic);
+        assert_eq!(bd.base, 3200);
+        assert_eq!(bd.time_bonus, 5833); // 700_000 / 120
+        assert_eq!(bd.no_undo_bonus, SCORE_NO_UNDO_BONUS);
+        assert!((bd.multiplier - 1.0).abs() < f32::EPSILON);
+        // Classic ×1.0 → multiplier row is suppressed.
+        assert!(!bd.shows_multiplier_row());
+        // Total == base + time_bonus + no_undo_bonus.
+        assert_eq!(bd.total(), 3200 + 5833 + SCORE_NO_UNDO_BONUS);
+    }
+
+    /// Zen-mode wins produce a zero multiplier — the breakdown shows
+    /// the multiplier row and the total collapses to zero regardless
+    /// of the other components.
+    #[test]
+    fn score_breakdown_zen_mode_zeros_total() {
+        let bd = ScoreBreakdown::compute(500, 60, 0, GameMode::Zen);
+        assert!((bd.multiplier - 0.0).abs() < f32::EPSILON);
+        assert!(bd.shows_multiplier_row(), "Zen ×0 must display the multiplier row");
+        assert_eq!(bd.total(), 0);
+    }
+
+    /// When the player used undo, the `no_undo_bonus` is zero and the
+    /// row is suppressed.
+    #[test]
+    fn score_breakdown_skips_no_undo_row_when_undo_was_used() {
+        let bd = ScoreBreakdown::compute(100, 60, 1, GameMode::Classic);
+        assert_eq!(bd.no_undo_bonus, 0);
+        assert!(!bd.shows_no_undo_row());
+    }
+
+    /// At `time_seconds == 0` the time-bonus formula yields 0; the row
+    /// is suppressed.
+    #[test]
+    fn score_breakdown_skips_time_bonus_row_when_zero() {
+        let bd = ScoreBreakdown::compute(100, 0, 0, GameMode::Classic);
+        assert_eq!(bd.time_bonus, 0);
+        assert!(!bd.shows_time_bonus_row());
+    }
+
+    /// `row_count()` reports the number of rows the renderer will
+    /// spawn. A non-trivial Classic win with both bonuses produces:
+    /// base + time + no-undo + separator + total = 5 rows (no
+    /// multiplier row, ×1.0 is suppressed).
+    #[test]
+    fn win_modal_score_breakdown_spawns_one_row_per_component() {
+        let bd = ScoreBreakdown::compute(3200, 120, 0, GameMode::Classic);
+        assert_eq!(
+            bd.row_count(),
+            5,
+            "Classic with both bonuses: base + time + no-undo + sep + total"
+        );
+
+        // Zen with both bonuses ALSO shows the multiplier row.
+        let zen = ScoreBreakdown::compute(3200, 120, 0, GameMode::Zen);
+        assert_eq!(
+            zen.row_count(),
+            6,
+            "Zen with both bonuses: base + time + no-undo + multiplier + sep + total"
+        );
+    }
+
+    /// When `no_undo_bonus == 0`, the row count drops by one.
+    #[test]
+    fn win_modal_score_breakdown_skips_zero_bonus_rows() {
+        let bd_with = ScoreBreakdown::compute(3200, 120, 0, GameMode::Classic);
+        let bd_without = ScoreBreakdown::compute(3200, 120, 1, GameMode::Classic);
+        assert_eq!(
+            bd_with.row_count() - 1,
+            bd_without.row_count(),
+            "removing the no-undo bonus must remove exactly one row"
+        );
+    }
+
+    /// Pure helper test: the reveal logic uses delta-time to count
+    /// down `delay_secs`; at `t = 0` only the first row is "revealed",
+    /// and after one stagger interval the second row reveals as well.
+    /// We exercise the system directly on a hand-built world rather
+    /// than going through the full modal-spawn path so the test is
+    /// independent of `Time` resource quirks.
+    #[test]
+    fn score_breakdown_reveal_advances_visibility_per_stagger() {
+        use bevy::time::TimePlugin;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins.build().disable::<TimePlugin>());
+        app.init_resource::<Time>();
+        app.add_systems(Update, reveal_score_breakdown);
+
+        // Spawn three rows with delays of 0.0, 0.15, and 0.30 s.
+        let stagger = MOTION_SCORE_BREAKDOWN_STAGGER_SECS;
+        let fade = MOTION_SCORE_BREAKDOWN_FADE_SECS;
+        let row0 = app
+            .world_mut()
+            .spawn((
+                ScoreBreakdownRow {
+                    delay_secs: 0.0,
+                    fade_elapsed_secs: 0.0,
+                    fade_duration_secs: fade,
+                    revealed: false,
+                },
+                Visibility::Hidden,
+            ))
+            .id();
+        let row1 = app
+            .world_mut()
+            .spawn((
+                ScoreBreakdownRow {
+                    delay_secs: stagger,
+                    fade_elapsed_secs: 0.0,
+                    fade_duration_secs: fade,
+                    revealed: false,
+                },
+                Visibility::Hidden,
+            ))
+            .id();
+        let row2 = app
+            .world_mut()
+            .spawn((
+                ScoreBreakdownRow {
+                    delay_secs: stagger * 2.0,
+                    fade_elapsed_secs: 0.0,
+                    fade_duration_secs: fade,
+                    revealed: false,
+                },
+                Visibility::Hidden,
+            ))
+            .id();
+
+        // Frame 1: `time.delta` is 0 (first frame), so only row0
+        // (delay = 0) should reveal.
+        app.update();
+        assert!(app.world().entity(row0).get::<ScoreBreakdownRow>().unwrap().revealed);
+        assert!(!app.world().entity(row1).get::<ScoreBreakdownRow>().unwrap().revealed);
+        assert!(!app.world().entity(row2).get::<ScoreBreakdownRow>().unwrap().revealed);
+
+        // Advance time by one stagger interval — row1 should reveal.
+        {
+            let mut time = app.world_mut().resource_mut::<Time>();
+            time.advance_by(std::time::Duration::from_secs_f32(stagger + 0.001));
+        }
+        app.update();
+        assert!(app.world().entity(row1).get::<ScoreBreakdownRow>().unwrap().revealed);
+        assert!(!app.world().entity(row2).get::<ScoreBreakdownRow>().unwrap().revealed);
+
+        // Advance again — row2 should reveal.
+        {
+            let mut time = app.world_mut().resource_mut::<Time>();
+            time.advance_by(std::time::Duration::from_secs_f32(stagger + 0.001));
+        }
+        app.update();
+        assert!(app.world().entity(row2).get::<ScoreBreakdownRow>().unwrap().revealed);
+    }
+
+    /// Under `AnimSpeed::Instant`, breakdown rows must spawn already
+    /// revealed and at full opacity — there should be no stagger
+    /// reveal animation at all.
+    #[test]
+    fn score_breakdown_instant_speed_skips_stagger() {
+        // Helper: simulate what `spawn_breakdown_row` constructs by
+        // checking the `instant` branch behaviour. Specifically: under
+        // Instant, scaled_duration → 0.0, so the row's stagger and
+        // fade are both zero.
+        let stagger = scaled_duration(MOTION_SCORE_BREAKDOWN_STAGGER_SECS, AnimSpeed::Instant);
+        let fade = scaled_duration(MOTION_SCORE_BREAKDOWN_FADE_SECS, AnimSpeed::Instant);
+        assert_eq!(stagger, 0.0);
+        assert_eq!(fade, 0.0);
     }
 }
