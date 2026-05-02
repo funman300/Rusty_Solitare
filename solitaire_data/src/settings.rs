@@ -132,6 +132,17 @@ pub struct Settings {
     /// `#[serde(default = ...)]`.
     #[serde(default = "default_theme_id")]
     pub selected_theme_id: String,
+    /// Set to `true` once the achievement-onboarding info-toast has been
+    /// shown to the player after their very first win. Acts as a
+    /// one-shot teach: subsequent wins must not re-fire the cue. Older
+    /// `settings.json` files written before this field existed
+    /// deserialize cleanly to `false` thanks to `#[serde(default)]` —
+    /// players who already had wins recorded before this field was
+    /// introduced are guarded by the post-condition `games_won == 1`
+    /// checked by `achievement_plugin::fire_achievement_onboarding_toast`,
+    /// so the toast still does not fire for them.
+    #[serde(default)]
+    pub shown_achievement_onboarding: bool,
 }
 
 fn default_draw_mode() -> DrawMode {
@@ -165,6 +176,7 @@ impl Default for Settings {
             color_blind_mode: false,
             window_geometry: None,
             selected_theme_id: default_theme_id(),
+            shown_achievement_onboarding: false,
         }
     }
 }
@@ -318,6 +330,7 @@ mod tests {
             color_blind_mode: false,
             window_geometry: None,
             selected_theme_id: "default".to_string(),
+            shown_achievement_onboarding: false,
         };
         save_settings_to(&path, &s).expect("save");
         let loaded = load_settings_from(&path);
@@ -505,5 +518,49 @@ mod tests {
         let json = br#"{ "window_geometry": null }"#;
         let s: Settings = serde_json::from_slice(json).unwrap_or_default();
         assert!(s.window_geometry.is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // shown_achievement_onboarding — first-win cue one-shot guard
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn settings_shown_achievement_onboarding_default_is_false() {
+        assert!(
+            !Settings::default().shown_achievement_onboarding,
+            "default shown_achievement_onboarding must be false so the cue fires once"
+        );
+    }
+
+    #[test]
+    fn settings_shown_achievement_onboarding_round_trip() {
+        let path = tmp_path("achievement_onboarding_round_trip");
+        let _ = fs::remove_file(&path);
+        let s = Settings {
+            shown_achievement_onboarding: true,
+            ..Settings::default()
+        };
+        save_settings_to(&path, &s).expect("save");
+        let loaded = load_settings_from(&path);
+        assert!(
+            loaded.shown_achievement_onboarding,
+            "shown_achievement_onboarding must survive serde round-trip"
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn legacy_settings_without_shown_achievement_onboarding_deserializes_to_false() {
+        // A settings.json written by an older version of the game will be
+        // missing this field entirely. `#[serde(default)]` on the field
+        // must yield `false` — the cue then fires on the next win, but
+        // only when stats.games_won == 1, so existing players who have
+        // already won past their first game won't see the toast either.
+        let json = br#"{ "sfx_volume": 0.7, "first_run_complete": true }"#;
+        let s: Settings = serde_json::from_slice(json).unwrap_or_default();
+        assert!(
+            !s.shown_achievement_onboarding,
+            "legacy settings.json missing shown_achievement_onboarding must deserialize to false"
+        );
     }
 }

@@ -14,17 +14,19 @@ use solitaire_core::achievement::{
     ALL_ACHIEVEMENTS,
 };
 use solitaire_data::{
-    achievements_file_path, load_achievements_from, save_achievements_to, AchievementRecord,
-    save_progress_to,
+    achievements_file_path, load_achievements_from, save_achievements_to, save_settings_to,
+    AchievementRecord, save_progress_to,
 };
 
 use crate::events::{
-    AchievementUnlockedEvent, GameWonEvent, ToggleAchievementsRequestEvent, XpAwardedEvent,
+    AchievementUnlockedEvent, GameWonEvent, InfoToastEvent, ToggleAchievementsRequestEvent,
+    XpAwardedEvent,
 };
 use crate::font_plugin::FontResource;
 use crate::game_plugin::GameMutation;
 use crate::progress_plugin::{LevelUpEvent, ProgressResource, ProgressStoragePath, ProgressUpdate};
 use crate::resources::GameStateResource;
+use crate::settings_plugin::{SettingsResource, SettingsStoragePath};
 use crate::stats_plugin::{StatsResource, StatsUpdate};
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
@@ -91,6 +93,7 @@ impl Plugin for AchievementPlugin {
             .add_message::<AchievementUnlockedEvent>()
             .add_message::<GameWonEvent>()
             .add_message::<XpAwardedEvent>()
+            .add_message::<InfoToastEvent>()
             .add_message::<ToggleAchievementsRequestEvent>()
             // Run after GameMutation (so GameWonEvent is available), after
             // StatsUpdate (so stats reflect this win), and after ProgressUpdate
@@ -101,6 +104,16 @@ impl Plugin for AchievementPlugin {
                     .after(GameMutation)
                     .after(StatsUpdate)
                     .after(ProgressUpdate),
+            )
+            // Achievement-onboarding cue: fires once after the player's very
+            // first win to teach the Achievements panel exists. Must run
+            // `.after(StatsUpdate)` so `stats.games_won` reflects the win
+            // that just landed (StatsUpdate increments it on `GameWonEvent`).
+            .add_systems(
+                Update,
+                fire_achievement_onboarding_toast
+                    .after(GameMutation)
+                    .after(StatsUpdate),
             )
             .add_systems(Update, toggle_achievements_screen)
             .add_systems(Update, handle_achievements_close_button);
@@ -207,6 +220,67 @@ fn evaluate_on_win(
             && let Err(e) = save_progress_to(target, &progress.0) {
                 warn!("failed to save progress after reward: {e}");
             }
+}
+
+/// Achievement-onboarding cue.
+///
+/// On the player's very first win — and only their first — fires a single
+/// `InfoToastEvent` nudging them toward the Achievements panel (`A` hotkey)
+/// so they discover the progression layer.
+///
+/// Three guards prevent spurious or repeat firings:
+///
+/// * `stats.games_won == 1` — the post-condition is checked **after**
+///   `StatsUpdate` increments `games_won`, so the cue only fires for the
+///   true first win, not (for example) a player who imported existing
+///   sync data and won a later game.
+/// * `!settings.shown_achievement_onboarding` — flips to `true` after
+///   the toast fires, persists to `settings.json`, and serves as the
+///   one-shot guard across launches and merged sync.
+/// * The system bails immediately when no `GameWonEvent` arrived this
+///   frame so it is a no-op outside the post-win frame.
+///
+/// The `A` hotkey is mentioned verbatim in the toast text so players who
+/// dismiss the cue still know where to find the panel.
+fn fire_achievement_onboarding_toast(
+    mut wins: MessageReader<GameWonEvent>,
+    stats: Res<StatsResource>,
+    mut settings: Option<ResMut<SettingsResource>>,
+    settings_path: Option<Res<SettingsStoragePath>>,
+    mut toast: MessageWriter<InfoToastEvent>,
+) {
+    // Drain the event queue regardless — multiple wins on a single frame
+    // only need a single onboarding toast at most.
+    let any_win = wins.read().last().is_some();
+    if !any_win {
+        return;
+    }
+
+    // Without a `SettingsResource` (headless tests that omit `SettingsPlugin`)
+    // we have no flag to consult; bail out cleanly.
+    let Some(settings) = settings.as_mut() else {
+        return;
+    };
+    if settings.0.shown_achievement_onboarding {
+        return;
+    }
+    if stats.0.games_won != 1 {
+        return;
+    }
+
+    toast.write(InfoToastEvent(
+        "First win! Press A to see your achievements.".to_string(),
+    ));
+    settings.0.shown_achievement_onboarding = true;
+
+    // Persist so the cue stays one-shot across launches. `None` storage
+    // (headless / test) is a documented no-op.
+    if let Some(path) = settings_path.as_ref()
+        && let Some(target) = path.0.as_deref()
+        && let Err(e) = save_settings_to(target, &settings.0)
+    {
+        warn!("failed to save settings (achievement onboarding): {e}");
+    }
 }
 
 /// Convenience: resolve an achievement ID to its human-readable name.
@@ -920,5 +994,188 @@ mod tests {
         let s = tooltip_for_row(false, Some(def));
         assert!(s.contains("How to unlock"));
         assert!(!s.contains("Reward"), "got {s:?}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Achievement-onboarding cue (`fire_achievement_onboarding_toast`)
+    // -----------------------------------------------------------------------
+
+    /// Builds a headless app that **also** includes `SettingsPlugin::headless()`
+    /// so the achievement-onboarding system (which reads `SettingsResource`)
+    /// has a flag to consult and persist into.
+    fn onboarding_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(GamePlugin)
+            .add_plugins(TablePlugin)
+            .add_plugins(StatsPlugin::headless())
+            .add_plugins(crate::progress_plugin::ProgressPlugin::headless())
+            .add_plugins(crate::settings_plugin::SettingsPlugin::headless())
+            .add_plugins(AchievementPlugin::headless());
+        app.init_resource::<bevy::input::ButtonInput<KeyCode>>();
+        app.update();
+        app
+    }
+
+    /// Collects every `InfoToastEvent` written so tests can assert on
+    /// count and message contents.
+    fn drain_info_toasts(app: &App) -> Vec<String> {
+        let events = app.world().resource::<Messages<InfoToastEvent>>();
+        let mut cursor = events.get_cursor();
+        cursor.read(events).map(|e| e.0.clone()).collect()
+    }
+
+    /// First-win path: with the flag false and `games_won` about to be
+    /// 1, exactly one `InfoToastEvent` mentioning the `A` hotkey must
+    /// fire and the flag must flip to `true`.
+    #[test]
+    fn first_win_fires_achievement_onboarding_toast() {
+        let mut app = onboarding_test_app();
+
+        // Sanity: fresh app starts with games_won = 0 and the flag unset.
+        assert_eq!(app.world().resource::<StatsResource>().0.games_won, 0);
+        assert!(
+            !app.world()
+                .resource::<SettingsResource>()
+                .0
+                .shown_achievement_onboarding
+        );
+
+        // StatsPlugin (StatsUpdate) increments games_won to 1 *before* the
+        // achievement-onboarding system reads stats — our system runs
+        // `.after(StatsUpdate)`. The system then sees games_won == 1 and
+        // the cue fires.
+        app.world_mut().write_message(GameWonEvent {
+            score: 1000,
+            time_seconds: 300,
+        });
+        app.update();
+
+        let toasts = drain_info_toasts(&app);
+        let onboarding_toasts: Vec<&String> = toasts
+            .iter()
+            .filter(|t| t.contains("Press A") && t.contains("achievements"))
+            .collect();
+        assert_eq!(
+            onboarding_toasts.len(),
+            1,
+            "exactly one achievement-onboarding toast must fire on the first win; \
+             saw all toasts: {toasts:?}"
+        );
+        assert!(
+            app.world()
+                .resource::<SettingsResource>()
+                .0
+                .shown_achievement_onboarding,
+            "shown_achievement_onboarding must flip to true after the toast fires"
+        );
+    }
+
+    /// Second-win path: with the flag already `true` (player already
+    /// saw the cue on a previous run), no onboarding toast may fire.
+    #[test]
+    fn subsequent_wins_do_not_fire_achievement_onboarding_toast() {
+        let mut app = onboarding_test_app();
+
+        // Pre-set the flag to simulate a player who already dismissed
+        // the cue on a previous run.
+        app.world_mut()
+            .resource_mut::<SettingsResource>()
+            .0
+            .shown_achievement_onboarding = true;
+
+        app.world_mut().write_message(GameWonEvent {
+            score: 1000,
+            time_seconds: 300,
+        });
+        app.update();
+
+        let onboarding_toasts: Vec<String> = drain_info_toasts(&app)
+            .into_iter()
+            .filter(|t| t.contains("Press A") && t.contains("achievements"))
+            .collect();
+        assert!(
+            onboarding_toasts.is_empty(),
+            "no onboarding toast must fire when shown_achievement_onboarding is already true; \
+             got: {onboarding_toasts:?}"
+        );
+    }
+
+    /// Sync-import path: a player imports stats with `games_won = 5`
+    /// already on the books. The flag is still `false` (they were on a
+    /// pre-cue release on this device), but the cue must NOT fire because
+    /// this isn't actually their first win — the post-condition
+    /// `games_won == 1` guards against retroactive nagging.
+    #[test]
+    fn non_first_win_does_not_fire_achievement_onboarding_toast() {
+        let mut app = onboarding_test_app();
+
+        // Pre-seed games_won = 5 BEFORE the win lands. StatsUpdate will
+        // bump it to 6 on the GameWonEvent, taking the system well past
+        // the `games_won == 1` post-condition.
+        app.world_mut().resource_mut::<StatsResource>().0.games_won = 5;
+
+        // Confirm the flag is still false so we know the guard that
+        // prevents firing is the games-won post-condition, not the flag.
+        assert!(
+            !app.world()
+                .resource::<SettingsResource>()
+                .0
+                .shown_achievement_onboarding
+        );
+
+        app.world_mut().write_message(GameWonEvent {
+            score: 1000,
+            time_seconds: 300,
+        });
+        app.update();
+
+        let onboarding_toasts: Vec<String> = drain_info_toasts(&app)
+            .into_iter()
+            .filter(|t| t.contains("Press A") && t.contains("achievements"))
+            .collect();
+        assert!(
+            onboarding_toasts.is_empty(),
+            "no onboarding toast must fire on a non-first win; got: {onboarding_toasts:?}"
+        );
+        // And the flag must remain false so the cue can still teach a
+        // genuinely-fresh second device or a wiped install.
+        assert!(
+            !app.world()
+                .resource::<SettingsResource>()
+                .0
+                .shown_achievement_onboarding,
+            "shown_achievement_onboarding must remain false when the cue did not fire"
+        );
+    }
+
+    /// Without any `GameWonEvent` arriving the system must be a no-op:
+    /// no toast, no flag flip — even on update ticks where stats happen
+    /// to read `games_won == 1`.
+    #[test]
+    fn no_win_event_means_no_achievement_onboarding_toast() {
+        let mut app = onboarding_test_app();
+
+        // Pre-seed games_won = 1 to simulate the misleading mid-frame
+        // state without actually firing a GameWonEvent.
+        app.world_mut().resource_mut::<StatsResource>().0.games_won = 1;
+
+        app.update();
+
+        let onboarding_toasts: Vec<String> = drain_info_toasts(&app)
+            .into_iter()
+            .filter(|t| t.contains("Press A") && t.contains("achievements"))
+            .collect();
+        assert!(
+            onboarding_toasts.is_empty(),
+            "no onboarding toast must fire without a GameWonEvent; got: {onboarding_toasts:?}"
+        );
+        assert!(
+            !app.world()
+                .resource::<SettingsResource>()
+                .0
+                .shown_achievement_onboarding,
+            "flag must not flip without a win event"
+        );
     }
 }
