@@ -105,6 +105,16 @@ const CONTROL_SECTIONS: &[ControlSection] = &[
         ],
     },
     ControlSection {
+        title: "Mode Launcher (M)",
+        rows: &[
+            ControlRow { keys: "1", description: "Launch Classic" },
+            ControlRow { keys: "2", description: "Launch Daily Challenge" },
+            ControlRow { keys: "3", description: "Launch Zen (level 5+)" },
+            ControlRow { keys: "4", description: "Launch Challenge (level 5+)" },
+            ControlRow { keys: "5", description: "Launch Time Attack (level 5+)" },
+        ],
+    },
+    ControlSection {
         title: "Overlays",
         rows: &[
             ControlRow { keys: "S", description: "Stats & progression" },

@@ -94,6 +94,7 @@ const HOTKEYS: &[HotkeyRow] = &[
     HotkeyRow { keys: "D / Space", description: "Draw from stock" },
     HotkeyRow { keys: "U", description: "Undo last move" },
     HotkeyRow { keys: "N", description: "New Classic game" },
+    HotkeyRow { keys: "M", description: "Open Mode Launcher (then 1–5 to pick)" },
     HotkeyRow { keys: "S", description: "Stats & progression" },
     HotkeyRow { keys: "A", description: "Achievements" },
     HotkeyRow { keys: "O", description: "Settings" },

@@ -135,6 +135,14 @@ impl Plugin for HomePlugin {
             .add_message::<StartTimeAttackRequestEvent>()
             .add_message::<StartDailyChallengeRequestEvent>()
             .add_message::<InfoToastEvent>()
+            // `.chain()` because several systems (M-toggle, card click,
+            // cancel button, digit-key shortcut) all read the
+            // `HomeScreen` entity and may queue a despawn on it in the
+            // same tick. Bevy's parallel scheduler would otherwise let
+            // two of them run simultaneously and double-despawn the
+            // entity, panicking when the second command buffer is
+            // applied. Chaining serialises these systems and keeps the
+            // despawn deterministic.
             .add_systems(
                 Update,
                 (
@@ -142,7 +150,9 @@ impl Plugin for HomePlugin {
                     attach_focusable_to_home_mode_cards,
                     handle_home_card_click,
                     handle_home_cancel_button,
-                ),
+                    handle_home_digit_keys,
+                )
+                    .chain(),
             );
     }
 }
@@ -246,6 +256,98 @@ fn handle_home_cancel_button(
     if !cancel_buttons.iter().any(|i| *i == Interaction::Pressed) {
         return;
     }
+    for entity in &screens {
+        commands.entity(entity).despawn();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Digit-key shortcuts (1-5) — modal-scoped
+// ---------------------------------------------------------------------------
+
+/// Maps a [`KeyCode::Digit1`]..[`KeyCode::Digit5`] press to the matching
+/// [`HomeMode`]. Returns `None` for any other key. Kept as a small free
+/// function so the keyboard handler reads as a clean dispatch table and so
+/// the mapping is easy to unit-test in isolation.
+fn digit_to_home_mode(key: KeyCode) -> Option<HomeMode> {
+    match key {
+        KeyCode::Digit1 => Some(HomeMode::Classic),
+        KeyCode::Digit2 => Some(HomeMode::Daily),
+        KeyCode::Digit3 => Some(HomeMode::Zen),
+        KeyCode::Digit4 => Some(HomeMode::Challenge),
+        KeyCode::Digit5 => Some(HomeMode::TimeAttack),
+        _ => None,
+    }
+}
+
+/// Direct keyboard activation of a specific mode while the Mode Launcher
+/// modal is open. Mirrors the click-handler dispatch in
+/// [`handle_home_card_click`]: pressing `1` launches Classic, `2` launches
+/// the Daily Challenge, and `3`/`4`/`5` launch Zen / Challenge / Time
+/// Attack respectively when the player has reached
+/// [`CHALLENGE_UNLOCK_LEVEL`].
+///
+/// The shortcut is **modal-scoped** — when no [`HomeScreen`] exists the
+/// system returns immediately, so digit keys can never accidentally launch
+/// a mode mid-game. Pressing a digit for a locked mode is a no-op (matches
+/// the click-on-locked-card behaviour) and leaves the modal open so the
+/// player can pick another mode.
+#[allow(clippy::too_many_arguments)]
+fn handle_home_digit_keys(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    progress: Option<Res<ProgressResource>>,
+    screens: Query<Entity, With<HomeScreen>>,
+    mut new_game: MessageWriter<NewGameRequestEvent>,
+    mut zen: MessageWriter<StartZenRequestEvent>,
+    mut challenge: MessageWriter<StartChallengeRequestEvent>,
+    mut time_attack: MessageWriter<StartTimeAttackRequestEvent>,
+    mut daily: MessageWriter<StartDailyChallengeRequestEvent>,
+) {
+    // Modal-scoped: do nothing when the Mode Launcher isn't open.
+    if screens.is_empty() {
+        return;
+    }
+
+    let Some(mode) = [
+        KeyCode::Digit1,
+        KeyCode::Digit2,
+        KeyCode::Digit3,
+        KeyCode::Digit4,
+        KeyCode::Digit5,
+    ]
+    .into_iter()
+    .find(|k| keys.just_pressed(*k))
+    .and_then(digit_to_home_mode) else {
+        return;
+    };
+
+    let level = progress.as_ref().map_or(0, |p| p.0.level);
+    if !mode.is_unlocked(level) {
+        // Locked mode: no-op, modal stays open.
+        return;
+    }
+
+    match mode {
+        HomeMode::Classic => {
+            new_game.write(NewGameRequestEvent::default());
+        }
+        HomeMode::Daily => {
+            daily.write(StartDailyChallengeRequestEvent);
+        }
+        HomeMode::Zen => {
+            zen.write(StartZenRequestEvent);
+        }
+        HomeMode::Challenge => {
+            challenge.write(StartChallengeRequestEvent);
+        }
+        HomeMode::TimeAttack => {
+            time_attack.write(StartTimeAttackRequestEvent);
+        }
+    }
+
+    // Close the modal after dispatching the launch event — same shape as
+    // the click handler.
     for entity in &screens {
         commands.entity(entity).despawn();
     }
@@ -871,6 +973,193 @@ mod tests {
         assert!(
             !any_disabled,
             "no card may be Disabled when the player is at the unlock level"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Digit-key shortcuts (1-5) — modal-scoped direct mode launch
+    // -----------------------------------------------------------------------
+
+    /// Press a key and clear the input afterwards so the next `update()`
+    /// doesn't re-fire `just_pressed`. Mirrors the open_home() pattern but
+    /// for an arbitrary key (the M-press helper releases & clears KeyM,
+    /// which is also what we need here for Digit keys).
+    fn press_and_clear(app: &mut App, key: KeyCode) {
+        {
+            let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            input.press(key);
+        }
+        app.update();
+        {
+            let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            input.release(key);
+            input.clear();
+        }
+    }
+
+    #[test]
+    fn digit1_in_home_modal_starts_classic_and_closes_modal() {
+        let mut app = headless_app();
+        let _ = open_home(&mut app);
+
+        // Drain any pre-existing NewGameRequestEvent so the assertion
+        // only sees the digit-key driven write.
+        app.world_mut()
+            .resource_mut::<Messages<NewGameRequestEvent>>()
+            .clear();
+
+        press_and_clear(&mut app, KeyCode::Digit1);
+
+        let events = app.world().resource::<Messages<NewGameRequestEvent>>();
+        let mut cursor = events.get_cursor();
+        let fired: Vec<_> = cursor.read(events).copied().collect();
+        assert_eq!(
+            fired.len(),
+            1,
+            "exactly one NewGameRequestEvent must fire for Digit1"
+        );
+
+        assert_eq!(
+            app.world_mut()
+                .query::<&HomeScreen>()
+                .iter(app.world())
+                .count(),
+            0,
+            "Home modal must close after launching Classic via Digit1"
+        );
+    }
+
+    #[test]
+    fn digit3_at_level_zero_is_a_noop() {
+        let mut app = headless_app();
+        // Default level is 0 — Zen is locked.
+        let _ = open_home(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<StartZenRequestEvent>>()
+            .clear();
+
+        press_and_clear(&mut app, KeyCode::Digit3);
+
+        let zen = app.world().resource::<Messages<StartZenRequestEvent>>();
+        let mut zc = zen.get_cursor();
+        assert!(
+            zc.read(zen).next().is_none(),
+            "Digit3 at level 0 must not fire StartZenRequestEvent"
+        );
+
+        assert_eq!(
+            app.world_mut()
+                .query::<&HomeScreen>()
+                .iter(app.world())
+                .count(),
+            1,
+            "Home modal must remain open after a locked-mode digit press"
+        );
+    }
+
+    #[test]
+    fn digit3_at_unlock_level_starts_zen_and_closes_modal() {
+        let mut app = headless_app();
+        // Bump the player to the unlock level *before* opening the modal
+        // so the Mode Launcher is in its unlocked state.
+        app.world_mut()
+            .resource_mut::<ProgressResource>()
+            .0
+            .level = CHALLENGE_UNLOCK_LEVEL;
+        let _ = open_home(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<StartZenRequestEvent>>()
+            .clear();
+
+        press_and_clear(&mut app, KeyCode::Digit3);
+
+        let zen = app.world().resource::<Messages<StartZenRequestEvent>>();
+        let mut zc = zen.get_cursor();
+        assert_eq!(
+            zc.read(zen).count(),
+            1,
+            "Digit3 at unlock level must fire exactly one StartZenRequestEvent"
+        );
+
+        assert_eq!(
+            app.world_mut()
+                .query::<&HomeScreen>()
+                .iter(app.world())
+                .count(),
+            0,
+            "Home modal must close after launching Zen via Digit3"
+        );
+    }
+
+    #[test]
+    fn digit_keys_outside_home_modal_are_noop() {
+        let mut app = headless_app();
+        // Modal is NOT open. Bump level so Zen would otherwise be allowed
+        // — this isolates the modal-scope guard from the unlock check.
+        app.world_mut()
+            .resource_mut::<ProgressResource>()
+            .0
+            .level = CHALLENGE_UNLOCK_LEVEL;
+
+        // Drain any pre-existing events.
+        app.world_mut()
+            .resource_mut::<Messages<NewGameRequestEvent>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<Messages<StartZenRequestEvent>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<Messages<StartChallengeRequestEvent>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<Messages<StartTimeAttackRequestEvent>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<Messages<StartDailyChallengeRequestEvent>>()
+            .clear();
+
+        // Press every digit 1-5 in turn — none should trigger a launch.
+        for key in [
+            KeyCode::Digit1,
+            KeyCode::Digit2,
+            KeyCode::Digit3,
+            KeyCode::Digit4,
+            KeyCode::Digit5,
+        ] {
+            press_and_clear(&mut app, key);
+        }
+
+        let new_game = app.world().resource::<Messages<NewGameRequestEvent>>();
+        let mut nc = new_game.get_cursor();
+        assert!(
+            nc.read(new_game).next().is_none(),
+            "Digit keys with no modal open must not fire NewGameRequestEvent"
+        );
+        let zen = app.world().resource::<Messages<StartZenRequestEvent>>();
+        let mut zc = zen.get_cursor();
+        assert!(
+            zc.read(zen).next().is_none(),
+            "Digit keys with no modal open must not fire StartZenRequestEvent"
+        );
+        let chal = app.world().resource::<Messages<StartChallengeRequestEvent>>();
+        let mut cc = chal.get_cursor();
+        assert!(
+            cc.read(chal).next().is_none(),
+            "Digit keys with no modal open must not fire StartChallengeRequestEvent"
+        );
+        let ta = app.world().resource::<Messages<StartTimeAttackRequestEvent>>();
+        let mut tc = ta.get_cursor();
+        assert!(
+            tc.read(ta).next().is_none(),
+            "Digit keys with no modal open must not fire StartTimeAttackRequestEvent"
+        );
+        let daily = app.world().resource::<Messages<StartDailyChallengeRequestEvent>>();
+        let mut dc = daily.get_cursor();
+        assert!(
+            dc.read(daily).next().is_none(),
+            "Digit keys with no modal open must not fire StartDailyChallengeRequestEvent"
         );
     }
 }
