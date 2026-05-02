@@ -107,12 +107,11 @@ impl AssetLoader for SvgLoader {
 pub fn rasterize_svg(svg_bytes: &[u8], target: UVec2) -> Result<Image, SvgLoaderError> {
     let opt = usvg::Options {
         fontdb: shared_fontdb(),
-        // Default for SVG elements without an explicit `font-family` —
-        // resolved by fontdb's generic-family alias to whatever
-        // sans-serif the system has installed (DejaVu Sans on most
-        // Linux installs, Helvetica on macOS, Arial on Windows).
-        font_family: "sans-serif".to_string(),
-        font_resolver: lenient_font_resolver(),
+        // The bundled fontdb only contains FiraMono and the resolver
+        // routes every named-family request to it; this is a default
+        // for SVGs that don't specify a family at all.
+        font_family: "Fira Mono".to_string(),
+        font_resolver: bundled_font_resolver(),
         ..Default::default()
     };
     let tree = usvg::Tree::from_data(svg_bytes, &opt)?;
@@ -152,100 +151,46 @@ pub fn rasterize_svg(svg_bytes: &[u8], target: UVec2) -> Result<Image, SvgLoader
     ))
 }
 
-/// Returns a process-wide font database populated with the OS-installed
-/// fonts plus the bundled FiraMono-Medium face. Initialised lazily on
-/// first SVG that references text, then shared (via `Arc`) across every
-/// subsequent rasterisation.
+/// FiraMono-Medium bytes embedded at compile time. Mirrors the embed in
+/// `solitaire_engine::font_plugin` so the SVG rasteriser and the Bevy UI
+/// share the same canonical face.
+const BUNDLED_FONT_BYTES: &[u8] = include_bytes!("../../../assets/fonts/main.ttf");
+
+/// Returns a process-wide font database holding only the bundled
+/// FiraMono-Medium face. Initialised lazily on first SVG that references
+/// text, then shared (via `Arc`) across every subsequent rasterisation.
 ///
-/// `usvg::Options::default()` ships an empty `fontdb`, so without this
-/// call any text glyph in an SVG renders with no font match — the
-/// visible symptom on the bundled hayeah artwork is the "No match for
-/// Arial font-family" warn spam plus glyphs that fall through to
-/// whatever shape-only path usvg uses for missing fonts.
+/// The bundled card SVGs reference families like `Arial` and
+/// `Bitstream Vera Sans` by name; [`bundled_font_resolver`] maps every
+/// such request directly to FiraMono so rasterisation is deterministic
+/// across machines and the system font path is never consulted.
 ///
-/// **Bundled font as last-resort fallback.** Loading only system fonts
-/// breaks on minimal Linux installs, fresh Wayland sessions, and
-/// chroots where fontconfig has nothing usable to serve as
-/// `sans-serif`. The cards on the bundled hayeah theme reference
-/// `Bitstream Vera Sans` and `Arial` by name — if neither is installed
-/// AND the resolver's CSS-generic fallbacks (`SansSerif`/`Serif`) also
-/// don't resolve, the rank/suit text vanishes entirely. Loading the
-/// project's bundled FiraMono via `include_bytes!()` and pinning it as
-/// the generic-family target guarantees a working last-resort glyph
-/// source on every machine. This was the cause of "card font didn't
-/// carry over" on a fresh second-machine pull.
-///
-/// `load_system_fonts` is comparatively expensive (~50–200 ms on a
-/// typical desktop) so we only pay it once for the lifetime of the
-/// process, gated by `OnceLock`.
+/// Aborts the program if the embedded bytes don't parse — bundled at
+/// compile time, so a parse failure means the binary is corrupt.
 fn shared_fontdb() -> Arc<fontdb::Database> {
     static DB: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
     DB.get_or_init(|| {
         let mut db = fontdb::Database::new();
-        db.load_system_fonts();
-        // The bundled FiraMono lives at the workspace root, so the
-        // include_bytes! path goes up three levels from this source
-        // file (assets → src → solitaire_engine → workspace root).
-        db.load_font_data(include_bytes!("../../../assets/fonts/main.ttf").to_vec());
-        // Pin the CSS generics to the bundled face as the resolution
-        // target. Named-family lookups (Bitstream Vera Sans, Arial)
-        // still try the system db first; only when those miss does
-        // the resolver fall through to SansSerif / Serif, and now
-        // those are guaranteed to land on FiraMono.
-        db.set_sans_serif_family("Fira Mono");
-        db.set_serif_family("Fira Mono");
-        db.set_monospace_family("Fira Mono");
-        db.set_cursive_family("Fira Mono");
-        db.set_fantasy_family("Fira Mono");
+        db.load_font_data(BUNDLED_FONT_BYTES.to_vec());
+        assert!(
+            db.faces().next().is_some(),
+            "bundled FiraMono failed to parse — binary is corrupt"
+        );
         Arc::new(db)
     })
     .clone()
 }
 
-/// Builds a `usvg::FontResolver` that mirrors the upstream default
-/// `select_font` but appends the CSS generics `sans-serif` and `serif`
-/// to every query's family list. The upstream selector only appends
-/// `serif` and emits a `log::warn!` when its `fontdb.query` returns
-/// `None`; on systems without the named families requested by the
-/// SVG (e.g. Arial on Linux), every text node bridges that warn into
-/// our tracing output. By appending two generics — both resolved via
-/// fontconfig (or fontdb's built-in defaults) to whatever sans-serif /
-/// serif the user has installed — we guarantee the query finds *some*
-/// face, so the warn branch is never taken. The visible behaviour is
-/// "use the system's default font when the requested one isn't
-/// installed", which is the intent here.
-///
-/// The fallback `select_fallback` is kept as the upstream default —
-/// per-character fallback (for combining marks, scripts the primary
-/// face doesn't cover) doesn't have the same warn-spam pathology.
-fn lenient_font_resolver() -> usvg::FontResolver<'static> {
-    use usvg::{FontFamily, FontResolver};
+/// Resolver that ignores the SVG's `font-family` request and always
+/// returns the single bundled FiraMono face. Bundled card SVGs ask for
+/// fonts by name (Arial, Bitstream Vera Sans) that this binary
+/// deliberately doesn't ship; routing every query to FiraMono keeps
+/// rendering deterministic and removes the system-font path entirely.
+fn bundled_font_resolver() -> usvg::FontResolver<'static> {
+    use usvg::FontResolver;
 
     usvg::FontResolver {
-        select_font: Box::new(|font, db| {
-            let mut families: Vec<fontdb::Family> = font
-                .families()
-                .iter()
-                .map(|f| match f {
-                    FontFamily::Serif => fontdb::Family::Serif,
-                    FontFamily::SansSerif => fontdb::Family::SansSerif,
-                    FontFamily::Cursive => fontdb::Family::Cursive,
-                    FontFamily::Fantasy => fontdb::Family::Fantasy,
-                    FontFamily::Monospace => fontdb::Family::Monospace,
-                    FontFamily::Named(s) => fontdb::Family::Name(s),
-                })
-                .collect();
-            families.push(fontdb::Family::SansSerif);
-            families.push(fontdb::Family::Serif);
-
-            let query = fontdb::Query {
-                families: &families,
-                weight: fontdb::Weight(font.weight()),
-                stretch: font.stretch().into(),
-                style: font.style().into(),
-            };
-            db.query(&query)
-        }),
+        select_font: Box::new(|_font, db| db.faces().next().map(|face| face.id)),
         select_fallback: FontResolver::default_fallback_selector(),
     }
 }
