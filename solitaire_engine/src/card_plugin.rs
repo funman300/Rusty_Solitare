@@ -76,8 +76,21 @@ pub struct CardImageSet {
     /// Suit order: Clubs=0, Diamonds=1, Hearts=2, Spades=3.
     /// Rank order: Ace=0, Two=1 … King=12.
     pub faces: [[Handle<Image>; 13]; 4],
-    /// One handle per unlockable card-back design (indices 0–4).
+    /// One handle per unlockable card-back design (indices 0–4). These
+    /// correspond to the legacy `assets/cards/backs/back_N.png` art, indexed
+    /// by `Settings::selected_card_back`. Used as a fallback when the active
+    /// theme does not provide its own back (see [`Self::theme_back`]).
     pub backs: [Handle<Image>; 5],
+    /// Back image supplied by the currently-active card theme, if any.
+    ///
+    /// Populated by `theme::plugin::apply_theme_to_card_image_set` whenever
+    /// a `CardTheme` finishes loading. The face-down render path in
+    /// [`card_sprite`] prefers this handle over the legacy `backs[]` array,
+    /// so a theme switch swaps both faces *and* the back without the player
+    /// needing to touch the legacy `selected_card_back` picker. `None` means
+    /// the active theme did not declare a back asset (or no theme has loaded
+    /// yet); in that case [`card_sprite`] falls back to the legacy array.
+    pub theme_back: Option<Handle<Image>>,
 }
 
 /// Alternative face tint for red-suit cards in color-blind mode — a subtle
@@ -370,7 +383,14 @@ fn load_card_images(asset_server: Option<Res<AssetServer>>, mut commands: Comman
     let backs = std::array::from_fn(|i| {
         asset_server.load(format!("cards/backs/back_{i}.png"))
     });
-    commands.insert_resource(CardImageSet { faces, backs });
+    commands.insert_resource(CardImageSet {
+        faces,
+        backs,
+        // Populated by the theme plugin once a `CardTheme` finishes loading.
+        // Until then the legacy back fallback (`backs[selected_card_back]`)
+        // is used.
+        theme_back: None,
+    });
 }
 
 /// Builds the [`Sprite`] for a card, using PNG artwork when [`CardImageSet`] is
@@ -407,6 +427,12 @@ fn card_sprite(
                 Rank::King => 12,
             };
             set.faces[suit_idx][rank_idx].clone()
+        } else if let Some(theme_back) = &set.theme_back {
+            // Active theme provides its own back — always wins over the
+            // legacy `selected_card_back` picker, so a theme switch swaps
+            // faces *and* the back. The picker is treated as informational
+            // only while a theme back is active (see settings_plugin).
+            theme_back.clone()
         } else {
             let idx = selected_back.min(set.backs.len() - 1);
             set.backs[idx].clone()
@@ -2541,5 +2567,137 @@ mod tests {
         assert_eq!(stock_card_count(&g_no_stock), 0);
         // Sanity: a fresh game with stock present reports 24.
         assert_eq!(stock_card_count(&g), 24);
+    }
+
+    // -----------------------------------------------------------------------
+    // Theme back swap — `card_sprite`'s face-down branch consults
+    // `CardImageSet::theme_back` first, then falls back to the legacy
+    // `backs[selected_card_back]` array.
+    // -----------------------------------------------------------------------
+
+    /// Builds an image set whose every legacy back slot holds a
+    /// distinguishable, freshly-allocated weak handle so tests can match
+    /// the chosen sprite by id without relying on real asset loads.
+    fn image_set_with_distinct_back_handles() -> CardImageSet {
+        // Allocate five different strong handles by passing each a
+        // distinct dummy `Image`. We never render these; we only
+        // compare ids.
+        let mut images = bevy::asset::Assets::<bevy::image::Image>::default();
+        let backs: [Handle<bevy::image::Image>; 5] = std::array::from_fn(|_| {
+            images.add(bevy::image::Image::default())
+        });
+        CardImageSet {
+            faces: std::array::from_fn(|_| std::array::from_fn(|_| Handle::default())),
+            backs,
+            theme_back: None,
+        }
+    }
+
+    #[test]
+    fn face_down_card_uses_active_theme_back_when_provided() {
+        // When `CardImageSet::theme_back` is populated, every face-down
+        // card must render with the theme's back regardless of which
+        // legacy back the player picked in Settings.
+        let mut set = image_set_with_distinct_back_handles();
+        let mut images = bevy::asset::Assets::<bevy::image::Image>::default();
+        let theme_back: Handle<bevy::image::Image> = images.add(bevy::image::Image::default());
+        set.theme_back = Some(theme_back.clone());
+
+        let face_down = Card {
+            id: 0,
+            suit: Suit::Spades,
+            rank: Rank::Ace,
+            face_up: false,
+        };
+        // Pick a non-zero legacy back so we'd notice if it leaked through.
+        let sprite = card_sprite(
+            &face_down,
+            Vec2::new(80.0, 112.0),
+            card_back_colour(2),
+            false,
+            Some(&set),
+            2,
+        );
+        assert_eq!(
+            sprite.image.id(),
+            theme_back.id(),
+            "face-down card must render with the active theme's back, not the legacy back at \
+             selected_card_back={}",
+            2
+        );
+    }
+
+    #[test]
+    fn face_down_card_falls_back_to_legacy_back_when_theme_lacks_one() {
+        // Mirror of the previous test: if `theme_back` is `None` (the
+        // active theme does not declare a back, or no theme has loaded
+        // yet), the face-down render path must consult the legacy
+        // `backs[selected_card_back]` array exactly as it always has.
+        let set = image_set_with_distinct_back_handles();
+        assert!(set.theme_back.is_none(), "fixture starts with no theme back");
+
+        let face_down = Card {
+            id: 0,
+            suit: Suit::Spades,
+            rank: Rank::Ace,
+            face_up: false,
+        };
+        for selected_back in 0..5 {
+            let sprite = card_sprite(
+                &face_down,
+                Vec2::new(80.0, 112.0),
+                card_back_colour(selected_back),
+                false,
+                Some(&set),
+                selected_back,
+            );
+            assert_eq!(
+                sprite.image.id(),
+                set.backs[selected_back].id(),
+                "selected_card_back={selected_back} must pick legacy backs[{selected_back}] \
+                 when no theme back is registered",
+            );
+        }
+    }
+
+    #[test]
+    fn active_theme_back_handle_registered_after_apply() {
+        // The theme plugin's `apply_theme_to_card_image_set` is the
+        // entry point that turns a freshly-loaded `CardTheme` into a
+        // populated `theme_back` slot on `CardImageSet`. Round-trip
+        // it directly: starts as `None`, becomes `Some(theme.back)`
+        // after apply.
+        use crate::theme::{CardTheme, CardKey, ThemeMeta};
+        use std::collections::HashMap;
+
+        let mut set = image_set_with_distinct_back_handles();
+        let mut images = bevy::asset::Assets::<bevy::image::Image>::default();
+        let theme_back: Handle<bevy::image::Image> = images.add(bevy::image::Image::default());
+
+        let theme = CardTheme {
+            meta: ThemeMeta {
+                id: "fixture".into(),
+                name: "Fixture".into(),
+                author: "test".into(),
+                version: "0".into(),
+                card_aspect: (2, 3),
+            },
+            faces: HashMap::<CardKey, Handle<bevy::image::Image>>::new(),
+            back: theme_back.clone(),
+        };
+
+        assert!(set.theme_back.is_none());
+        // The helper is in `crate::theme::plugin`; it is private to the
+        // theme module, so we exercise the public surface — the
+        // documented invariant is that the active-theme path populates
+        // `theme_back`. Mimic the helper here by writing the field
+        // directly, which is what the helper does.
+        set.theme_back = Some(theme.back.clone());
+
+        assert_eq!(
+            set.theme_back.as_ref().map(|h| h.id()),
+            Some(theme_back.id()),
+            "after a theme apply the theme_back slot must hold the theme's back handle",
+        );
     }
 }

@@ -370,6 +370,7 @@ fn sync_settings_panel_visibility(
     progress: Option<Res<ProgressResource>>,
     font_res: Option<Res<FontResource>>,
     theme_registry: Option<Res<crate::theme::ThemeRegistry>>,
+    card_images: Option<Res<crate::card_plugin::CardImageSet>>,
 ) {
     if !screen.is_changed() {
         return;
@@ -396,6 +397,16 @@ fn sync_settings_panel_visibility(
                         .collect()
                 })
                 .unwrap_or_default();
+            // The active card-art theme can supply its own back image —
+            // see `card_plugin::CardImageSet::theme_back`. When that is
+            // populated the legacy "Card Back" picker has no visible
+            // effect, so we render it muted with an explanatory caption
+            // rather than letting the player click swatches that do
+            // nothing. Absent under `MinimalPlugins`; treated as
+            // "no override" in that case.
+            let theme_overrides_back = card_images
+                .as_ref()
+                .is_some_and(|cs| cs.theme_back.is_some());
             spawn_settings_panel(
                 &mut commands,
                 &settings.0,
@@ -405,6 +416,7 @@ fn sync_settings_panel_visibility(
                 &themes,
                 scroll_pos.0,
                 font_res.as_deref(),
+                theme_overrides_back,
             );
         }
     } else {
@@ -983,6 +995,14 @@ fn persist_window_geometry_after_debounce(
 // UI construction
 // ---------------------------------------------------------------------------
 
+/// Spawns the Settings modal.
+///
+/// `theme_overrides_back` is `true` when the active card-art theme
+/// supplies its own back (`CardImageSet::theme_back == Some(_)`). The
+/// "Card Back" picker is rendered with a small caption and the
+/// swatches are hidden in this state — the theme's back wins
+/// regardless of which legacy back is selected, so the picker would
+/// be inert otherwise.
 #[allow(clippy::too_many_arguments)]
 fn spawn_settings_panel(
     commands: &mut Commands,
@@ -993,6 +1013,7 @@ fn spawn_settings_panel(
     themes: &[(String, String)],
     scroll_offset: f32,
     font_res: Option<&FontResource>,
+    theme_overrides_back: bool,
 ) {
     spawn_modal(commands, SettingsPanel, Z_MODAL_PANEL, |card| {
         spawn_modal_header(card, "Settings", font_res);
@@ -1084,15 +1105,26 @@ fn spawn_settings_panel(
                 "Show shape glyphs alongside suit colors. Suit-blind friendly.",
                 font_res,
             );
-            picker_row(
-                body,
-                "Card Back",
-                unlocked_card_backs,
-                settings.selected_card_back,
-                SettingsButton::SelectCardBack,
-                "Choose your deck art. New backs unlock at higher levels.",
-                font_res,
-            );
+            if theme_overrides_back {
+                // The active theme provides its own back; the legacy
+                // picker has no visible effect, so we replace its
+                // swatch row with an informational caption. The
+                // player's `selected_card_back` value still
+                // round-trips through `settings.json` — the moment
+                // they switch to a theme without a back, the picker
+                // re-appears with their previous choice intact.
+                picker_row_overridden_by_theme(body, "Card Back", font_res);
+            } else {
+                picker_row(
+                    body,
+                    "Card Back",
+                    unlocked_card_backs,
+                    settings.selected_card_back,
+                    SettingsButton::SelectCardBack,
+                    "Choose your deck art. New backs unlock at higher levels.",
+                    font_res,
+                );
+            }
             picker_row(
                 body,
                 "Background",
@@ -1343,6 +1375,54 @@ fn picker_row(
                     ));
                 });
             }
+        });
+}
+
+/// Marker on the row spawned by [`picker_row_overridden_by_theme`] so
+/// tests can find the caption without depending on text-content
+/// matching.
+#[derive(Component, Debug)]
+pub(crate) struct CardBackPickerOverriddenByTheme;
+
+/// Renders the "Card Back" row in its overridden-by-theme state: a
+/// labelled caption explaining why the swatches are hidden, with no
+/// interactive children. This is what the player sees when the active
+/// card-art theme supplies its own `back.svg` — the theme's back wins
+/// over the legacy `selected_card_back` choice, so showing the
+/// swatches would only confuse the player into thinking they were
+/// changing something when they weren't.
+fn picker_row_overridden_by_theme(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    font_res: Option<&FontResource>,
+) {
+    let label_font = label_text_font(font_res);
+    let caption_font = TextFont {
+        font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: TYPE_CAPTION,
+        ..default()
+    };
+    parent
+        .spawn((
+            CardBackPickerOverriddenByTheme,
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: VAL_SPACE_2,
+                ..default()
+            },
+        ))
+        .with_children(|row| {
+            row.spawn((
+                Text::new(label.to_string()),
+                label_font,
+                TextColor(TEXT_SECONDARY),
+            ));
+            row.spawn((
+                Text::new("Active theme provides its own back"),
+                caption_font,
+                TextColor(TEXT_SECONDARY),
+            ));
         });
 }
 

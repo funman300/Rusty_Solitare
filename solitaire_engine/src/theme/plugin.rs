@@ -112,7 +112,7 @@ fn react_to_settings_theme_change(
     commands.insert_resource(ActiveTheme(handle));
 }
 
-/// Replaces every face slot and slot 0 of the back array on
+/// Replaces every face slot and the active-theme back-handle slot on
 /// `CardImageSet` whenever the active theme finishes loading or
 /// changes. Fires `StateChangedEvent` afterwards so the existing
 /// `card_plugin::sync_cards_on_change` pipeline re-renders every
@@ -155,8 +155,16 @@ fn sync_card_image_set_with_active_theme(
 }
 
 /// Pure helper that copies the theme's image handles into the
-/// `[suit][rank]` face matrix and into back slot 0. Split out so it
-/// can be unit-tested without spinning up a Bevy `App`.
+/// `[suit][rank]` face matrix and into the dedicated `theme_back`
+/// slot. Split out so it can be unit-tested without spinning up a
+/// Bevy `App`.
+///
+/// The legacy `backs[0..5]` array is left untouched — those handles
+/// are the player's `selected_card_back` choices and remain available
+/// as a fallback when the active theme does not declare a back. The
+/// face-down render path in `card_plugin::card_sprite` prefers
+/// `theme_back` when present, so writing here is sufficient to make
+/// every face-down card pick up the theme's art on the next sync.
 fn apply_theme_to_card_image_set(theme: &CardTheme, image_set: &mut CardImageSet) {
     for suit in [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades] {
         for rank in [
@@ -169,7 +177,7 @@ fn apply_theme_to_card_image_set(theme: &CardTheme, image_set: &mut CardImageSet
             }
         }
     }
-    image_set.backs[0] = theme.back.clone();
+    image_set.theme_back = Some(theme.back.clone());
 }
 
 /// Index used by [`CardImageSet::faces`] for a given suit. Mirrors
@@ -251,6 +259,7 @@ mod tests {
         CardImageSet {
             faces: std::array::from_fn(|_| std::array::from_fn(|_| Handle::default())),
             backs: std::array::from_fn(|_| Handle::default()),
+            theme_back: None,
         }
     }
 
@@ -284,24 +293,34 @@ mod tests {
     }
 
     #[test]
-    fn applying_theme_overwrites_back_slot_zero() {
-        // Build a theme whose back handle is a freshly-allocated weak
-        // handle — its id will differ from the default-handle id we
-        // started with, proving the back slot was overwritten.
+    fn applying_theme_writes_theme_back_slot_and_leaves_legacy_backs_untouched() {
+        // The active-theme back lives in its own dedicated slot
+        // (`theme_back`) so the legacy `backs[0..5]` PNG fallbacks
+        // remain untouched. This guarantees the player's
+        // `selected_card_back` choice can still be honoured when no
+        // theme is active.
         let mut image_set = empty_card_image_set();
+        // Snapshot the legacy back ids so we can prove they don't
+        // change when a theme is applied.
+        let legacy_ids_before: [bevy::asset::AssetId<bevy::image::Image>; 5] =
+            std::array::from_fn(|i| image_set.backs[i].id());
         let theme = empty_theme();
-        let original_back_id = image_set.backs[0].id();
+        assert!(image_set.theme_back.is_none(), "theme_back starts empty");
         apply_theme_to_card_image_set(&theme, &mut image_set);
-        // Both default handles compare equal to themselves; the test
-        // asserts via id() that whichever handle is in slot 0 came
-        // from the theme — even if both happen to be Handle::default,
-        // the id swap is still observable via the value-equality of
-        // theme.back's id.
-        assert_eq!(image_set.backs[0].id(), theme.back.id());
-        // No assertion about original_back_id — both sides may be the
-        // same default handle id when neither is loaded; the contract
-        // we're checking is "slot 0 now matches theme.back".
-        let _ = original_back_id;
+        // The active-theme back is now populated and matches the theme.
+        let active_back = image_set
+            .theme_back
+            .as_ref()
+            .expect("theme_back populated after apply");
+        assert_eq!(active_back.id(), theme.back.id());
+        // Every legacy back slot is preserved byte-for-byte by id.
+        for (i, before) in legacy_ids_before.iter().enumerate() {
+            assert_eq!(
+                image_set.backs[i].id(),
+                *before,
+                "legacy back slot {i} must not be clobbered by theme apply",
+            );
+        }
     }
 
     #[test]
