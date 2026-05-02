@@ -22,6 +22,7 @@ use solitaire_core::pile::PileType;
 use solitaire_core::rules::{can_place_on_foundation, can_place_on_tableau};
 
 use crate::animation_plugin::{CardAnim, EffectiveSlideDuration};
+use crate::card_animation::CardAnimation;
 use crate::events::{CardFaceRevealedEvent, CardFlippedEvent, StateChangedEvent};
 use crate::game_plugin::GameMutation;
 use crate::layout::{Layout, LayoutResource, LayoutSystem};
@@ -50,8 +51,11 @@ pub const TABLEAU_FAN_FRAC: f32 = 0.25;
 pub const TABLEAU_FACEDOWN_FAN_FRAC: f32 = 0.12;
 
 /// Fraction of card height used as a tiny offset between stacked cards in
-/// non-tableau piles, so stacking is visible.
-const STACK_FAN_FRAC: f32 = 0.003;
+/// non-tableau piles, so stacking is visible. Public so other plugins
+/// (e.g. input_plugin's drag-rejection tween) can compute the resting
+/// `Transform.translation.z` for a card at a given stack index without
+/// drifting from the value used by [`card_positions`].
+pub const STACK_FAN_FRAC: f32 = 0.003;
 
 /// Font size as a fraction of card width.
 const FONT_SIZE_FRAC: f32 = 0.28;
@@ -447,7 +451,7 @@ fn sync_cards_startup(
     layout: Option<Res<LayoutResource>>,
     slide_dur: Option<Res<EffectiveSlideDuration>>,
     settings: Option<Res<SettingsResource>>,
-    entities: Query<(Entity, &CardEntity, &Transform)>,
+    entities: Query<(Entity, &CardEntity, &Transform, Option<&CardAnimation>)>,
     card_images: Option<Res<CardImageSet>>,
 ) {
     if let Some(layout) = layout {
@@ -467,7 +471,7 @@ fn sync_cards_on_change(
     layout: Option<Res<LayoutResource>>,
     slide_dur: Option<Res<EffectiveSlideDuration>>,
     settings: Option<Res<SettingsResource>>,
-    entities: Query<(Entity, &CardEntity, &Transform)>,
+    entities: Query<(Entity, &CardEntity, &Transform, Option<&CardAnimation>)>,
     card_images: Option<Res<CardImageSet>>,
 ) {
     if events.read().next().is_none() {
@@ -490,22 +494,27 @@ fn sync_cards(
     slide_secs: f32,
     back_colour: Color,
     color_blind: bool,
-    entities: &Query<(Entity, &CardEntity, &Transform)>,
+    entities: &Query<(Entity, &CardEntity, &Transform, Option<&CardAnimation>)>,
     card_images: Option<&CardImageSet>,
     selected_back: usize,
 ) {
     let positions = card_positions(game, layout);
 
-    // Map card_id -> (Entity, current_translation) for in-place updates.
-    let mut existing: HashMap<u32, (Entity, Vec3)> = HashMap::new();
-    for (entity, marker, transform) in entities.iter() {
-        existing.insert(marker.card_id, (entity, transform.translation));
+    // Map card_id -> (Entity, current_translation, has_card_animation) for
+    // in-place updates. The `has_card_animation` flag lets `update_card_entity`
+    // skip the snap/slide path on cards that are already being driven by a
+    // curve-based `CardAnimation` tween (e.g. the drag-rejection return tween
+    // — see `input_plugin::end_drag`). Otherwise the StateChangedEvent that
+    // accompanies a rejection would race the tween and the card would jump.
+    let mut existing: HashMap<u32, (Entity, Vec3, bool)> = HashMap::new();
+    for (entity, marker, transform, anim) in entities.iter() {
+        existing.insert(marker.card_id, (entity, transform.translation, anim.is_some()));
     }
 
     let live_ids: HashSet<u32> = positions.iter().map(|(c, _, _)| c.id).collect();
 
     // Despawn any entity whose card is no longer tracked.
-    for (card_id, (entity, _)) in &existing {
+    for (card_id, (entity, _, _)) in &existing {
         if !live_ids.contains(card_id) {
             commands.entity(*entity).despawn();
         }
@@ -514,10 +523,10 @@ fn sync_cards(
     // For each card in the current state: spawn or update its entity.
     for (card, position, z) in positions {
         match existing.get(&card.id) {
-            Some(&(entity, cur)) => {
+            Some(&(entity, cur, has_anim)) => {
                 update_card_entity(
                     &mut commands, entity, card, position, z, layout,
-                    slide_secs, back_colour, color_blind, cur, card_images, selected_back,
+                    slide_secs, back_colour, color_blind, cur, has_anim, card_images, selected_back,
                 )
             }
             None => spawn_card_entity(&mut commands, card, position, z, layout, back_colour, color_blind, card_images, selected_back),
@@ -667,6 +676,7 @@ fn update_card_entity(
     back_colour: Color,
     color_blind: bool,
     cur: Vec3,
+    has_card_animation: bool,
     card_images: Option<&CardImageSet>,
     selected_back: usize,
 ) {
@@ -675,24 +685,31 @@ fn update_card_entity(
     // Always refresh the visual appearance.
     commands.entity(entity).insert(card_sprite(card, layout.card_size, back_colour, color_blind, card_images, selected_back));
 
-    // Slide to the new position when it differs meaningfully; snap otherwise.
-    if (cur.truncate() - target.truncate()).length() > 1.0 && slide_secs > 0.0 {
-        let start = Vec3::new(cur.x, cur.y, z); // update Z immediately
-        commands
-            .entity(entity)
-            .insert(Transform::from_translation(start))
-            .insert(CardAnim {
-                start,
-                target,
-                elapsed: 0.0,
-                duration: slide_secs,
-                delay: 0.0,
-            });
-    } else {
-        commands
-            .entity(entity)
-            .remove::<CardAnim>()
-            .insert(Transform::from_xyz(pos.x, pos.y, z));
+    // Skip the snap/slide path entirely when a curve-based `CardAnimation`
+    // is driving this card (e.g. the drag-rejection return tween). Writing
+    // `Transform` here would race that animation each frame and cause a
+    // visible jump. The animation system snaps the final position itself
+    // when it completes.
+    if !has_card_animation {
+        // Slide to the new position when it differs meaningfully; snap otherwise.
+        if (cur.truncate() - target.truncate()).length() > 1.0 && slide_secs > 0.0 {
+            let start = Vec3::new(cur.x, cur.y, z); // update Z immediately
+            commands
+                .entity(entity)
+                .insert(Transform::from_translation(start))
+                .insert(CardAnim {
+                    start,
+                    target,
+                    elapsed: 0.0,
+                    duration: slide_secs,
+                    delay: 0.0,
+                });
+        } else {
+            commands
+                .entity(entity)
+                .remove::<CardAnim>()
+                .insert(Transform::from_xyz(pos.x, pos.y, z));
+        }
     }
 
     // Despawn any stale children and re-add the per-card drop shadow plus,

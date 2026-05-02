@@ -333,6 +333,11 @@ pub const MOTION_SHAKE_SECS: f32 = 0.25;
 /// Shake angular frequency in rad/s.
 pub const MOTION_SHAKE_OMEGA: f32 = 35.0;
 
+/// Duration of the smooth return tween when a drag is rejected by an
+/// invalid drop target. Short enough to feel snappy but long enough to
+/// read as motion rather than a teleport.
+pub const MOTION_DRAG_REJECT_SECS: f32 = 0.15;
+
 /// Card flip — half-time per phase (squash + grow). 100 ms each =
 /// 200 ms total. Pair with a ±8° Z-rotation at the midpoint for a 3D
 /// feel without 3D rendering.

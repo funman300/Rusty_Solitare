@@ -30,10 +30,12 @@ use solitaire_core::pile::PileType;
 use solitaire_core::rules::{can_place_on_foundation, can_place_on_tableau};
 
 use crate::card_animation::tuning::AnimationTuning;
+use crate::card_animation::{CardAnimation, MotionCurve};
 use crate::card_plugin::{
-    CardEntity, HintHighlight, HintHighlightTimer, TABLEAU_FACEDOWN_FAN_FRAC, TABLEAU_FAN_FRAC,
+    CardEntity, HintHighlight, HintHighlightTimer, STACK_FAN_FRAC, TABLEAU_FACEDOWN_FAN_FRAC,
+    TABLEAU_FAN_FRAC,
 };
-use crate::feedback_anim_plugin::ShakeAnim;
+use crate::ui_theme::MOTION_DRAG_REJECT_SECS;
 use solitaire_core::game_state::DrawMode;
 use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
 use crate::events::{
@@ -666,14 +668,16 @@ fn end_drag(
                         to: target.clone(),
                         count,
                     });
-                    // Shake each dragged card so the player gets immediate
-                    // visual feedback that the drop was rejected. ShakeAnim
-                    // restores translation.x to origin_x at the end of the
-                    // animation, so origin_x must be the target slot in the
-                    // origin pile — using the current drag transform would
-                    // pin the card at the drop location and fight the
-                    // sync_cards slide that StateChangedEvent triggers
-                    // (the symptom is "card lands beside the pile").
+                    // Smoothly glide each dragged card from its drop-time
+                    // transform back to its resting slot in the origin pile.
+                    // The audio cue (card_invalid.wav, played by AudioPlugin
+                    // on MoveRejectedEvent) still gives the player clear
+                    // negative feedback; this just replaces the old shake
+                    // wiggle with a forgiving ease-out tween.
+                    //
+                    // `update_card_entity` skips its own snap/slide while a
+                    // `CardAnimation` is present, so the StateChangedEvent
+                    // that fires below does not fight this tween.
                     if let Some(origin_pile) = game.0.piles.get(&origin) {
                         for &card_id in &drag.cards {
                             let Some(stack_index) =
@@ -683,14 +687,23 @@ fn end_drag(
                             };
                             let target_pos =
                                 card_position(&game.0, &layout.0, &origin, stack_index);
-                            if let Some((entity, _, _)) = card_entities
+                            if let Some((entity, _, transform)) = card_entities
                                 .iter()
                                 .find(|(_, ce, _)| ce.card_id == card_id)
                             {
-                                commands.entity(entity).insert(ShakeAnim {
-                                    elapsed: 0.0,
-                                    origin_x: target_pos.x,
-                                });
+                                let drag_pos = transform.translation.truncate();
+                                let drag_z = transform.translation.z;
+                                let end_z = 1.0 + (stack_index as f32) * STACK_FAN_FRAC;
+                                commands.entity(entity).insert(
+                                    CardAnimation::slide(
+                                        drag_pos,
+                                        drag_z,
+                                        target_pos,
+                                        end_z,
+                                        MotionCurve::Responsive,
+                                    )
+                                    .with_duration(MOTION_DRAG_REJECT_SECS),
+                                );
                             }
                         }
                     }
@@ -899,9 +912,11 @@ fn touch_end_drag(
                         fired = true;
                     } else {
                         rejected.write(MoveRejectedEvent { from: origin.clone(), to: target, count });
-                        // See `end_drag` (mouse path) for the rationale: ShakeAnim
-                        // restores translation.x to origin_x, so origin_x must be
-                        // the origin pile's slot, not the drop location.
+                        // Smoothly glide each dragged card from its drop-time
+                        // transform back to its resting slot. See `end_drag`
+                        // (mouse path) for the full rationale; the touch path
+                        // mirrors it exactly so finger and mouse rejection
+                        // feel identical.
                         if let Some(origin_pile) = game.0.piles.get(&origin) {
                             for &card_id in &drag.cards {
                                 let Some(stack_index) =
@@ -911,13 +926,22 @@ fn touch_end_drag(
                                 };
                                 let target_pos =
                                     card_position(&game.0, &layout.0, &origin, stack_index);
-                                if let Some((entity, _, _)) =
+                                if let Some((entity, _, transform)) =
                                     card_entities.iter().find(|(_, ce, _)| ce.card_id == card_id)
                                 {
-                                    commands.entity(entity).insert(ShakeAnim {
-                                        elapsed: 0.0,
-                                        origin_x: target_pos.x,
-                                    });
+                                    let drag_pos = transform.translation.truncate();
+                                    let drag_z = transform.translation.z;
+                                    let end_z = 1.0 + (stack_index as f32) * STACK_FAN_FRAC;
+                                    commands.entity(entity).insert(
+                                        CardAnimation::slide(
+                                            drag_pos,
+                                            drag_z,
+                                            target_pos,
+                                            end_z,
+                                            MotionCurve::Responsive,
+                                        )
+                                        .with_duration(MOTION_DRAG_REJECT_SECS),
+                                    );
                                 }
                             }
                         }
@@ -1946,71 +1970,159 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Task #57 — ShakeAnim insertion on rejected drag
+    // Drag-rejection return tween — `CardAnimation` replaces the legacy
+    // `ShakeAnim` on the dragged cards. The audio cue
+    // (`card_invalid.wav` via `MoveRejectedEvent`) is unchanged; only the
+    // visual response on the dragged cards swapped from a horizontal wiggle
+    // to a smooth ease-out glide back to the origin pile.
+    //
+    // These tests build the component values exactly as `end_drag` and
+    // `touch_end_drag` would, then assert the resulting `CardAnimation` is
+    // shaped correctly. Driving `end_drag` end-to-end requires a real window
+    // and mouse-button input, so we exercise the data path the same way the
+    // legacy `ShakeAnim` tests did.
     // -----------------------------------------------------------------------
 
-    /// Verifies that `ShakeAnim` constructed for a rejected drag has the
-    /// correct initial values: `elapsed` starts at 0.0 and `origin_x` matches
-    /// the **target slot in the origin pile** (where the card will rest after
-    /// the rejection). Saving the drop-location X here was the root cause of
-    /// the "card lands beside the pile" bug — `tick_shake_anim` restores
-    /// `translation.x` to `origin_x` at the end of the shake, fighting the
-    /// `sync_cards` slide that `StateChangedEvent` triggers.
-    ///
-    /// The Bevy ECS part (Commands + Query) is exercised at runtime; this test
-    /// covers the data path — that we build the component with the right values
-    /// before handing it to `commands.entity(...).insert(...)`.
-    #[test]
-    fn shake_anim_for_rejected_drag_has_correct_initial_values() {
-        use crate::feedback_anim_plugin::ShakeAnim;
-
-        // Simulate the X coordinate of the card's slot in its origin pile —
-        // computed by `card_position(game, layout, &origin, stack_index)` at
-        // rejection time, not the drop-location transform X.
-        let target_slot_x = 123.5_f32;
-
-        // This mirrors the ShakeAnim construction in `end_drag` and
-        // `touch_end_drag` after the bugfix: origin_x is the origin pile's
-        // slot X, so the shake ends with the card at its correct resting
-        // position.
-        let anim = ShakeAnim {
-            elapsed: 0.0,
-            origin_x: target_slot_x,
-        };
-
-        assert_eq!(
-            anim.elapsed, 0.0,
-            "ShakeAnim must start with elapsed=0.0 so the animation plays from the beginning"
-        );
-        assert!(
-            (anim.origin_x - target_slot_x).abs() < 1e-6,
-            "ShakeAnim origin_x must match the origin pile slot's X (where the \
-             card belongs after rejection), not the drop-location transform X. \
-             Expected {target_slot_x}, got {}",
-            anim.origin_x
-        );
+    /// Helper: build the `CardAnimation` the rejection paths construct for
+    /// one dragged card. Mirrors the inline logic in `end_drag` and
+    /// `touch_end_drag` so the tests stay in sync with the production code.
+    fn build_drag_reject_animation(
+        drag_pos: Vec2,
+        drag_z: f32,
+        target_pos: Vec2,
+        stack_index: usize,
+    ) -> CardAnimation {
+        let end_z = 1.0 + (stack_index as f32) * STACK_FAN_FRAC;
+        CardAnimation::slide(drag_pos, drag_z, target_pos, end_z, MotionCurve::Responsive)
+            .with_duration(MOTION_DRAG_REJECT_SECS)
     }
 
-    /// When a drag is rejected, every card id in `drag.cards` should receive a
-    /// `ShakeAnim`. Verify that the set of card ids we would iterate matches
-    /// exactly the ids stored in `DragState::cards` at rejection time.
+    /// Every card in `drag.cards` should receive its own `CardAnimation` on
+    /// rejection. With the shake → tween migration, the assertion changes
+    /// from "every dragged card gets a ShakeAnim" to "every dragged card
+    /// gets a CardAnimation" — same coverage, new component.
     #[test]
-    fn rejected_drag_shakes_all_dragged_cards() {
-        // Simulate a DragState with two card ids (a stack drag).
+    fn rejected_drag_inserts_card_animation_on_each_dragged_card() {
+        // Simulate a stack drag of two cards.
         let dragged_ids: Vec<u32> = vec![10, 11];
 
-        // In `end_drag`, we iterate `drag.cards` and look up each id in
-        // `card_entities`. The ids we would insert ShakeAnim on must exactly
-        // match the dragged set.
-        let mut shaken: Vec<u32> = Vec::new();
+        let mut animated: Vec<u32> = Vec::new();
         for &card_id in &dragged_ids {
-            // Simulate finding the entity for card_id (always succeeds here).
-            shaken.push(card_id);
+            // In `end_drag` we iterate `drag.cards` and look up each id in
+            // `card_entities`. The ids we would insert a `CardAnimation` on
+            // must exactly match the dragged set.
+            animated.push(card_id);
         }
 
         assert_eq!(
-            shaken, dragged_ids,
-            "every card id in drag.cards must receive a ShakeAnim on rejection"
+            animated, dragged_ids,
+            "every card id in drag.cards must receive a CardAnimation on rejection"
+        );
+    }
+
+    /// The `end` field of the inserted tween must equal the card's resting
+    /// slot in its origin pile — the position the card belongs at after a
+    /// rejected drop. Without this, the tween would glide to the wrong spot
+    /// and `sync_cards` would have to fight it back.
+    #[test]
+    fn rejected_drag_animation_targets_origin_resting_position() {
+        let drag_pos = Vec2::new(640.0, 200.0); // somewhere mid-screen
+        let target_pos = Vec2::new(123.5, -50.0); // origin pile slot
+        let anim = build_drag_reject_animation(drag_pos, DRAG_Z, target_pos, /* stack_index */ 3);
+
+        assert!(
+            (anim.end - target_pos).length() < 1e-6,
+            "CardAnimation.end must match the origin slot's resting position. \
+             Expected {target_pos:?}, got {:?}",
+            anim.end
+        );
+    }
+
+    /// The `start` field of the inserted tween must equal the card's
+    /// drop-time transform position — i.e. wherever the cursor or finger
+    /// released the card. This is what makes the glide feel like a
+    /// continuous return rather than a teleport-then-shake.
+    #[test]
+    fn rejected_drag_animation_starts_from_drag_position() {
+        let drag_pos = Vec2::new(640.0, 200.0);
+        let target_pos = Vec2::new(80.0, -120.0);
+        let anim = build_drag_reject_animation(drag_pos, DRAG_Z, target_pos, /* stack_index */ 0);
+
+        assert!(
+            (anim.start - drag_pos).length() < 1e-6,
+            "CardAnimation.start must match the drop-time transform position \
+             (where the cursor released). Expected {drag_pos:?}, got {:?}",
+            anim.start
+        );
+        // And the start must be visibly distinct from the origin slot — the
+        // whole point of the tween is that it visibly travels.
+        assert!(
+            (anim.start - anim.end).length() > 1.0,
+            "rejected drag should travel a visible distance, got start={:?} end={:?}",
+            anim.start,
+            anim.end
+        );
+    }
+
+    /// The tween duration is taken from the project-wide motion token so
+    /// designers can retune the feel from one place. Keeps the constant and
+    /// the call site honest.
+    #[test]
+    fn rejected_drag_animation_uses_correct_duration() {
+        let anim = build_drag_reject_animation(
+            Vec2::new(640.0, 200.0),
+            DRAG_Z,
+            Vec2::new(80.0, -120.0),
+            0,
+        );
+        assert!(
+            (anim.duration - MOTION_DRAG_REJECT_SECS).abs() < 1e-6,
+            "drag-rejection tween duration must match MOTION_DRAG_REJECT_SECS \
+             ({MOTION_DRAG_REJECT_SECS}), got {}",
+            anim.duration
+        );
+    }
+
+    /// The curve must be a no-overshoot ease-out so the card decelerates
+    /// cleanly into its rest position — overshoot on a rejection feels
+    /// jittery rather than forgiving.
+    #[test]
+    fn rejected_drag_animation_uses_responsive_curve() {
+        let anim = build_drag_reject_animation(
+            Vec2::new(640.0, 200.0),
+            DRAG_Z,
+            Vec2::new(80.0, -120.0),
+            0,
+        );
+        assert_eq!(
+            anim.curve,
+            MotionCurve::Responsive,
+            "drag-rejection tween must use Responsive (quintic ease-out) \
+             so the card snaps back without bouncing past the slot"
+        );
+    }
+
+    /// The `start_z` of the tween must equal the card's drop-time z
+    /// (`DRAG_Z`) so the card stays above the rest of the table while it
+    /// travels home, then settles at the correct resting z.
+    #[test]
+    fn rejected_drag_animation_lifts_from_drag_z_to_resting_z() {
+        let stack_index = 2_usize;
+        let anim = build_drag_reject_animation(
+            Vec2::new(640.0, 200.0),
+            DRAG_Z,
+            Vec2::new(80.0, -120.0),
+            stack_index,
+        );
+        assert!(
+            (anim.start_z - DRAG_Z).abs() < 1e-6,
+            "tween must start at DRAG_Z so the card stays on top during the glide"
+        );
+        let expected_end_z = 1.0 + (stack_index as f32) * STACK_FAN_FRAC;
+        assert!(
+            (anim.end_z - expected_end_z).abs() < 1e-6,
+            "tween must end at the slot's resting z, got {} expected {expected_end_z}",
+            anim.end_z
         );
     }
 }
