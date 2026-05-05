@@ -151,6 +151,21 @@ pub struct Settings {
     /// `#[serde(default = "default_tooltip_delay")]`.
     #[serde(default = "default_tooltip_delay")]
     pub tooltip_delay_secs: f32,
+    /// Multiplier applied to the post-game time-bonus score component
+    /// shown in the win-summary modal. Range
+    /// `[TIME_BONUS_MULTIPLIER_MIN, TIME_BONUS_MULTIPLIER_MAX]`
+    /// (`0.0`–`2.0`); default `1.0` keeps the existing behaviour.
+    ///
+    /// **COSMETIC ONLY** — this multiplier changes what the player
+    /// sees in the win modal's score breakdown but does **not** affect
+    /// achievement unlock thresholds, lifetime score totals, or
+    /// leaderboard submissions, which all use the raw, unmultiplied
+    /// score values produced by `solitaire_core`. Older
+    /// `settings.json` files written before this field existed
+    /// deserialize cleanly to `1.0` via
+    /// `#[serde(default = "default_time_bonus_multiplier")]`.
+    #[serde(default = "default_time_bonus_multiplier")]
+    pub time_bonus_multiplier: f32,
 }
 
 fn default_draw_mode() -> DrawMode {
@@ -189,6 +204,25 @@ pub const TOOLTIP_DELAY_MAX_SECS: f32 = 1.5;
 /// Increment applied by the tooltip-delay decrement / increment buttons.
 pub const TOOLTIP_DELAY_STEP_SECS: f32 = 0.1;
 
+/// Lower bound of the player-tunable time-bonus multiplier. `0.0`
+/// disables the time-bonus row entirely (renders as "Off" in the UI).
+pub const TIME_BONUS_MULTIPLIER_MIN: f32 = 0.0;
+
+/// Upper bound of the player-tunable time-bonus multiplier. `2.0`
+/// doubles the displayed time bonus.
+pub const TIME_BONUS_MULTIPLIER_MAX: f32 = 2.0;
+
+/// Increment applied by the time-bonus multiplier decrement /
+/// increment buttons.
+pub const TIME_BONUS_MULTIPLIER_STEP: f32 = 0.1;
+
+/// Default value for [`Settings::time_bonus_multiplier`]. `1.0` keeps
+/// the displayed time bonus identical to the raw value produced by
+/// `solitaire_core::scoring::compute_time_bonus`.
+fn default_time_bonus_multiplier() -> f32 {
+    1.0
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -206,14 +240,15 @@ impl Default for Settings {
             selected_theme_id: default_theme_id(),
             shown_achievement_onboarding: false,
             tooltip_delay_secs: default_tooltip_delay(),
+            time_bonus_multiplier: default_time_bonus_multiplier(),
         }
     }
 }
 
 impl Settings {
-    /// Clamps `sfx_volume`, `music_volume`, and `tooltip_delay_secs` into
-    /// their respective ranges after deserialization or hand-editing of
-    /// `settings.json`.
+    /// Clamps `sfx_volume`, `music_volume`, `tooltip_delay_secs`, and
+    /// `time_bonus_multiplier` into their respective ranges after
+    /// deserialization or hand-editing of `settings.json`.
     pub fn sanitized(self) -> Self {
         Self {
             sfx_volume: self.sfx_volume.clamp(0.0, 1.0),
@@ -221,6 +256,9 @@ impl Settings {
             tooltip_delay_secs: self
                 .tooltip_delay_secs
                 .clamp(TOOLTIP_DELAY_MIN_SECS, TOOLTIP_DELAY_MAX_SECS),
+            time_bonus_multiplier: self
+                .time_bonus_multiplier
+                .clamp(TIME_BONUS_MULTIPLIER_MIN, TIME_BONUS_MULTIPLIER_MAX),
             ..self
         }
     }
@@ -244,6 +282,20 @@ impl Settings {
         self.tooltip_delay_secs = (self.tooltip_delay_secs + delta)
             .clamp(TOOLTIP_DELAY_MIN_SECS, TOOLTIP_DELAY_MAX_SECS);
         self.tooltip_delay_secs
+    }
+
+    /// Adjust the time-bonus multiplier by `delta`, clamped to
+    /// `[TIME_BONUS_MULTIPLIER_MIN, TIME_BONUS_MULTIPLIER_MAX]`. The
+    /// result is rounded to one decimal place so the readout stays
+    /// clean across repeated `±` clicks (avoids float drift like
+    /// `0.30000004`). Returns the new value.
+    pub fn adjust_time_bonus_multiplier(&mut self, delta: f32) -> f32 {
+        let raw = (self.time_bonus_multiplier + delta)
+            .clamp(TIME_BONUS_MULTIPLIER_MIN, TIME_BONUS_MULTIPLIER_MAX);
+        // Round to 1 decimal place — the slider step is 0.1, so this
+        // collapses any FP drift introduced by repeated additions.
+        self.time_bonus_multiplier = (raw * 10.0).round() / 10.0;
+        self.time_bonus_multiplier
     }
 }
 
@@ -375,6 +427,7 @@ mod tests {
             selected_theme_id: "default".to_string(),
             shown_achievement_onboarding: false,
             tooltip_delay_secs: default_tooltip_delay(),
+            time_bonus_multiplier: default_time_bonus_multiplier(),
         };
         save_settings_to(&path, &s).expect("save");
         let loaded = load_settings_from(&path);
@@ -688,5 +741,98 @@ mod tests {
         }
         .sanitized();
         assert_eq!(s2.tooltip_delay_secs, TOOLTIP_DELAY_MAX_SECS);
+    }
+
+    // -----------------------------------------------------------------------
+    // time_bonus_multiplier — cosmetic win-modal time-bonus weight
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn settings_time_bonus_multiplier_default_is_one() {
+        let s = Settings::default();
+        assert!(
+            (s.time_bonus_multiplier - 1.0).abs() < 1e-6,
+            "default time_bonus_multiplier must be 1.0 (no change to displayed bonus), got {}",
+            s.time_bonus_multiplier
+        );
+    }
+
+    #[test]
+    fn settings_time_bonus_multiplier_round_trip() {
+        let path = tmp_path("time_bonus_multiplier_round_trip");
+        let _ = fs::remove_file(&path);
+        let s = Settings {
+            time_bonus_multiplier: 1.5,
+            ..Settings::default()
+        };
+        save_settings_to(&path, &s).expect("save");
+        let loaded = load_settings_from(&path);
+        assert!(
+            (loaded.time_bonus_multiplier - 1.5).abs() < 1e-6,
+            "time_bonus_multiplier must survive serde round-trip; got {}",
+            loaded.time_bonus_multiplier
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn legacy_settings_without_time_bonus_multiplier_deserializes_to_one() {
+        // A settings.json written before this field existed must
+        // deserialize cleanly to the existing 1.0 baseline so old
+        // players see no change to their win-modal bonuses.
+        let json = br#"{ "sfx_volume": 0.7, "first_run_complete": true }"#;
+        let s: Settings = serde_json::from_slice(json).unwrap_or_default();
+        assert!(
+            (s.time_bonus_multiplier - 1.0).abs() < 1e-6,
+            "legacy settings.json missing time_bonus_multiplier must deserialize to 1.0, got {}",
+            s.time_bonus_multiplier
+        );
+    }
+
+    #[test]
+    fn settings_time_bonus_multiplier_clamps_to_range() {
+        // Negative or oversized values from a hand-edited file must be
+        // clamped on load.
+        let s = Settings {
+            time_bonus_multiplier: -0.5,
+            ..Settings::default()
+        }
+        .sanitized();
+        assert_eq!(s.time_bonus_multiplier, TIME_BONUS_MULTIPLIER_MIN);
+
+        let s2 = Settings {
+            time_bonus_multiplier: 99.0,
+            ..Settings::default()
+        }
+        .sanitized();
+        assert_eq!(s2.time_bonus_multiplier, TIME_BONUS_MULTIPLIER_MAX);
+    }
+
+    #[test]
+    fn adjust_time_bonus_multiplier_clamps_and_rounds() {
+        let mut s = Settings { time_bonus_multiplier: 1.0, ..Default::default() };
+        // Step up to 1.1.
+        assert!((s.adjust_time_bonus_multiplier(0.1) - 1.1).abs() < 1e-6);
+        // Big positive jump clamps to TIME_BONUS_MULTIPLIER_MAX.
+        assert!(
+            (s.adjust_time_bonus_multiplier(99.0) - TIME_BONUS_MULTIPLIER_MAX).abs() < 1e-6
+        );
+        // Big negative jump clamps to TIME_BONUS_MULTIPLIER_MIN.
+        assert!(
+            (s.adjust_time_bonus_multiplier(-99.0) - TIME_BONUS_MULTIPLIER_MIN).abs() < 1e-6
+        );
+        assert_eq!(s.time_bonus_multiplier, 0.0);
+
+        // Repeated incremental adds must not drift past the 0.1 grid.
+        let mut s2 = Settings { time_bonus_multiplier: 0.0, ..Default::default() };
+        for _ in 0..10 {
+            s2.adjust_time_bonus_multiplier(0.1);
+        }
+        // After ten +0.1 steps, value should be exactly 1.0 (1 decimal).
+        assert!(
+            (s2.time_bonus_multiplier - 1.0).abs() < 1e-6,
+            "rounding should pin repeated 0.1 steps to the decimal grid, got {}",
+            s2.time_bonus_multiplier
+        );
     }
 }

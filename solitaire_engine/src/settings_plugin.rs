@@ -18,7 +18,7 @@ use bevy::window::{WindowMoved, WindowResized};
 use solitaire_core::game_state::DrawMode;
 use solitaire_data::{
     load_settings_from, save_settings_to, settings_file_path, settings::Theme, AnimSpeed, Settings,
-    WindowGeometry, TOOLTIP_DELAY_STEP_SECS,
+    WindowGeometry, TIME_BONUS_MULTIPLIER_STEP, TOOLTIP_DELAY_STEP_SECS,
 };
 
 use crate::events::{ManualSyncRequestEvent, ToggleSettingsRequestEvent};
@@ -128,6 +128,10 @@ struct ColorBlindText;
 #[derive(Component, Debug)]
 struct TooltipDelayText;
 
+/// Marks the `Text` node showing the live time-bonus-multiplier value.
+#[derive(Component, Debug)]
+struct TimeBonusMultiplierText;
+
 /// Marks the scrollable inner card so the mouse-wheel system can target it.
 #[derive(Component, Debug)]
 struct SettingsPanelScrollable;
@@ -166,6 +170,10 @@ enum SettingsButton {
     TooltipDelayDown,
     /// Increment the tooltip-hover dwell delay by one step.
     TooltipDelayUp,
+    /// Decrement the cosmetic time-bonus multiplier by one step.
+    TimeBonusDown,
+    /// Increment the cosmetic time-bonus multiplier by one step.
+    TimeBonusUp,
     ToggleTheme,
     ToggleColorBlind,
     SyncNow,
@@ -198,6 +206,8 @@ impl SettingsButton {
             SettingsButton::CycleAnimSpeed => 40,
             SettingsButton::TooltipDelayDown => 45,
             SettingsButton::TooltipDelayUp => 46,
+            SettingsButton::TimeBonusDown => 47,
+            SettingsButton::TimeBonusUp => 48,
             // Cosmetic section
             SettingsButton::ToggleTheme => 50,
             SettingsButton::ToggleColorBlind => 60,
@@ -288,6 +298,7 @@ impl Plugin for SettingsPlugin {
                     update_anim_speed_text,
                     update_color_blind_text,
                     update_tooltip_delay_text,
+                    update_time_bonus_multiplier_text,
                     attach_focusable_to_settings_buttons,
                     scroll_focus_into_view,
                 ),
@@ -553,6 +564,20 @@ fn update_tooltip_delay_text(
     }
 }
 
+/// Refreshes the live time-bonus-multiplier value in the Gameplay
+/// section whenever `SettingsResource` changes.
+fn update_time_bonus_multiplier_text(
+    settings: Res<SettingsResource>,
+    mut text_nodes: Query<&mut Text, With<TimeBonusMultiplierText>>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+    for mut text in &mut text_nodes {
+        **text = time_bonus_label(settings.0.time_bonus_multiplier);
+    }
+}
+
 fn card_back_label(idx: usize) -> String {
     if idx == 0 {
         "Default".to_string()
@@ -694,6 +719,25 @@ fn handle_settings_buttons(
                     changed.write(SettingsChangedEvent(settings.0.clone()));
                 }
             }
+            SettingsButton::TimeBonusDown => {
+                let before = settings.0.time_bonus_multiplier;
+                let after = settings.0.adjust_time_bonus_multiplier(-TIME_BONUS_MULTIPLIER_STEP);
+                if (before - after).abs() > f32::EPSILON {
+                    persist(&path, &settings.0);
+                    changed.write(SettingsChangedEvent(settings.0.clone()));
+                    // The Text node is refreshed by
+                    // `update_time_bonus_multiplier_text` on the next
+                    // frame via `settings.is_changed()`.
+                }
+            }
+            SettingsButton::TimeBonusUp => {
+                let before = settings.0.time_bonus_multiplier;
+                let after = settings.0.adjust_time_bonus_multiplier(TIME_BONUS_MULTIPLIER_STEP);
+                if (before - after).abs() > f32::EPSILON {
+                    persist(&path, &settings.0);
+                    changed.write(SettingsChangedEvent(settings.0.clone()));
+                }
+            }
             SettingsButton::ToggleTheme => {
                 settings.0.theme = match settings.0.theme {
                     Theme::Green => Theme::Blue,
@@ -776,6 +820,18 @@ fn tooltip_delay_label(secs: f32) -> String {
         "Instant".into()
     } else {
         format!("{secs:.1} s")
+    }
+}
+
+/// Formats the cosmetic time-bonus multiplier for display in the
+/// Settings panel. `0.0` reads as `"Off"` so the player understands the
+/// time-bonus row will be hidden; any other value prints as
+/// `"{n:.1}×"` (e.g. `"1.0×"`, `"1.5×"`).
+fn time_bonus_label(value: f32) -> String {
+    if value <= 0.0 {
+        "Off".into()
+    } else {
+        format!("{value:.1}×")
     }
 }
 
@@ -1116,6 +1172,11 @@ fn spawn_settings_panel(
                 settings.tooltip_delay_secs,
                 font_res,
             );
+            time_bonus_multiplier_row(
+                body,
+                settings.time_bonus_multiplier,
+                font_res,
+            );
 
             // --- Cosmetic ---
             section_label(body, "Cosmetic", font_res);
@@ -1295,6 +1356,56 @@ fn tooltip_delay_row(
                 "+",
                 SettingsButton::TooltipDelayUp,
                 "Lengthen the hover delay before tooltips appear.",
+                font_res,
+            );
+        });
+}
+
+/// `Time bonus  1.0×  [−]  [+]` — slider row for the cosmetic
+/// `Settings::time_bonus_multiplier`. Mirrors [`tooltip_delay_row`]
+/// (label, current value, decrement, increment) but formats the value
+/// via [`time_bonus_label`] so `0.0` reads as `"Off"` and other values
+/// as `"{n:.1}×"`. The multiplier is **cosmetic** — adjusting it
+/// changes only the win-modal score breakdown, not the canonical
+/// scores recorded in stats / achievements / leaderboards.
+fn time_bonus_multiplier_row(
+    parent: &mut ChildSpawnerCommands,
+    value: f32,
+    font_res: Option<&FontResource>,
+) {
+    let label_font = label_text_font(font_res);
+    let value_font = value_text_font(font_res);
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: VAL_SPACE_2,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                Text::new("Time bonus".to_string()),
+                label_font,
+                TextColor(TEXT_SECONDARY),
+            ));
+            row.spawn((
+                TimeBonusMultiplierText,
+                Text::new(time_bonus_label(value)),
+                value_font,
+                TextColor(TEXT_PRIMARY),
+            ));
+            icon_button(
+                row,
+                "−",
+                SettingsButton::TimeBonusDown,
+                "Shrink the time-bonus shown in the win modal. Cosmetic only.",
+                font_res,
+            );
+            icon_button(
+                row,
+                "+",
+                SettingsButton::TimeBonusUp,
+                "Boost the time-bonus shown in the win modal. Cosmetic only.",
                 font_res,
             );
         });

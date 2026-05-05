@@ -314,14 +314,40 @@ pub struct ScoreBreakdown {
 }
 
 impl ScoreBreakdown {
-    /// Builds a breakdown for the given win.
+    /// Builds a breakdown for the given win, applying the player's
+    /// **cosmetic** time-bonus multiplier (`Settings::time_bonus_multiplier`)
+    /// to the raw `compute_time_bonus` result before storing it on the
+    /// breakdown.
     ///
     /// `base` is the running game score (`pending.score`); `time_seconds`,
-    /// `undo_count`, and `mode` come from the captured `WinSummaryPending`.
-    /// All score arithmetic is saturating to keep the breakdown safe even
-    /// for pathologically high scores.
-    pub fn compute(base: i32, time_seconds: u64, undo_count: u32, mode: GameMode) -> Self {
-        let time_bonus = compute_time_bonus(time_seconds);
+    /// `undo_count`, and `mode` come from the captured `WinSummaryPending`;
+    /// `time_bonus_multiplier` comes from `SettingsResource`. All score
+    /// arithmetic is saturating to keep the breakdown safe even for
+    /// pathologically high scores.
+    ///
+    /// The multiplier is **purely visual** — it changes what the player
+    /// sees in the win modal but does **not** affect achievement
+    /// thresholds, leaderboard submissions, or `StatsSnapshot` totals,
+    /// which all use the raw, unmultiplied scoring values.
+    pub fn compute(
+        base: i32,
+        time_seconds: u64,
+        undo_count: u32,
+        mode: GameMode,
+        time_bonus_multiplier: f32,
+    ) -> Self {
+        let raw_bonus = compute_time_bonus(time_seconds);
+        // Apply the cosmetic multiplier and round back to an integer so
+        // the breakdown total stays a whole-number score.
+        let scaled = (raw_bonus as f32 * time_bonus_multiplier).round();
+        // Clamp into i32 range defensively — `raw_bonus` is already
+        // bounded by `compute_time_bonus`, but a multiplier of 2.0 on
+        // an i32::MAX-adjacent bonus could still overflow the cast.
+        let time_bonus = if scaled.is_nan() {
+            0
+        } else {
+            scaled.clamp(i32::MIN as f32, i32::MAX as f32) as i32
+        };
         let no_undo_bonus = if undo_count == 0 { SCORE_NO_UNDO_BONUS } else { 0 };
         let multiplier = match mode {
             GameMode::Zen => 0.0,
@@ -554,7 +580,21 @@ fn spawn_win_summary_after_delay(
                 let anim_speed = settings
                     .as_ref()
                     .map_or(AnimSpeed::Normal, |s| s.0.animation_speed);
-                spawn_overlay(&mut commands, &pending, &session, challenge_level, anim_speed);
+                // The cosmetic time-bonus multiplier is also pulled
+                // here — defaults to 1.0 (no change) when settings are
+                // absent (tests under MinimalPlugins without
+                // SettingsPlugin).
+                let time_bonus_multiplier = settings
+                    .as_ref()
+                    .map_or(1.0_f32, |s| s.0.time_bonus_multiplier);
+                spawn_overlay(
+                    &mut commands,
+                    &pending,
+                    &session,
+                    challenge_level,
+                    anim_speed,
+                    time_bonus_multiplier,
+                );
             }
         }
     }
@@ -634,18 +674,25 @@ fn apply_screen_shake(
 /// full opacity (no stagger, no fade); otherwise rows are spawned
 /// hidden and the [`reveal_score_breakdown`] system fades them in over
 /// roughly one second.
+///
+/// `time_bonus_multiplier` is the player's cosmetic
+/// `Settings::time_bonus_multiplier` and is folded into the time-bonus
+/// row of the score breakdown only — it does **not** alter any stored
+/// score or achievement-unlock evaluation.
 fn spawn_overlay(
     commands: &mut Commands,
     pending: &WinSummaryPending,
     session: &SessionAchievements,
     challenge_level: Option<u32>,
     anim_speed: AnimSpeed,
+    time_bonus_multiplier: f32,
 ) {
     let breakdown = ScoreBreakdown::compute(
         pending.score,
         pending.time_seconds,
         pending.undo_count,
         pending.mode,
+        time_bonus_multiplier,
     );
     commands
         .spawn((
@@ -1392,7 +1439,7 @@ mod tests {
     /// the no-undo bonus fires because `undo_count == 0`.
     #[test]
     fn score_breakdown_compute_produces_expected_components() {
-        let bd = ScoreBreakdown::compute(3200, 120, 0, GameMode::Classic);
+        let bd = ScoreBreakdown::compute(3200, 120, 0, GameMode::Classic, 1.0);
         assert_eq!(bd.base, 3200);
         assert_eq!(bd.time_bonus, 5833); // 700_000 / 120
         assert_eq!(bd.no_undo_bonus, SCORE_NO_UNDO_BONUS);
@@ -1408,7 +1455,7 @@ mod tests {
     /// of the other components.
     #[test]
     fn score_breakdown_zen_mode_zeros_total() {
-        let bd = ScoreBreakdown::compute(500, 60, 0, GameMode::Zen);
+        let bd = ScoreBreakdown::compute(500, 60, 0, GameMode::Zen, 1.0);
         assert!((bd.multiplier - 0.0).abs() < f32::EPSILON);
         assert!(bd.shows_multiplier_row(), "Zen ×0 must display the multiplier row");
         assert_eq!(bd.total(), 0);
@@ -1418,7 +1465,7 @@ mod tests {
     /// row is suppressed.
     #[test]
     fn score_breakdown_skips_no_undo_row_when_undo_was_used() {
-        let bd = ScoreBreakdown::compute(100, 60, 1, GameMode::Classic);
+        let bd = ScoreBreakdown::compute(100, 60, 1, GameMode::Classic, 1.0);
         assert_eq!(bd.no_undo_bonus, 0);
         assert!(!bd.shows_no_undo_row());
     }
@@ -1427,7 +1474,7 @@ mod tests {
     /// is suppressed.
     #[test]
     fn score_breakdown_skips_time_bonus_row_when_zero() {
-        let bd = ScoreBreakdown::compute(100, 0, 0, GameMode::Classic);
+        let bd = ScoreBreakdown::compute(100, 0, 0, GameMode::Classic, 1.0);
         assert_eq!(bd.time_bonus, 0);
         assert!(!bd.shows_time_bonus_row());
     }
@@ -1438,7 +1485,7 @@ mod tests {
     /// multiplier row, ×1.0 is suppressed).
     #[test]
     fn win_modal_score_breakdown_spawns_one_row_per_component() {
-        let bd = ScoreBreakdown::compute(3200, 120, 0, GameMode::Classic);
+        let bd = ScoreBreakdown::compute(3200, 120, 0, GameMode::Classic, 1.0);
         assert_eq!(
             bd.row_count(),
             5,
@@ -1446,7 +1493,7 @@ mod tests {
         );
 
         // Zen with both bonuses ALSO shows the multiplier row.
-        let zen = ScoreBreakdown::compute(3200, 120, 0, GameMode::Zen);
+        let zen = ScoreBreakdown::compute(3200, 120, 0, GameMode::Zen, 1.0);
         assert_eq!(
             zen.row_count(),
             6,
@@ -1457,13 +1504,59 @@ mod tests {
     /// When `no_undo_bonus == 0`, the row count drops by one.
     #[test]
     fn win_modal_score_breakdown_skips_zero_bonus_rows() {
-        let bd_with = ScoreBreakdown::compute(3200, 120, 0, GameMode::Classic);
-        let bd_without = ScoreBreakdown::compute(3200, 120, 1, GameMode::Classic);
+        let bd_with = ScoreBreakdown::compute(3200, 120, 0, GameMode::Classic, 1.0);
+        let bd_without = ScoreBreakdown::compute(3200, 120, 1, GameMode::Classic, 1.0);
         assert_eq!(
             bd_with.row_count() - 1,
             bd_without.row_count(),
             "removing the no-undo bonus must remove exactly one row"
         );
+    }
+
+    /// Cosmetic time-bonus multiplier from `Settings::time_bonus_multiplier`
+    /// scales the displayed `time_bonus` row by the factor, rounded to
+    /// the nearest integer. A `0.5` multiplier halves the canonical
+    /// `compute_time_bonus(120) = 5833` to `2917` (5833 × 0.5 = 2916.5,
+    /// round-half-to-even via `.round()` lands on 2917 in IEEE-754).
+    #[test]
+    fn score_breakdown_applies_time_bonus_multiplier() {
+        let raw = compute_time_bonus(120);
+        assert_eq!(raw, 5833, "sanity-check raw bonus before testing the multiplier");
+
+        let bd = ScoreBreakdown::compute(0, 120, 0, GameMode::Classic, 0.5);
+        let expected = ((raw as f32) * 0.5).round() as i32;
+        assert_eq!(
+            bd.time_bonus, expected,
+            "time_bonus row must reflect raw_bonus × multiplier (rounded)"
+        );
+        // The row is still shown — value is 2917, not zero.
+        assert!(bd.shows_time_bonus_row());
+    }
+
+    /// At `multiplier == 0.0` ("Off"), the time-bonus row collapses to
+    /// zero and is suppressed by the renderer (same path as a zero
+    /// elapsed time).
+    #[test]
+    fn score_breakdown_off_multiplier_zeros_time_bonus() {
+        let bd = ScoreBreakdown::compute(100, 120, 0, GameMode::Classic, 0.0);
+        assert_eq!(
+            bd.time_bonus, 0,
+            "0.0 multiplier must zero out the displayed time bonus"
+        );
+        assert!(
+            !bd.shows_time_bonus_row(),
+            "with time_bonus = 0 the row must be suppressed by the renderer"
+        );
+    }
+
+    /// A `2.0` multiplier doubles the displayed bonus — exercises the
+    /// upper end of the slider range.
+    #[test]
+    fn score_breakdown_double_multiplier_doubles_time_bonus() {
+        let raw = compute_time_bonus(120);
+        let bd = ScoreBreakdown::compute(0, 120, 0, GameMode::Classic, 2.0);
+        let expected = ((raw as f32) * 2.0).round() as i32;
+        assert_eq!(bd.time_bonus, expected);
     }
 
     /// Pure helper test: the reveal logic uses delta-time to count
