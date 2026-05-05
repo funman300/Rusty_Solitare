@@ -20,14 +20,15 @@ use uuid::Uuid;
 
 use solitaire_data::{
     save_achievements_to, save_progress_to, save_stats_to, AchievementRecord, PlayerProgress,
-    StatsSnapshot, SyncError, SyncProvider,
+    Replay, StatsSnapshot, SyncError, SyncProvider,
 };
 use solitaire_sync::{merge, SyncPayload, SyncResponse};
 
 use crate::achievement_plugin::{AchievementsResource, AchievementsStoragePath};
-use crate::events::{ManualSyncRequestEvent, SyncCompleteEvent};
+use crate::events::{GameWonEvent, ManualSyncRequestEvent, SyncCompleteEvent};
+use crate::game_plugin::RecordingReplay;
 use crate::progress_plugin::{ProgressResource, ProgressStoragePath};
-use crate::resources::{SyncStatus, SyncStatusResource};
+use crate::resources::{GameStateResource, SyncStatus, SyncStatusResource};
 use crate::stats_plugin::{StatsResource, StatsStoragePath};
 
 // ---------------------------------------------------------------------------
@@ -96,7 +97,10 @@ impl Plugin for SyncPlugin {
             .add_message::<ManualSyncRequestEvent>()
             .add_message::<SyncCompleteEvent>()
             .add_systems(Startup, start_pull)
-            .add_systems(Update, (poll_pull_result, handle_manual_sync_request))
+            .add_systems(
+                Update,
+                (poll_pull_result, handle_manual_sync_request, push_replay_on_win),
+            )
             .add_systems(Last, push_on_exit);
     }
 }
@@ -260,6 +264,51 @@ fn push_on_exit(
             // loop is done).
             warn!("sync push on exit failed: {e}");
         }
+    }
+}
+
+/// Update-schedule system: on each `GameWonEvent` push the just-completed
+/// replay to the active sync backend so it's available for web playback.
+///
+/// Spawned as a fire-and-forget task on `AsyncComputeTaskPool` — the game
+/// loop never blocks on the network round-trip. Errors are logged but
+/// never surfaced to the UI; failure to upload is non-fatal because the
+/// replay is also persisted locally by `game_plugin::record_replay_on_win`,
+/// so the player can still review it on the next login. `LocalOnlyProvider`'s
+/// `UnsupportedPlatform` is silently absorbed in the same way the
+/// `push_on_exit` path handles it.
+fn push_replay_on_win(
+    mut wins: MessageReader<GameWonEvent>,
+    provider: Res<SyncProviderResource>,
+    game: Res<GameStateResource>,
+    recording: Res<RecordingReplay>,
+) {
+    for ev in wins.read() {
+        // Empty-recording guard mirrors `record_replay_on_win` —
+        // synthesised win events from XP / streak tests must not trigger
+        // a server upload.
+        if recording.moves.is_empty() {
+            continue;
+        }
+        let replay = Replay::new(
+            game.0.seed,
+            game.0.draw_mode.clone(),
+            game.0.mode,
+            ev.time_seconds,
+            ev.score,
+            Utc::now().date_naive(),
+            recording.moves.clone(),
+        );
+        let provider = provider.0.clone();
+        AsyncComputeTaskPool::get()
+            .spawn(async move {
+                match provider.push_replay(&replay).await {
+                    Ok(()) => {}
+                    Err(SyncError::UnsupportedPlatform) => {}
+                    Err(e) => warn!("replay upload failed: {e}"),
+                }
+            })
+            .detach();
     }
 }
 
