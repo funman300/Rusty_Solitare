@@ -1447,3 +1447,150 @@ async fn auth_rate_limit_returns_429_on_11th_request() {
         "11th request must be rate-limited with 429"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Replay endpoints
+//
+// End-to-end coverage for the upload → fetch → render path that powers
+// the web replay viewer. Each test boots the full router against an
+// in-memory SQLite, registers a user, and exercises one of the three
+// replay endpoints. The schema-correctness tests (storage round-trip,
+// version gate, atomic write) live in `solitaire_data::replay`; here we
+// only verify the HTTP transport + database layer.
+// ---------------------------------------------------------------------------
+
+/// Build a minimal v2 replay JSON the upload endpoint will accept.
+///
+/// Uses the same field shape `solitaire_data::Replay` produces — kept
+/// in sync by hand because the server crate intentionally does not
+/// depend on `solitaire_data` (which carries dirs/keyring/reqwest).
+fn sample_replay_payload(seed: u64, score: i32) -> Value {
+    serde_json::json!({
+        "schema_version": 2,
+        "seed": seed,
+        "draw_mode": "DrawOne",
+        "mode": "Classic",
+        "time_seconds": 134,
+        "final_score": score,
+        "recorded_at": "2026-05-02",
+        "moves": [
+            "StockClick",
+            { "Move": { "from": "Waste", "to": { "Tableau": 3 }, "count": 1 } }
+        ]
+    })
+}
+
+/// Round-trip: register → upload → fetch → assert the payload returned
+/// by `GET /api/replays/:id` matches what was uploaded byte-for-byte.
+/// This is the canonical "the web viewer can play back what the
+/// desktop client uploaded" test.
+#[tokio::test]
+async fn replay_upload_then_fetch_round_trips_payload() {
+    let pool = test_pool().await;
+    let app = build_test_router(pool);
+    let (token, _) = register_user(app.clone(), "replay_round_trip_user", "p4ssword!").await;
+
+    let payload = sample_replay_payload(7654, 4321);
+    let resp = post_authed(app.clone(), "/api/replays", &token, payload.clone()).await;
+    assert_eq!(resp.status(), StatusCode::OK, "upload must return 200");
+    let id = body_json(resp).await["id"]
+        .as_str()
+        .expect("upload response missing `id`")
+        .to_string();
+    assert!(uuid::Uuid::parse_str(&id).is_ok(), "id must be a UUID");
+
+    // Fetch is public — no auth required, exercising the path the
+    // logged-out web viewer takes.
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/replays/{id}"))
+        .header("x-forwarded-for", TEST_CLIENT_IP)
+        .body(Body::empty())
+        .expect("fetch request");
+    let resp = app.clone().oneshot(req).await.expect("oneshot");
+    assert_eq!(resp.status(), StatusCode::OK, "fetch must return 200");
+    let fetched = body_json(resp).await;
+    assert_eq!(
+        fetched, payload,
+        "fetched payload must match what was uploaded byte-for-byte",
+    );
+}
+
+/// `GET /api/replays/:id` for an id that was never uploaded must
+/// return 404 (not 500). Exercises the `AppError::NotFound` mapping
+/// added in the server commit.
+#[tokio::test]
+async fn replay_fetch_unknown_id_returns_404() {
+    let pool = test_pool().await;
+    let app = build_test_router(pool);
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/replays/nonexistent-id-1234")
+        .header("x-forwarded-for", TEST_CLIENT_IP)
+        .body(Body::empty())
+        .expect("fetch request");
+    let resp = app.oneshot(req).await.expect("oneshot");
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+/// Two uploads, then `GET /api/replays/recent` — the more recent
+/// upload must come first and the response must include the
+/// uploader's username (joined from the `users` table).
+#[tokio::test]
+async fn replay_recent_lists_newest_first_with_username() {
+    let pool = test_pool().await;
+    let app = build_test_router(pool);
+    let (token, _) = register_user(app.clone(), "replay_recent_user", "p4ssword!").await;
+
+    let _ = post_authed(app.clone(), "/api/replays", &token, sample_replay_payload(1, 100)).await;
+    let _ = post_authed(app.clone(), "/api/replays", &token, sample_replay_payload(2, 200)).await;
+
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/replays/recent")
+        .header("x-forwarded-for", TEST_CLIENT_IP)
+        .body(Body::empty())
+        .expect("recent request");
+    let resp = app.oneshot(req).await.expect("oneshot");
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let entries = body_json(resp).await;
+    let array = entries.as_array().expect("recent should return an array");
+    assert!(array.len() >= 2, "two uploads should yield two list entries");
+    // Newer upload (seed = 2) must appear before older one (seed = 1).
+    let seeds: Vec<i64> = array
+        .iter()
+        .map(|e| e["seed"].as_i64().expect("seed should be an integer"))
+        .collect();
+    assert_eq!(
+        seeds, [2, 1],
+        "received_at DESC: most recent upload first",
+    );
+    assert_eq!(
+        array[0]["username"].as_str(),
+        Some("replay_recent_user"),
+        "username must be joined into the response",
+    );
+}
+
+/// `POST /api/replays` without an `Authorization` header must return
+/// 401, not silently insert as an anonymous user.
+#[tokio::test]
+async fn replay_upload_without_auth_returns_401() {
+    let pool = test_pool().await;
+    let app = build_test_router(pool);
+    let resp = post_json(app, "/api/replays", sample_replay_payload(99, 50)).await;
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// `POST /api/replays` with a malformed body (missing fields the
+/// header projector needs) must return 400, not 500.
+#[tokio::test]
+async fn replay_upload_malformed_body_returns_400() {
+    let pool = test_pool().await;
+    let app = build_test_router(pool);
+    let (token, _) = register_user(app.clone(), "replay_bad_body_user", "p4ssword!").await;
+    let bad = serde_json::json!({ "schema_version": 2, "missing_required_fields": true });
+    let resp = post_authed(app, "/api/replays", &token, bad).await;
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
