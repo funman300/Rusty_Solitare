@@ -31,6 +31,10 @@ pub enum AppError {
     #[error("bad request: {0}")]
     BadRequest(String),
 
+    /// The requested resource does not exist.
+    #[error("not found: {0}")]
+    NotFound(String),
+
     /// A database error occurred.
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
@@ -56,6 +60,7 @@ impl IntoResponse for AppError {
             }
             AppError::UsernameTaken => (StatusCode::CONFLICT, self.to_string()),
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
+            AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg.clone()),
             AppError::Database(e) => {
                 tracing::error!("database error: {e}");
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".to_string())

@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n              r.id              AS \"id!: String\",\n              u.username        AS \"username!: String\",\n              r.seed            AS \"seed!: i64\",\n              r.draw_mode       AS \"draw_mode!: String\",\n              r.mode            AS \"mode!: String\",\n              r.time_seconds    AS \"time_seconds!: i64\",\n              r.final_score     AS \"final_score!: i64\",\n              r.recorded_at     AS \"recorded_at!: String\",\n              r.received_at     AS \"received_at!: String\"\n           FROM replays r\n           JOIN users   u ON u.id = r.user_id\n           ORDER BY r.received_at DESC\n           LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "username!: String",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "seed!: i64",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "draw_mode!: String",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "mode!: String",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "time_seconds!: i64",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "final_score!: i64",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "recorded_at!: String",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "received_at!: String",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3a9bd2e51b2389da5b7e85f26806fcffa896748e0b589d216cf60827fc3857a9"
+}

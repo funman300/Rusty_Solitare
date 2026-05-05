@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT replay_json FROM replays WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "replay_json",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5bc1984044bc792c2e9577a159ca22789469df14cb25144451f37e8cdad8165c"
+}

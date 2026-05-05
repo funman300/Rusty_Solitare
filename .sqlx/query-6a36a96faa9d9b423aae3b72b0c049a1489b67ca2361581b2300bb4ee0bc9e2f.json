@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO replays (\n              id, user_id, seed, draw_mode, mode, time_seconds, final_score,\n              recorded_at, received_at, replay_json\n           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "6a36a96faa9d9b423aae3b72b0c049a1489b67ca2361581b2300bb4ee0bc9e2f"
+}

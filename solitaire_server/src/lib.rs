@@ -9,6 +9,7 @@ pub mod challenge;
 pub mod error;
 pub mod leaderboard;
 pub mod middleware;
+pub mod replays;
 pub mod sync;
 
 use axum::{
@@ -64,6 +65,7 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
     let protected = Router::new()
         .route("/api/sync/pull", get(sync::pull))
         .route("/api/sync/push", post(sync::push))
+        .route("/api/replays", post(replays::upload))
         .route("/api/leaderboard", get(leaderboard::get_leaderboard))
         .route("/api/leaderboard/opt-in", post(leaderboard::opt_in))
         .route("/api/leaderboard/opt-in", delete(leaderboard::opt_out))
@@ -98,6 +100,8 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
     // Public endpoints (no auth, no rate limit beyond defaults).
     let public = Router::new()
         .route("/api/daily-challenge", get(challenge::daily_challenge))
+        .route("/api/replays/recent", get(replays::recent))
+        .route("/api/replays/{id}", get(replays::get_by_id))
         .route("/health", get(health));
 
     Router::new()
