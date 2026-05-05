@@ -16,6 +16,7 @@ use solitaire_sync::{ChallengeGoal, LeaderboardEntry, SyncPayload, SyncResponse}
 
 use crate::{
     auth_tokens::{load_access_token, load_refresh_token, store_tokens},
+    replay::Replay,
     settings::SyncBackend,
     SyncError, SyncProvider,
 };
@@ -355,6 +356,54 @@ impl SyncProvider for SolitaireServerClient {
         }
 
         extract_leaderboard_body(resp).await
+    }
+
+    /// Upload a winning replay to `POST /api/replays`. Mirrors the
+    /// `push` auth flow: 401 triggers a token refresh and one retry.
+    /// Non-success statuses are surfaced as the relevant `SyncError`
+    /// variant so the engine's push-on-win system can downgrade
+    /// network/auth failures into a quiet log without aborting the
+    /// game flow.
+    async fn push_replay(&self, replay: &Replay) -> Result<(), SyncError> {
+        let token = self.access_token()?;
+        let url = format!("{}/api/replays", self.base_url);
+
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(&token)
+            .json(replay)
+            .send()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.refresh_token().await?;
+            let new_token = self.access_token()?;
+            let resp = self
+                .client
+                .post(&url)
+                .bearer_auth(new_token)
+                .json(replay)
+                .send()
+                .await
+                .map_err(|e| SyncError::Network(e.to_string()))?;
+            return check_replay_status(resp.status());
+        }
+
+        check_replay_status(resp.status())
+    }
+}
+
+fn check_replay_status(status: reqwest::StatusCode) -> Result<(), SyncError> {
+    if status.is_success() {
+        Ok(())
+    } else if status == reqwest::StatusCode::UNAUTHORIZED
+        || status == reqwest::StatusCode::FORBIDDEN
+    {
+        Err(SyncError::Auth(format!("server returned {status}")))
+    } else {
+        Err(SyncError::Network(format!("server returned {status}")))
     }
 }
 

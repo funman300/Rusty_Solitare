@@ -56,6 +56,15 @@ pub trait SyncProvider: Send + Sync {
     async fn delete_account(&self) -> Result<(), SyncError> {
         Ok(())
     }
+    /// Upload a winning replay to the backend so it's available for web
+    /// playback at `<server>/replays/<id>`. Default returns
+    /// `UnsupportedPlatform` so backends without a server (e.g.
+    /// `LocalOnlyProvider`) are silently no-op'd by the engine's
+    /// push-on-win system, matching the same pattern `pull` / `push`
+    /// follow.
+    async fn push_replay(&self, _replay: &crate::replay::Replay) -> Result<(), SyncError> {
+        Err(SyncError::UnsupportedPlatform)
+    }
 }
 
 /// Blanket impl so `Box<dyn SyncProvider + Send + Sync>` (returned by
@@ -91,6 +100,9 @@ impl SyncProvider for Box<dyn SyncProvider + Send + Sync> {
     }
     async fn delete_account(&self) -> Result<(), SyncError> {
         (**self).delete_account().await
+    }
+    async fn push_replay(&self, replay: &crate::replay::Replay) -> Result<(), SyncError> {
+        (**self).push_replay(replay).await
     }
 }
 
@@ -139,3 +151,9 @@ pub use auth_tokens::{
 
 pub mod sync_client;
 pub use sync_client::{provider_for_backend, LocalOnlyProvider, SolitaireServerClient};
+
+pub mod replay;
+pub use replay::{
+    latest_replay_path, load_latest_replay_from, save_latest_replay_to, Replay, ReplayMove,
+    REPLAY_SCHEMA_VERSION,
+};
