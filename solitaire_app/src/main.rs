@@ -10,7 +10,8 @@ use solitaire_engine::{
     AudioPlugin, AutoCompletePlugin, CardAnimationPlugin, CardPlugin, ChallengePlugin,
     CursorPlugin, DailyChallengePlugin, FeedbackAnimPlugin, FontPlugin, GamePlugin, HelpPlugin,
     HomePlugin, HudPlugin, InputPlugin, LeaderboardPlugin, OnboardingPlugin, PausePlugin,
-    ProfilePlugin, ProgressPlugin, RadialMenuPlugin, SelectionPlugin, SettingsPlugin, SplashPlugin,
+    ProfilePlugin, ProgressPlugin, RadialMenuPlugin, ReplayOverlayPlugin, ReplayPlaybackPlugin,
+    SelectionPlugin, SettingsPlugin, SplashPlugin,
     StatsPlugin, SyncPlugin, TablePlugin, ThemePlugin, ThemeRegistryPlugin, TimeAttackPlugin,
     UiFocusPlugin, UiModalPlugin, UiTooltipPlugin, WeeklyGoalsPlugin, WinSummaryPlugin,
 };
@@ -117,6 +118,8 @@ fn main() {
         .add_plugins(FeedbackAnimPlugin)
         .add_plugins(CardAnimationPlugin)
         .add_plugins(AutoCompletePlugin)
+        .add_plugins(ReplayPlaybackPlugin)
+        .add_plugins(ReplayOverlayPlugin)
         .add_plugins(StatsPlugin::default())
         .add_plugins(ProgressPlugin::default())
         .add_plugins(AchievementPlugin::default())

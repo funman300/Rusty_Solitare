@@ -187,27 +187,44 @@ fn refresh_latest_replay_on_win(
 
 /// Click handler for the "Watch replay" button.
 ///
-/// Replay playback lives on the sync server's web UI rather than in
-/// the desktop client. This handler currently surfaces a clear toast
-/// pointing the player there once the upload + URL is wired; until
-/// then it acknowledges the click and signals that the feature is on
-/// the way.
+/// Starts in-engine replay playback when the Watch Replay button is
+/// pressed. If no replay has been recorded yet, surfaces an
+/// [`InfoToastEvent`] instead. The playback path resets the live
+/// game to the recorded deal and ticks through the move list via
+/// [`crate::replay_playback`]; the [`crate::replay_overlay`] banner
+/// surfaces while playback runs.
 fn handle_watch_replay_button(
+    mut commands: Commands,
     buttons: Query<&Interaction, (With<WatchReplayButton>, Changed<Interaction>)>,
     latest: Res<LatestReplayResource>,
+    playback: Option<ResMut<crate::replay_playback::ReplayPlaybackState>>,
     mut toast: MessageWriter<InfoToastEvent>,
 ) {
     if !buttons.iter().any(|i| *i == Interaction::Pressed) {
         return;
     }
-    let message = match &latest.0 {
-        Some(replay) => format!(
-            "Replay ready ({}) \u{2014} web playback coming in a future build",
-            format_replay_caption(replay),
-        ),
-        None => "No replay recorded yet \u{2014} win a game first.".to_string(),
-    };
-    toast.write(InfoToastEvent(message));
+    match (&latest.0, playback) {
+        (Some(replay), Some(mut playback)) => {
+            crate::replay_playback::start_replay_playback(
+                &mut commands,
+                &mut playback,
+                replay.clone(),
+            );
+        }
+        (Some(replay), None) => {
+            // ReplayPlaybackPlugin not registered (headless test
+            // fixtures); fall back to a descriptive toast.
+            toast.write(InfoToastEvent(format!(
+                "Replay ready ({})",
+                format_replay_caption(replay)
+            )));
+        }
+        (None, _) => {
+            toast.write(InfoToastEvent(
+                "No replay recorded yet \u{2014} win a game first.".to_string(),
+            ));
+        }
+    }
 }
 
 /// Pure helper: render a one-line caption for a [`Replay`] suitable
