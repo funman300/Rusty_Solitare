@@ -155,7 +155,10 @@ pub mod sync_client;
 pub use sync_client::{provider_for_backend, LocalOnlyProvider, SolitaireServerClient};
 
 pub mod replay;
+#[allow(deprecated)]
+pub use replay::{latest_replay_path, load_latest_replay_from, save_latest_replay_to};
 pub use replay::{
-    latest_replay_path, load_latest_replay_from, save_latest_replay_to, Replay, ReplayMove,
-    REPLAY_SCHEMA_VERSION,
+    append_replay_to_history, load_replay_history_from, migrate_legacy_latest_replay,
+    replay_history_path, save_replay_history_to, Replay, ReplayHistory, ReplayMove,
+    REPLAY_HISTORY_CAP, REPLAY_HISTORY_SCHEMA_VERSION, REPLAY_SCHEMA_VERSION,
 };

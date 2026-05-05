@@ -13,8 +13,12 @@ use bevy::prelude::*;
 use chrono::Utc;
 use solitaire_core::game_state::{DrawMode, GameState};
 use solitaire_core::pile::PileType;
-use solitaire_data::{delete_game_state_at, game_state_file_path, latest_replay_path,
-    load_game_state_from, save_game_state_to, save_latest_replay_to, Replay, ReplayMove};
+use solitaire_data::{
+    append_replay_to_history, delete_game_state_at, game_state_file_path, load_game_state_from,
+    migrate_legacy_latest_replay, replay_history_path, save_game_state_to, Replay, ReplayMove,
+};
+#[allow(deprecated)]
+use solitaire_data::latest_replay_path;
 
 use crate::events::{
     CardFlippedEvent, DrawRequestEvent, FoundationCompletedEvent, GameWonEvent, InfoToastEvent,
@@ -54,7 +58,15 @@ pub struct GameMutation;
 #[derive(Resource, Debug, Clone)]
 pub struct GameStatePath(pub Option<PathBuf>);
 
-/// Persistence path for the most recent winning replay. `None` disables I/O.
+/// Persistence path for the rolling [`solitaire_data::ReplayHistory`]
+/// file (`replays.json`). `None` disables I/O — used by tests and on
+/// minimal Linux containers without `dirs::data_dir()`.
+///
+/// Each `GameWonEvent` appends the freshly-frozen [`Replay`] to the
+/// history at this path via
+/// [`solitaire_data::append_replay_to_history`], capping at
+/// [`solitaire_data::REPLAY_HISTORY_CAP`] so the file never grows
+/// unbounded.
 #[derive(Resource, Debug, Clone)]
 pub struct ReplayPath(pub Option<PathBuf>);
 
@@ -101,9 +113,27 @@ impl Plugin for GamePlugin {
             .and_then(load_game_state_from)
             .unwrap_or_else(|| GameState::new(seed_from_system_time(), DrawMode::DrawOne));
 
+        // One-shot migration from the legacy single-slot
+        // `latest_replay.json` to the rolling history at `replays.json`.
+        // Runs at plugin construction so the player's last winning
+        // replay from a pre-history build is the first entry of the
+        // new history file. The legacy file is intentionally left in
+        // place for one release as a safety net (see
+        // `migrate_legacy_latest_replay` doc comment).
+        let history_path = replay_history_path();
+        if let (Some(legacy), Some(history)) =
+            (
+                #[allow(deprecated)]
+                latest_replay_path(),
+                history_path.as_ref(),
+            )
+        {
+            migrate_legacy_latest_replay(&legacy, history);
+        }
+
         app.insert_resource(GameStateResource(initial_state))
             .insert_resource(GameStatePath(path))
-            .insert_resource(ReplayPath(latest_replay_path()))
+            .insert_resource(ReplayPath(history_path))
             .init_resource::<RecordingReplay>()
             .init_resource::<DragState>()
             .init_resource::<SyncStatusResource>()
@@ -557,14 +587,15 @@ fn handle_undo(
 
 /// On every `GameWonEvent`, freeze the in-flight [`RecordingReplay`] into
 /// a [`Replay`] tagged with the deal seed/mode, the win's score and
-/// elapsed time, and today's date — then persist it atomically to
-/// `<data_dir>/solitaire_quest/latest_replay.json` (or to whichever path
-/// `ReplayPath` carries; tests inject a temp path).
+/// elapsed time, and today's date — then append it to the rolling
+/// [`solitaire_data::ReplayHistory`] at the path `ReplayPath` carries
+/// (tests inject a temp path).
 ///
-/// Only the most recent winning replay is retained — the existing file is
-/// overwritten. The recording buffer is left intact after the win so a
-/// subsequent state-change does not erase the move list before the save
-/// completes; it gets cleared on the next `NewGameRequestEvent`.
+/// The history is capped at [`solitaire_data::REPLAY_HISTORY_CAP`]
+/// entries; older wins age out automatically when the cap is hit. The
+/// recording buffer is left intact after the win so a subsequent
+/// state-change does not erase the move list before the save completes;
+/// it gets cleared on the next `NewGameRequestEvent`.
 pub fn record_replay_on_win(
     mut wins: MessageReader<GameWonEvent>,
     game: Res<GameStateResource>,
@@ -597,8 +628,8 @@ pub fn record_replay_on_win(
             // to inspect it without going through the disk.
             continue;
         };
-        if let Err(e) = save_latest_replay_to(p, &replay) {
-            warn!("replay: failed to save winning replay: {e}");
+        if let Err(e) = append_replay_to_history(p, replay) {
+            warn!("replay: failed to append winning replay to history: {e}");
         }
     }
 }
@@ -1946,11 +1977,13 @@ mod tests {
     }
 
     /// On `GameWonEvent`, the recording is frozen into a `Replay` and
-    /// persisted. We point `ReplayPath` at a temp file, fake a win, and
-    /// load the file back to assert the metadata + move list match.
+    /// appended to the rolling [`solitaire_data::ReplayHistory`]. We
+    /// point `ReplayPath` at a temp file, fake a win, and load the
+    /// history back to assert the just-saved entry sits at the front
+    /// with the metadata + move list intact.
     #[test]
     fn replay_recording_freezes_into_replay_on_game_won() {
-        use solitaire_data::load_latest_replay_from;
+        use solitaire_data::load_replay_history_from;
 
         let path = std::env::temp_dir().join("engine_test_replay_freeze.json");
         let _ = std::fs::remove_file(&path);
@@ -1978,8 +2011,14 @@ mod tests {
         });
         app.update();
 
-        let loaded = load_latest_replay_from(&path)
+        let history = load_replay_history_from(&path)
             .expect("a winning replay must be persisted to ReplayPath");
+        assert_eq!(
+            history.replays.len(),
+            1,
+            "fresh history must contain exactly the just-recorded win",
+        );
+        let loaded = &history.replays[0];
         assert_eq!(loaded.seed, 7654, "seed must match the live game state");
         assert_eq!(loaded.draw_mode, DrawMode::DrawOne, "draw_mode must be captured");
         assert_eq!(loaded.final_score, 4321, "final_score must come from the win event");
@@ -1994,6 +2033,53 @@ mod tests {
             }
             other => panic!("second entry must be a Move, got {other:?}"),
         }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Successive `GameWonEvent`s must accumulate in the rolling
+    /// history rather than overwriting one another. Pre-cap, every win
+    /// joins the front of `history.replays`.
+    #[test]
+    fn replay_recording_appends_to_history_across_wins() {
+        use solitaire_data::load_replay_history_from;
+
+        let path = std::env::temp_dir().join("engine_test_replay_history_append.json");
+        let _ = std::fs::remove_file(&path);
+
+        let mut app = test_app(11);
+        app.insert_resource(ReplayPath(Some(path.clone())));
+
+        // First win.
+        {
+            let mut recording = app.world_mut().resource_mut::<RecordingReplay>();
+            recording.moves.clear();
+            recording.moves.push(ReplayMove::StockClick);
+        }
+        app.world_mut().write_message(GameWonEvent {
+            score: 100,
+            time_seconds: 60,
+        });
+        app.update();
+
+        // Second win — different score so we can distinguish.
+        {
+            let mut recording = app.world_mut().resource_mut::<RecordingReplay>();
+            recording.moves.clear();
+            recording.moves.push(ReplayMove::StockClick);
+            recording.moves.push(ReplayMove::StockClick);
+        }
+        app.world_mut().write_message(GameWonEvent {
+            score: 200,
+            time_seconds: 120,
+        });
+        app.update();
+
+        let history = load_replay_history_from(&path).expect("history must exist");
+        assert_eq!(history.replays.len(), 2, "both wins must be retained");
+        // Newest first — second win lands at index 0.
+        assert_eq!(history.replays[0].final_score, 200);
+        assert_eq!(history.replays[1].final_score, 100);
 
         let _ = std::fs::remove_file(&path);
     }

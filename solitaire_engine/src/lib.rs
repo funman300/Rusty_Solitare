@@ -133,7 +133,8 @@ pub use selection_plugin::{
 };
 pub use splash_plugin::{SplashAge, SplashPlugin, SplashRoot};
 pub use stats_plugin::{
-    format_replay_caption, LatestReplayPath, LatestReplayResource, StatsPlugin, StatsResource,
+    format_replay_caption, LatestReplayPath, ReplayHistoryResource, ReplayNextButton,
+    ReplayPrevButton, ReplaySelectorCaption, SelectedReplayIndex, StatsPlugin, StatsResource,
     StatsScreen, StatsUpdate, WatchReplayButton,
 };
 pub use sync_plugin::{SyncPlugin, SyncProviderResource};

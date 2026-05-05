@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use solitaire_data::{
-    latest_replay_path, load_latest_replay_from, load_stats_from, save_stats_to, stats_file_path,
-    PlayerProgress, Replay, StatsExt, StatsSnapshot, WEEKLY_GOALS,
+    load_replay_history_from, load_stats_from, replay_history_path, save_stats_to,
+    stats_file_path, PlayerProgress, Replay, ReplayHistory, StatsExt, StatsSnapshot, WEEKLY_GOALS,
 };
 
 use crate::auto_complete_plugin::AutoCompleteState;
@@ -58,29 +58,56 @@ pub struct StatsScreen;
 #[derive(Component, Debug)]
 pub struct StatsCell;
 
-/// Resource holding the most recently loaded winning [`Replay`], if any.
+/// Resource holding the rolling [`ReplayHistory`] of recent winning
+/// replays.
 ///
-/// Populated from `<data_dir>/solitaire_quest/latest_replay.json` at
-/// startup and refreshed in-place whenever the engine writes a new
-/// winning replay (the path the Stats UI calls into is unchanged so a
-/// re-open of the modal sees the latest record).
+/// Populated from `<data_dir>/solitaire_quest/replays.json` at startup
+/// and refreshed in-place whenever the engine writes a new winning
+/// replay so the Stats overlay's selector always reflects the current
+/// on-disk history.
 ///
-/// The Stats overlay reads this to decide whether to render the
-/// "Watch replay" call-to-action or the "No replay recorded yet"
-/// caption.
+/// `replays[0]` is the most recent win — the Stats overlay's selector
+/// defaults to that entry and lets the player step backwards through
+/// up to [`solitaire_data::REPLAY_HISTORY_CAP`] older entries.
 #[derive(Resource, Debug, Default, Clone)]
-pub struct LatestReplayResource(pub Option<Replay>);
+pub struct ReplayHistoryResource(pub ReplayHistory);
 
-/// Persistence path for the latest winning replay file. `None` disables
-/// I/O — used by tests and by `StatsPlugin::headless`.
+/// Currently-selected index into [`ReplayHistoryResource::0`].`replays`.
+///
+/// `0` is the most recent win and is the default on every modal open.
+/// The Prev / Next chips wrap-around within the bounds of the current
+/// history so the selector is always sat on a valid replay (or on `0`
+/// when the history is empty — the chips paint disabled in that case).
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct SelectedReplayIndex(pub usize);
+
+/// Persistence path for the rolling replay history file
+/// (`replays.json`). `None` disables I/O — used by tests and by
+/// `StatsPlugin::headless`.
 #[derive(Resource, Debug, Clone)]
 pub struct LatestReplayPath(pub Option<PathBuf>);
 
 /// Marker on the "Watch replay" button inside the Stats modal. Clicking
-/// it currently fires an [`InfoToastEvent`] indicating playback ships
-/// in a future build — see [`handle_watch_replay_button`].
+/// it starts in-engine playback of the selected replay — see
+/// [`handle_watch_replay_button`].
 #[derive(Component, Debug)]
 pub struct WatchReplayButton;
+
+/// Marker on the selector's "Previous replay" chip — steps the
+/// selection backwards (toward older replays) within
+/// [`ReplayHistoryResource`].
+#[derive(Component, Debug)]
+pub struct ReplayPrevButton;
+
+/// Marker on the selector's "Next replay" chip — steps the selection
+/// forwards (toward more recent replays).
+#[derive(Component, Debug)]
+pub struct ReplayNextButton;
+
+/// Marker on the selector's `"Replay N / M"` caption text node so the
+/// repaint system can rewrite the label as the selection changes.
+#[derive(Component, Debug)]
+pub struct ReplaySelectorCaption;
 
 /// Marker component on each per-mode bests row in the stats overlay.
 ///
@@ -123,14 +150,16 @@ impl Plugin for StatsPlugin {
         // Replay file lives next to stats.json — when the StatsPlugin
         // is in headless mode (storage_path = None), we mirror that
         // policy and disable replay I/O too. Otherwise resolve the
-        // platform-default path via `latest_replay_path()`.
-        let replay_path = self.storage_path.as_ref().and(latest_replay_path());
-        let initial_replay = replay_path
+        // platform-default path via `replay_history_path()`.
+        let replay_path = self.storage_path.as_ref().and(replay_history_path());
+        let initial_history = replay_path
             .as_deref()
-            .and_then(load_latest_replay_from);
+            .and_then(load_replay_history_from)
+            .unwrap_or_default();
         app.insert_resource(StatsResource(loaded))
             .insert_resource(StatsStoragePath(self.storage_path.clone()))
-            .insert_resource(LatestReplayResource(initial_replay))
+            .insert_resource(ReplayHistoryResource(initial_history))
+            .init_resource::<SelectedReplayIndex>()
             .insert_resource(LatestReplayPath(replay_path))
             .add_message::<GameWonEvent>()
             .add_message::<NewGameRequestEvent>()
@@ -160,19 +189,25 @@ impl Plugin for StatsPlugin {
             .add_systems(Update, handle_stats_close_button)
             .add_systems(
                 Update,
-                refresh_latest_replay_on_win.after(GameMutation),
+                refresh_replay_history_on_win.after(GameMutation),
             )
-            .add_systems(Update, handle_watch_replay_button);
+            .add_systems(Update, handle_watch_replay_button)
+            .add_systems(
+                Update,
+                (handle_replay_selector_buttons, repaint_replay_selector_caption).chain(),
+            );
     }
 }
 
-/// After a win, the engine has just persisted a fresh winning replay.
-/// Re-load it so the next time the player opens the Stats overlay, the
-/// "Watch replay" call-to-action reflects the most recent victory
-/// rather than an older session.
-fn refresh_latest_replay_on_win(
+/// After a win, the engine has just appended a fresh winning replay to
+/// the rolling history file. Re-load it so the next time the player
+/// opens the Stats overlay the selector reflects the new entry, and
+/// reset [`SelectedReplayIndex`] to `0` so the default selection is the
+/// just-recorded win.
+fn refresh_replay_history_on_win(
     mut wins: MessageReader<GameWonEvent>,
-    mut latest: ResMut<LatestReplayResource>,
+    mut history: ResMut<ReplayHistoryResource>,
+    mut selected: ResMut<SelectedReplayIndex>,
     path: Res<LatestReplayPath>,
 ) {
     // Only re-load when at least one win actually fired.
@@ -182,28 +217,34 @@ fn refresh_latest_replay_on_win(
     let Some(p) = path.0.as_deref() else {
         return;
     };
-    latest.0 = load_latest_replay_from(p);
+    history.0 = load_replay_history_from(p).unwrap_or_default();
+    // Snap the selector back to the most recent win — that's the one
+    // the player just earned.
+    selected.0 = 0;
 }
 
 /// Click handler for the "Watch replay" button.
 ///
-/// Starts in-engine replay playback when the Watch Replay button is
-/// pressed. If no replay has been recorded yet, surfaces an
-/// [`InfoToastEvent`] instead. The playback path resets the live
-/// game to the recorded deal and ticks through the move list via
-/// [`crate::replay_playback`]; the [`crate::replay_overlay`] banner
-/// surfaces while playback runs.
+/// Starts in-engine replay playback for the currently-selected entry in
+/// [`ReplayHistoryResource`] (per [`SelectedReplayIndex`]). If the
+/// history is empty or the selector points past the end (defensive
+/// guard), surfaces an [`InfoToastEvent`] instead. The playback path
+/// resets the live game to the recorded deal and ticks through the
+/// move list via [`crate::replay_playback`]; the
+/// [`crate::replay_overlay`] banner surfaces while playback runs.
 fn handle_watch_replay_button(
     mut commands: Commands,
     buttons: Query<&Interaction, (With<WatchReplayButton>, Changed<Interaction>)>,
-    latest: Res<LatestReplayResource>,
+    history: Res<ReplayHistoryResource>,
+    selected: Res<SelectedReplayIndex>,
     playback: Option<ResMut<crate::replay_playback::ReplayPlaybackState>>,
     mut toast: MessageWriter<InfoToastEvent>,
 ) {
     if !buttons.iter().any(|i| *i == Interaction::Pressed) {
         return;
     }
-    match (&latest.0, playback) {
+    let chosen = history.0.replays.get(selected.0);
+    match (chosen, playback) {
         (Some(replay), Some(mut playback)) => {
             crate::replay_playback::start_replay_playback(
                 &mut commands,
@@ -225,6 +266,74 @@ fn handle_watch_replay_button(
             ));
         }
     }
+}
+
+/// Click handler for the Prev / Next chips on the Stats overlay's
+/// replay selector. Steps [`SelectedReplayIndex`] within the bounds of
+/// the current [`ReplayHistoryResource`]; selection wraps so the
+/// chooser is always sat on a valid replay.
+///
+/// No-op when the history is empty — the selector chips paint disabled
+/// in that case but a defensive bounds check here keeps things tidy if
+/// the click somehow lands.
+fn handle_replay_selector_buttons(
+    prev: Query<&Interaction, (With<ReplayPrevButton>, Changed<Interaction>)>,
+    next: Query<&Interaction, (With<ReplayNextButton>, Changed<Interaction>)>,
+    history: Res<ReplayHistoryResource>,
+    mut selected: ResMut<SelectedReplayIndex>,
+) {
+    let len = history.0.replays.len();
+    if len == 0 {
+        return;
+    }
+    let prev_pressed = prev.iter().any(|i| *i == Interaction::Pressed);
+    let next_pressed = next.iter().any(|i| *i == Interaction::Pressed);
+    if prev_pressed {
+        // Step toward older replays — wrap to the oldest when at the
+        // newest (index 0).
+        selected.0 = if selected.0 == 0 { len - 1 } else { selected.0 - 1 };
+    }
+    if next_pressed {
+        // Step toward more recent replays — wrap to the newest when at
+        // the oldest.
+        selected.0 = (selected.0 + 1) % len;
+    }
+}
+
+/// Live-update the `"Replay N / M"` caption text as the selector
+/// changes. The caption sits next to the Prev / Next chips above the
+/// Watch button so the player can see at a glance which replay they're
+/// about to watch.
+fn repaint_replay_selector_caption(
+    history: Res<ReplayHistoryResource>,
+    selected: Res<SelectedReplayIndex>,
+    mut q: Query<&mut Text, With<ReplaySelectorCaption>>,
+) {
+    if !history.is_changed() && !selected.is_changed() {
+        return;
+    }
+    for mut text in &mut q {
+        **text = replay_selector_caption(selected.0, history.0.replays.len());
+    }
+}
+
+/// Pure helper: render the selector caption shown next to the Prev /
+/// Next chips. Returns `"No replays"` when the history is empty,
+/// otherwise `"Replay {1-based index} / {total}"`.
+///
+/// `index` is zero-based as it's stored in [`SelectedReplayIndex`].
+/// The display flips it to a one-based ordinal so "Replay 1" reads as
+/// "the most recent win" — matching the mental model the chooser
+/// surfaces.
+pub fn replay_selector_caption(index: usize, total: usize) -> String {
+    if total == 0 {
+        return "No replays".to_string();
+    }
+    // Defensive clamp — the caller is supposed to keep `index` in
+    // range, but a stale selector after a cap-driven truncation
+    // shouldn't crash the renderer.
+    let one_based = index.min(total.saturating_sub(1)) + 1;
+    format!("Replay {one_based} / {total}")
 }
 
 /// Pure helper: render a one-line caption for a [`Replay`] suitable
@@ -376,7 +485,8 @@ fn toggle_stats_screen(
     progress: Option<Res<ProgressResource>>,
     time_attack: Option<Res<TimeAttackResource>>,
     font_res: Option<Res<FontResource>>,
-    latest_replay: Res<LatestReplayResource>,
+    latest_replay: Res<ReplayHistoryResource>,
+    selected_index: Res<SelectedReplayIndex>,
     screens: Query<Entity, With<StatsScreen>>,
 ) {
     let button_clicked = requests.read().count() > 0;
@@ -386,13 +496,14 @@ fn toggle_stats_screen(
     if let Ok(entity) = screens.single() {
         commands.entity(entity).despawn();
     } else {
+        let selected = latest_replay.0.replays.get(selected_index.0);
         spawn_stats_screen(
             &mut commands,
             &stats.0,
             progress.as_deref().map(|p| &p.0),
             time_attack.as_deref(),
             font_res.as_deref(),
-            latest_replay.0.as_ref(),
+            selected,
         );
     }
 }
