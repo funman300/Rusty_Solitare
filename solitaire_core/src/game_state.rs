@@ -4,7 +4,7 @@ use crate::card::Card;
 use crate::deck::{deal_klondike, Deck};
 use crate::error::MoveError;
 use crate::pile::{Pile, PileType};
-use crate::rules::{can_place_on_foundation, can_place_on_tableau};
+use crate::rules::{can_place_on_foundation, can_place_on_tableau, is_valid_tableau_sequence};
 use crate::scoring::{compute_time_bonus as scoring_time_bonus, score_move, score_undo as scoring_undo};
 
 const MAX_UNDO_STACK: usize = 64;
@@ -282,6 +282,18 @@ impl GameState {
                     let dest = self.piles.get(&to).ok_or(MoveError::InvalidDestination)?;
                     if !can_place_on_tableau(&bottom_card, dest) {
                         return Err(MoveError::RuleViolation("invalid tableau placement".into()));
+                    }
+                    // The previous check only validates that the *bottom* of the
+                    // moved stack lands on the destination's top card. Without
+                    // this guard, a player could lift an arbitrary multi-card
+                    // selection from one column and drop it onto another whenever
+                    // the bottom card happens to match — even if the cards
+                    // above the bottom don't form a legal descending
+                    // alternating-colour run.
+                    if !is_valid_tableau_sequence(&from_pile.cards[start..]) {
+                        return Err(MoveError::RuleViolation(
+                            "moved cards must form a valid tableau run".into(),
+                        ));
                     }
                 }
                 _ => return Err(MoveError::InvalidDestination),

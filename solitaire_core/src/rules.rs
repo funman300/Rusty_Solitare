@@ -30,6 +30,18 @@ pub fn can_place_on_tableau(card: &Card, pile: &Pile) -> bool {
     }
 }
 
+/// Returns `true` if `cards` is a legal tableau run on its own — every
+/// adjacent pair descends by one rank and alternates colour. A single
+/// card is trivially valid. The destination check is separate; this
+/// only validates the sequence's *internal* structure, which the tableau
+/// move path must enforce so a player can't smuggle an arbitrary stack
+/// onto another column when the bottom card happens to land legally.
+pub fn is_valid_tableau_sequence(cards: &[Card]) -> bool {
+    cards.windows(2).all(|w| {
+        w[0].rank.value() == w[1].rank.value() + 1 && w[0].suit.is_red() != w[1].suit.is_red()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +185,27 @@ mod tests {
         top.face_up = false;
         let p = pile_with(PileType::Tableau(0), vec![top]);
         assert!(!can_place_on_tableau(&c, &p));
+    }
+
+    #[test]
+    fn tableau_sequence_validation() {
+        // Single card is trivially a valid sequence.
+        assert!(is_valid_tableau_sequence(&[card(Suit::Hearts, Rank::Five)]));
+        // Valid descending alternating-colour run K♠ Q♥ J♣.
+        assert!(is_valid_tableau_sequence(&[
+            card(Suit::Spades, Rank::King),
+            card(Suit::Hearts, Rank::Queen),
+            card(Suit::Clubs, Rank::Jack),
+        ]));
+        // Same colour twice (Q♠ on K♠) — invalid.
+        assert!(!is_valid_tableau_sequence(&[
+            card(Suit::Spades, Rank::King),
+            card(Suit::Spades, Rank::Queen),
+        ]));
+        // Rank gap (K♠ → J♥) — invalid.
+        assert!(!is_valid_tableau_sequence(&[
+            card(Suit::Spades, Rank::King),
+            card(Suit::Hearts, Rank::Jack),
+        ]));
     }
 }
