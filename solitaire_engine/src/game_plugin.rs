@@ -168,6 +168,8 @@ fn handle_new_game(
     font_res: Option<Res<FontResource>>,
     confirm_screens: Query<Entity, With<ConfirmNewGameScreen>>,
     game_over_screens: Query<Entity, With<GameOverScreen>>,
+    layout: Option<Res<crate::layout::LayoutResource>>,
+    mut card_transforms: Query<&mut Transform, With<crate::card_plugin::CardEntity>>,
 ) {
     for ev in new_game.read() {
         // If an active game is in progress, intercept and show a confirm dialog.
@@ -209,6 +211,24 @@ fn handle_new_game(
             && let Err(e) = delete_game_state_at(p) {
                 warn!("game_state: failed to delete saved game: {e}");
             }
+        // Snap every existing card sprite to the stock position before the
+        // deal animation starts. Without this the per-card slide tween reads
+        // each card's previous-game Transform as its source, which lets a
+        // careful observer track origin points to deduce where face-down
+        // cards came from. Funnelling all sprites through the deck position
+        // hides that information and reads naturally as "dealt from the
+        // deck." Skipped when LayoutResource isn't present (headless tests).
+        if let Some(layout) = layout.as_ref()
+            && let Some(stock) = layout
+                .0
+                .pile_positions
+                .get(&solitaire_core::pile::PileType::Stock)
+        {
+            for mut tx in &mut card_transforms {
+                tx.translation.x = stock.x;
+                tx.translation.y = stock.y;
+            }
+        }
         changed.write(StateChangedEvent);
     }
 }
