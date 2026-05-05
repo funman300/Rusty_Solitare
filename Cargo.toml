@@ -36,7 +36,46 @@ solitaire_sync   = { path = "solitaire_sync" }
 solitaire_data   = { path = "solitaire_data" }
 solitaire_engine = { path = "solitaire_engine" }
 
-bevy = "0.18"
+# Bevy with `default-features = false` to avoid the unused
+# `bevy_audio → rodio + symphonia + cpal 0.15 + alsa 0.9` chain.
+# Audio is handled directly by `kira` in `audio_plugin.rs`, so the
+# `bevy_audio` feature is intentionally omitted. The features below
+# enumerate every leaf of the standard `2d` + `ui` meta-features that
+# we actually use; new features should only be added with a
+# corresponding use site.
+bevy = { version = "0.18", default-features = false, features = [
+    # default_app
+    "async_executor",
+    "bevy_asset",
+    "bevy_input_focus",
+    "bevy_log",
+    "bevy_state",
+    "bevy_window",
+    "custom_cursor",
+    "reflect_auto_register",
+    # default_platform (desktop subset; no android/wayland/webgl/gilrs/sysinfo)
+    "std",
+    "bevy_winit",
+    "default_font",
+    "multi_threaded",
+    "x11",
+    # common_api
+    "bevy_color",
+    "bevy_image",
+    "bevy_mesh",
+    "bevy_shader",
+    "bevy_text",
+    "png",
+    # 2d rendering
+    "bevy_camera",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_sprite",
+    "bevy_sprite_render",
+    # UI rendering
+    "bevy_ui",
+    "bevy_ui_render",
+] }
 kira = "0.12"
 
 # SVG rasterisation pipeline for the runtime card-theme system.
