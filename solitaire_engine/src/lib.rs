@@ -92,7 +92,10 @@ pub use events::{
     ToggleLeaderboardRequestEvent, ToggleProfileRequestEvent, ToggleSettingsRequestEvent,
     ToggleStatsRequestEvent, UndoRequestEvent, WinStreakMilestoneEvent, XpAwardedEvent,
 };
-pub use game_plugin::{ConfirmNewGameScreen, GameMutation, GameOverScreen, GamePlugin, GameStatePath};
+pub use game_plugin::{
+    ConfirmNewGameScreen, GameMutation, GameOverScreen, GamePlugin, GameStatePath, RecordingReplay,
+    ReplayPath,
+};
 pub use help_plugin::{HelpPlugin, HelpScreen};
 pub use home_plugin::{HomePlugin, HomeScreen};
 pub use hud_plugin::{

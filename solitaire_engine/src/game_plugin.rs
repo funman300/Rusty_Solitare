@@ -10,9 +10,11 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
+use chrono::Utc;
 use solitaire_core::game_state::{DrawMode, GameState};
-use solitaire_data::{delete_game_state_at, game_state_file_path, load_game_state_from,
-    save_game_state_to};
+use solitaire_core::pile::PileType;
+use solitaire_data::{delete_game_state_at, game_state_file_path, latest_replay_path,
+    load_game_state_from, save_game_state_to, save_latest_replay_to, Replay, ReplayMove};
 
 use crate::events::{
     CardFlippedEvent, DrawRequestEvent, FoundationCompletedEvent, GameWonEvent, InfoToastEvent,
@@ -52,6 +54,32 @@ pub struct GameMutation;
 #[derive(Resource, Debug, Clone)]
 pub struct GameStatePath(pub Option<PathBuf>);
 
+/// Persistence path for the most recent winning replay. `None` disables I/O.
+#[derive(Resource, Debug, Clone)]
+pub struct ReplayPath(pub Option<PathBuf>);
+
+/// In-memory accumulator for [`ReplayMove`] entries during the current
+/// game. Cleared on every new-game start; frozen into a [`Replay`] and
+/// flushed to disk by [`record_replay_on_win`] when the player wins.
+///
+/// Recording captures only successful state-mutating events the player
+/// drove (`MoveRequestEvent`, `DrawRequestEvent`). `UndoRequestEvent` is
+/// intentionally not recorded — see [`solitaire_data::replay`] for the
+/// design rationale.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct RecordingReplay {
+    /// Ordered list of moves applied so far this game.
+    pub moves: Vec<ReplayMove>,
+}
+
+impl RecordingReplay {
+    /// Reset the recording. Called on every `NewGameRequestEvent` so a
+    /// fresh deal starts with an empty move list.
+    pub fn clear(&mut self) {
+        self.moves.clear();
+    }
+}
+
 /// Registers game resources, events, and the systems that route user intent
 /// (events) into mutations on `GameState`.
 pub struct GamePlugin;
@@ -75,6 +103,8 @@ impl Plugin for GamePlugin {
 
         app.insert_resource(GameStateResource(initial_state))
             .insert_resource(GameStatePath(path))
+            .insert_resource(ReplayPath(latest_replay_path()))
+            .init_resource::<RecordingReplay>()
             .init_resource::<DragState>()
             .init_resource::<SyncStatusResource>()
             .add_message::<MoveRequestEvent>()
@@ -100,6 +130,7 @@ impl Plugin for GamePlugin {
                     .in_set(GameMutation),
             )
             .add_systems(Update, check_no_moves.after(GameMutation))
+            .add_systems(Update, record_replay_on_win.after(GameMutation))
             .add_systems(Update, handle_confirm_input.after(GameMutation))
             .add_systems(Update, handle_confirm_button_input.after(GameMutation))
             .add_systems(Update, handle_game_over_input.after(GameMutation))
@@ -163,6 +194,7 @@ fn handle_new_game(
     mut new_game: MessageReader<NewGameRequestEvent>,
     mut game: ResMut<GameStateResource>,
     mut changed: MessageWriter<StateChangedEvent>,
+    mut recording: ResMut<RecordingReplay>,
     settings: Option<Res<crate::settings_plugin::SettingsResource>>,
     path: Option<Res<GameStatePath>>,
     font_res: Option<Res<FontResource>>,
@@ -206,6 +238,10 @@ fn handle_new_game(
             .map_or_else(|| game.0.draw_mode.clone(), |s| s.0.draw_mode.clone());
         let mode = ev.mode.unwrap_or(game.0.mode);
         game.0 = GameState::new_with_mode(seed, draw_mode, mode);
+        // Reset the in-flight replay buffer — a fresh deal starts with
+        // an empty move list. The previously saved replay on disk
+        // (latest_replay.json) is preserved until the player wins again.
+        recording.clear();
         // Delete any previously saved in-progress state — this is a fresh game.
         if let Some(p) = path.as_ref().and_then(|r| r.0.as_deref())
             && let Err(e) = delete_game_state_at(p) {
@@ -381,9 +417,8 @@ fn handle_draw(
     mut game: ResMut<GameStateResource>,
     mut changed: MessageWriter<StateChangedEvent>,
     mut flipped: MessageWriter<CardFlippedEvent>,
+    mut recording: ResMut<RecordingReplay>,
 ) {
-    use solitaire_core::pile::PileType;
-
     for _ in draws.read() {
         // Capture which cards are about to be drawn (top of the stock pile)
         // so we can fire flip events after they land face-up in the waste.
@@ -412,6 +447,13 @@ fn handle_draw(
                 for id in drawn_ids {
                     flipped.write(CardFlippedEvent(id));
                 }
+                // Record the atomic player input. Whether the engine
+                // resolves this to a draw or a waste→stock recycle is
+                // a deterministic function of stock state at the time
+                // the click happens — re-executing on the same starting
+                // deal produces the same effect, so the input alone is
+                // sufficient to recover the move on playback.
+                recording.moves.push(ReplayMove::StockClick);
                 changed.write(StateChangedEvent);
             }
             Err(e) => warn!("draw rejected: {e}"),
@@ -427,10 +469,9 @@ fn handle_move(
     mut won: MessageWriter<GameWonEvent>,
     mut flipped: MessageWriter<crate::events::CardFlippedEvent>,
     mut foundation_done: MessageWriter<FoundationCompletedEvent>,
+    mut recording: ResMut<RecordingReplay>,
     path: Option<Res<GameStatePath>>,
 ) {
-    use solitaire_core::pile::PileType;
-
     for ev in moves.read() {
         let was_won = game.0.is_won;
         // Identify the card that will be exposed (and may flip face-up) by the move.
@@ -446,6 +487,14 @@ fn handle_move(
         });
         match game.0.move_cards(ev.from.clone(), ev.to.clone(), ev.count) {
             Ok(()) => {
+                // Record the move in the in-flight replay buffer. Done
+                // first so the entry is captured even if a subsequent
+                // event-write or pile-lookup happens to bail out below.
+                recording.moves.push(ReplayMove::Move {
+                    from: ev.from.clone(),
+                    to: ev.to.clone(),
+                    count: ev.count,
+                });
                 // Fire flip event if the candidate card is now face-up.
                 if let Some(fid) = flip_candidate_id
                     && game.0.piles.get(&ev.from)
@@ -502,6 +551,54 @@ fn handle_undo(
                 toast.write(InfoToastEvent("Nothing to undo".to_string()));
             }
             Err(e) => warn!("undo rejected: {e}"),
+        }
+    }
+}
+
+/// On every `GameWonEvent`, freeze the in-flight [`RecordingReplay`] into
+/// a [`Replay`] tagged with the deal seed/mode, the win's score and
+/// elapsed time, and today's date — then persist it atomically to
+/// `<data_dir>/solitaire_quest/latest_replay.json` (or to whichever path
+/// `ReplayPath` carries; tests inject a temp path).
+///
+/// Only the most recent winning replay is retained — the existing file is
+/// overwritten. The recording buffer is left intact after the win so a
+/// subsequent state-change does not erase the move list before the save
+/// completes; it gets cleared on the next `NewGameRequestEvent`.
+pub fn record_replay_on_win(
+    mut wins: MessageReader<GameWonEvent>,
+    game: Res<GameStateResource>,
+    recording: Res<RecordingReplay>,
+    path: Option<Res<ReplayPath>>,
+) {
+    for ev in wins.read() {
+        // Skip persistence when the recording is empty. This guards
+        // against unrelated tests in other plugins that synthesise a
+        // `GameWonEvent` (e.g. to exercise XP / streak / weekly goal
+        // logic) without driving any actual moves — those wins should
+        // not silently overwrite the developer's real replay file.
+        // A real win always has at least one recorded `Move`.
+        if recording.moves.is_empty() {
+            continue;
+        }
+        let replay = Replay::new(
+            game.0.seed,
+            game.0.draw_mode.clone(),
+            game.0.mode,
+            ev.time_seconds,
+            ev.score,
+            Utc::now().date_naive(),
+            recording.moves.clone(),
+        );
+        let Some(p) = path.as_ref().and_then(|r| r.0.as_deref()) else {
+            // No persistence path configured (e.g. tests / minimal Linux
+            // containers without dirs::data_dir). The in-memory replay
+            // is still available via the resource for callers that want
+            // to inspect it without going through the disk.
+            continue;
+        };
+        if let Err(e) = save_latest_replay_to(p, &replay) {
+            warn!("replay: failed to save winning replay: {e}");
         }
     }
 }
@@ -791,8 +888,11 @@ mod tests {
     fn test_app(seed: u64) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).add_plugins(GamePlugin);
-        // Disable I/O — tests must not touch the real game state file.
+        // Disable I/O — tests must not touch the real game state file or
+        // the real replay file. Both default to dirs::data_dir() in the
+        // plugin's build path; clearing them keeps tests self-contained.
         app.insert_resource(GameStatePath(None));
+        app.insert_resource(ReplayPath(None));
         // Override the system-time seed with a known value.
         app.world_mut()
             .resource_mut::<GameStateResource>()
@@ -1692,6 +1792,234 @@ mod tests {
         assert!(
             fired.is_empty(),
             "no InfoToastEvent must fire on a successful undo"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Win-game replay recording
+    //
+    // The recording resource captures exactly the player-driven actions
+    // that successfully advanced GameState. On GameWonEvent it freezes
+    // into a Replay (with seed/mode/time/score metadata) and persists.
+    // -----------------------------------------------------------------------
+
+    /// Set up Tableau(0) with a face-up Ace of Clubs that can be moved
+    /// to the empty Foundation(0) — gives us a single deterministic move
+    /// to drive the recording without depending on the dealt layout.
+    fn seed_single_legal_move(app: &mut App) {
+        use solitaire_core::card::{Card, Rank, Suit};
+        let mut gs = app.world_mut().resource_mut::<GameStateResource>();
+        let t0 = gs.0.piles.get_mut(&PileType::Tableau(0)).unwrap();
+        t0.cards.clear();
+        t0.cards.push(Card {
+            id: 999,
+            suit: Suit::Clubs,
+            rank: Rank::Ace,
+            face_up: true,
+        });
+        let f0 = gs.0.piles.get_mut(&PileType::Foundation(0)).unwrap();
+        f0.cards.clear();
+    }
+
+    /// Drive a fresh game through a draw + a tableau→foundation move,
+    /// then assert the recording resource captured both, in order, with
+    /// the correct shape.
+    #[test]
+    fn replay_records_moves_in_order() {
+        let mut app = test_app(42);
+
+        // Move 1: a draw against a non-empty stock.
+        app.world_mut().write_message(DrawRequestEvent);
+        app.update();
+
+        // Move 2: a real card move from tableau to foundation.
+        seed_single_legal_move(&mut app);
+        app.world_mut().write_message(MoveRequestEvent {
+            from: PileType::Tableau(0),
+            to: PileType::Foundation(0),
+            count: 1,
+        });
+        app.update();
+
+        // Move 3: another draw.
+        app.world_mut().write_message(DrawRequestEvent);
+        app.update();
+
+        let recording = app.world().resource::<RecordingReplay>();
+        assert_eq!(
+            recording.moves.len(),
+            3,
+            "recording must capture exactly the three successful actions",
+        );
+        assert!(
+            matches!(recording.moves[0], ReplayMove::StockClick),
+            "first entry must be StockClick, got {:?}",
+            recording.moves[0],
+        );
+        match &recording.moves[1] {
+            ReplayMove::Move { from, to, count } => {
+                assert_eq!(*from, PileType::Tableau(0), "from pile must be Tableau(0)");
+                assert_eq!(*to, PileType::Foundation(0), "to pile must be Foundation(0)");
+                assert_eq!(*count, 1, "single-card move must have count 1");
+            }
+            other => panic!("second entry must be a Move, got {other:?}"),
+        }
+        assert!(
+            matches!(recording.moves[2], ReplayMove::StockClick),
+            "third entry must be StockClick, got {:?}",
+            recording.moves[2],
+        );
+    }
+
+    /// Invalid moves must not appear in the recording — the recording is
+    /// "what successfully happened", not "what was requested".
+    #[test]
+    fn replay_does_not_record_rejected_moves() {
+        let mut app = test_app(42);
+        // Stock → Waste is InvalidDestination; the live engine rejects it.
+        app.world_mut().write_message(MoveRequestEvent {
+            from: PileType::Stock,
+            to: PileType::Waste,
+            count: 1,
+        });
+        app.update();
+
+        let recording = app.world().resource::<RecordingReplay>();
+        assert!(
+            recording.moves.is_empty(),
+            "rejected moves must not enter the recording, got {:?}",
+            recording.moves,
+        );
+    }
+
+    /// Undo intentionally does NOT enter the recording. The replay
+    /// represents the canonical path the player took to win, not the
+    /// missteps that were rolled back.
+    #[test]
+    fn replay_recording_skips_undo() {
+        let mut app = test_app(42);
+        app.world_mut().write_message(DrawRequestEvent);
+        app.update();
+        app.world_mut().write_message(UndoRequestEvent);
+        app.update();
+
+        let recording = app.world().resource::<RecordingReplay>();
+        assert_eq!(
+            recording.moves.len(),
+            1,
+            "only the draw is recorded; the undo does not erase it nor add a new entry",
+        );
+        assert!(matches!(recording.moves[0], ReplayMove::StockClick));
+    }
+
+    /// Starting a new game wipes the recording so the next deal begins
+    /// with a clean buffer.
+    #[test]
+    fn replay_recording_clears_on_new_game() {
+        let mut app = test_app(1);
+        app.world_mut().write_message(DrawRequestEvent);
+        app.update();
+        assert_eq!(
+            app.world().resource::<RecordingReplay>().moves.len(),
+            1,
+            "draw should have been recorded",
+        );
+
+        // Use `confirmed: true` so the request bypasses the
+        // abandon-current-game modal (which fires when move_count > 0)
+        // and goes straight to the new-game branch that clears the
+        // recording. The modal-spawn path is exercised by other tests
+        // in this module.
+        app.world_mut().write_message(NewGameRequestEvent {
+            seed: Some(2),
+            mode: None,
+            confirmed: true,
+        });
+        app.update();
+
+        let recording = app.world().resource::<RecordingReplay>();
+        assert!(
+            recording.moves.is_empty(),
+            "recording must be cleared on new-game start; got {:?}",
+            recording.moves,
+        );
+    }
+
+    /// On `GameWonEvent`, the recording is frozen into a `Replay` and
+    /// persisted. We point `ReplayPath` at a temp file, fake a win, and
+    /// load the file back to assert the metadata + move list match.
+    #[test]
+    fn replay_recording_freezes_into_replay_on_game_won() {
+        use solitaire_data::load_latest_replay_from;
+
+        let path = std::env::temp_dir().join("engine_test_replay_freeze.json");
+        let _ = std::fs::remove_file(&path);
+
+        let mut app = test_app(7654);
+        app.insert_resource(ReplayPath(Some(path.clone())));
+
+        // Push two recorded moves manually so we can verify they survive
+        // the freeze/save round-trip without having to drive a real win.
+        {
+            let mut recording = app.world_mut().resource_mut::<RecordingReplay>();
+            recording.moves.push(ReplayMove::StockClick);
+            recording.moves.push(ReplayMove::Move {
+                from: PileType::Waste,
+                to: PileType::Tableau(2),
+                count: 1,
+            });
+        }
+
+        // Fire the win event the engine emits when the last foundation
+        // completes — `record_replay_on_win` listens for it.
+        app.world_mut().write_message(GameWonEvent {
+            score: 4321,
+            time_seconds: 250,
+        });
+        app.update();
+
+        let loaded = load_latest_replay_from(&path)
+            .expect("a winning replay must be persisted to ReplayPath");
+        assert_eq!(loaded.seed, 7654, "seed must match the live game state");
+        assert_eq!(loaded.draw_mode, DrawMode::DrawOne, "draw_mode must be captured");
+        assert_eq!(loaded.final_score, 4321, "final_score must come from the win event");
+        assert_eq!(loaded.time_seconds, 250, "time_seconds must come from the win event");
+        assert_eq!(loaded.moves.len(), 2, "every recorded move must round-trip");
+        assert!(matches!(loaded.moves[0], ReplayMove::StockClick));
+        match &loaded.moves[1] {
+            ReplayMove::Move { from, to, count } => {
+                assert_eq!(*from, PileType::Waste);
+                assert_eq!(*to, PileType::Tableau(2));
+                assert_eq!(*count, 1);
+            }
+            other => panic!("second entry must be a Move, got {other:?}"),
+        }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// `GameWonEvent` with an empty recording must NOT touch disk.
+    /// Without this guard, parallel-plugin tests that synthesise
+    /// win events for XP / streak / weekly-goal logic (without
+    /// driving any actual moves) would clobber the developer's real
+    /// replay file every time `cargo test` ran.
+    #[test]
+    fn replay_with_empty_recording_skips_save() {
+        let path = std::env::temp_dir().join("engine_test_replay_empty_skip.json");
+        let _ = std::fs::remove_file(&path);
+
+        let mut app = test_app(1);
+        app.insert_resource(ReplayPath(Some(path.clone())));
+        // Recording is empty by default — fire a win event anyway.
+        app.world_mut().write_message(GameWonEvent {
+            score: 100,
+            time_seconds: 30,
+        });
+        app.update();
+
+        assert!(
+            !path.exists(),
+            "no replay must be written when recording is empty",
         );
     }
 }
