@@ -99,8 +99,11 @@ pub use stats::{StatsExt, StatsSnapshot};
 
 pub mod storage;
 pub use storage::{
-    cleanup_orphaned_tmp_files, delete_game_state_at, game_state_file_path, load_game_state_from,
-    load_stats, load_stats_from, save_game_state_to, save_stats, save_stats_to, stats_file_path,
+    cleanup_orphaned_tmp_files, delete_game_state_at, delete_time_attack_session_at,
+    game_state_file_path, load_game_state_from, load_stats, load_stats_from,
+    load_time_attack_session_from, load_time_attack_session_from_at, save_game_state_to,
+    save_stats, save_stats_to, save_time_attack_session_to, stats_file_path,
+    time_attack_session_path, time_attack_session_with_now, TimeAttackSession,
 };
 
 pub mod achievements;
