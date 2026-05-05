@@ -8,6 +8,99 @@ project follows [Semantic Versioning](https://semver.org/).
 
 _Nothing yet._
 
+## [0.14.0] — 2026-05-02
+
+Two threads land in v0.14.0: the second half of the post-v0.12.0 UX
+candidate list (theme thumbnails, daily-challenge calendar, Time Attack
+auto-save, per-mode bests, time-bonus multiplier) plus a **major new
+feature** — the replay pipeline (record → upload → web viewer). Three
+Quat-reported bugs from a smoke-test round shipped alongside.
+
+### Added
+
+- **Theme-picker thumbnails** in Settings → Cosmetic. Each theme chip
+  renders a small Ace-of-Spades + back preview pair via the existing
+  `rasterize_svg` path. Cached per theme in a new
+  `ThemeThumbnailCache`. Themes that lack a preview SVG fall back to
+  a transparent placeholder rather than crashing.
+- **14-day daily-challenge calendar** in the Profile modal. Horizontal
+  row of dots showing the trailing two weeks; today's dot is ringed
+  in `ACCENT_PRIMARY`, completed days fill `STATE_SUCCESS`, missed
+  days fill `BG_ELEVATED`. Caption above the row reads "Current
+  streak: N · Longest: M".
+- **Time Attack session auto-save** to `<data_dir>/time_attack_session.json`,
+  atomic .tmp + rename. 30-second auto-save while a session is active,
+  plus on `AppExit`. Sessions whose 10-minute window expired in real
+  time while the app was closed are discarded on load. Classic, Zen,
+  and Challenge already auto-saved correctly via `game_state.json` —
+  Time Attack was the only mode missing session-level persistence.
+- **Per-mode best-score and fastest-win readouts** in the Stats screen.
+  `StatsSnapshot` gains six `#[serde(default)]` fields (Classic / Zen
+  / Challenge × best_score + fastest_win_seconds). Stats screen renders
+  a "Per-mode bests" section between the primary cell grid and
+  progression. Lifetime totals continue to roll all modes together.
+- **Time-bonus multiplier slider** in Settings → Gameplay (0.0–2.0,
+  0.1 steps, default 1.0, "Off" label at zero). Cosmetic only —
+  multiplies the time-bonus shown in the win modal but does NOT
+  affect achievement unlock thresholds (those still use the raw
+  unmultiplied score).
+- **Win-replay recording + storage.** Every move during a successful
+  game appends to a `RecordingReplay` resource; on `GameWonEvent`
+  the recording freezes into a `Replay` (seed + draw_mode + mode +
+  score + time + ordered move list) and persists to
+  `<data_dir>/latest_replay.json` atomically. Single-slot — overwrites
+  on every win.
+- **"Watch replay" button** in the Stats overlay. Shows the latest
+  win's caption and surfaces a button that loads the replay (button
+  fires an `InfoToastEvent` describing the replay; full in-engine
+  playback is deferred to a future build).
+- **Replay upload + fetch endpoints** on the server. `POST /api/replays`
+  accepts a `Replay` JSON; `GET /api/replays/:id` returns it. JWT-gated
+  with the existing auth middleware. Engine uploads winning replays
+  automatically when the player has cloud sync configured.
+- **`solitaire_wasm` crate** — new workspace member compiling
+  replay-relevant `solitaire_core` types to WebAssembly so a
+  browser can re-execute a replay client-side. No-std-friendly
+  surface; `wasm-bindgen` glue.
+- **Web replay viewer** served from the Solitaire server.
+  `GET /replays/:id` returns HTML + CSS + the wasm bundle that
+  fetches the replay JSON, rasterises a deal from the seed, and
+  animates the recorded moves.
+- **Card flight animations on the web side** so the browser viewer
+  reads as a real game replay rather than a static dump.
+
+### Fixed
+
+- **Multi-card lift validation.** `solitaire_core::rules::is_valid_tableau_sequence`
+  rejects a moved stack whose adjacent cards don't form a descending
+  alternating-colour run. Previously a player could lift any
+  multi-card selection and drop it as long as the bottom landed
+  legally. Wired into `move_cards`'s tableau-destination branch.
+- **Softlock detection.** `has_legal_moves` rewritten to walk every
+  potential move source (every stock card, every waste card, the
+  face-up top of every tableau column) and check it against every
+  foundation and every tableau. Previously the heuristic
+  early-returned `true` whenever stock had cards — players got
+  stuck in unwinnable end-states with no end-game screen.
+  `GameOverScreen` now actually fires for true softlocks. Quat's
+  exact reproduction case is pinned by a new test.
+- **Deal-tween information leak.** New-game now snaps every card
+  sprite to the stock pile position before writing
+  `StateChangedEvent`, so all 52 cards animate from a single point
+  during the deal. Previously the sprites started from their
+  previous-game positions, briefly revealing the prior deal.
+
+### Documentation
+
+- `SESSION_HANDOFF.md` refreshed for the Quat smoke-test round
+  including investigation findings on solver decisions and
+  dependency duplicates.
+
+### Stats
+
+- 1134 passing tests (was 1053 at v0.13.0 close).
+- Zero clippy warnings under `--workspace --all-targets -- -D warnings`.
+
 ## [0.13.0] — 2026-05-02
 
 Third UX iteration round on top of v0.12.0. Six handoff candidates
@@ -312,7 +405,8 @@ with no PNG artwork yet.
   CREDITS.md, persistent window geometry, mode-launcher Home repurpose,
   client-side sync round-trip integration tests.
 
-[Unreleased]: https://github.com/funman300/Rusty_Solitaire/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/funman300/Rusty_Solitaire/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/funman300/Rusty_Solitaire/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/funman300/Rusty_Solitaire/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/funman300/Rusty_Solitaire/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/funman300/Rusty_Solitaire/compare/v0.10.0...v0.11.0
