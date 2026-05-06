@@ -18,7 +18,8 @@ use bevy::window::{WindowMoved, WindowResized};
 use solitaire_core::game_state::DrawMode;
 use solitaire_data::{
     load_settings_from, save_settings_to, settings_file_path, settings::Theme, AnimSpeed, Settings,
-    WindowGeometry, TIME_BONUS_MULTIPLIER_STEP, TOOLTIP_DELAY_STEP_SECS,
+    WindowGeometry, REPLAY_MOVE_INTERVAL_STEP_SECS, TIME_BONUS_MULTIPLIER_STEP,
+    TOOLTIP_DELAY_STEP_SECS,
 };
 
 use crate::events::{ManualSyncRequestEvent, ToggleSettingsRequestEvent};
@@ -132,6 +133,12 @@ struct TooltipDelayText;
 #[derive(Component, Debug)]
 struct TimeBonusMultiplierText;
 
+/// Marks the `Text` node showing the live replay-playback per-move
+/// interval value. The Gameplay-section row beside this label lets the
+/// player tune `Settings::replay_move_interval_secs`.
+#[derive(Component, Debug)]
+struct ReplayMoveIntervalText;
+
 /// Marks the `Text` node showing the current "Winnable deals only"
 /// state ("ON" / "OFF") in the Gameplay section.
 #[derive(Component, Debug)]
@@ -179,6 +186,12 @@ enum SettingsButton {
     TimeBonusDown,
     /// Increment the cosmetic time-bonus multiplier by one step.
     TimeBonusUp,
+    /// Decrement the replay-playback per-move interval by one step
+    /// (i.e. speed playback up).
+    ReplayMoveIntervalDown,
+    /// Increment the replay-playback per-move interval by one step
+    /// (i.e. slow playback down).
+    ReplayMoveIntervalUp,
     ToggleTheme,
     ToggleColorBlind,
     /// Toggle the [`Settings::winnable_deals_only`] flag. When on, new
@@ -219,8 +232,12 @@ impl SettingsButton {
             SettingsButton::TooltipDelayUp => 46,
             SettingsButton::TimeBonusDown => 47,
             SettingsButton::TimeBonusUp => 48,
+            // Replay-speed slider — last Gameplay-section row, so it
+            // sits between TimeBonusUp (48) and the Cosmetic section.
+            SettingsButton::ReplayMoveIntervalDown => 49,
+            SettingsButton::ReplayMoveIntervalUp => 49,
             // Cosmetic section
-            SettingsButton::ToggleTheme => 50,
+            SettingsButton::ToggleTheme => 55,
             SettingsButton::ToggleColorBlind => 60,
             // Picker rows — every swatch in a row shares the row's
             // priority so entity-index tiebreaking yields left → right.
@@ -310,6 +327,7 @@ impl Plugin for SettingsPlugin {
                     update_color_blind_text,
                     update_tooltip_delay_text,
                     update_time_bonus_multiplier_text,
+                    update_replay_move_interval_text,
                     update_winnable_deals_only_text,
                     attach_focusable_to_settings_buttons,
                     scroll_focus_into_view,
@@ -605,6 +623,21 @@ fn update_time_bonus_multiplier_text(
     }
 }
 
+/// Refreshes the live replay-playback per-move-interval value in the
+/// Gameplay section whenever `SettingsResource` changes (slider buttons,
+/// hand-edited settings.json reload, etc.).
+fn update_replay_move_interval_text(
+    settings: Res<SettingsResource>,
+    mut text_nodes: Query<&mut Text, With<ReplayMoveIntervalText>>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+    for mut text in &mut text_nodes {
+        **text = replay_move_interval_label(settings.0.replay_move_interval_secs);
+    }
+}
+
 fn card_back_label(idx: usize) -> String {
     if idx == 0 {
         "Default".to_string()
@@ -765,6 +798,29 @@ fn handle_settings_buttons(
                     changed.write(SettingsChangedEvent(settings.0.clone()));
                 }
             }
+            SettingsButton::ReplayMoveIntervalDown => {
+                let before = settings.0.replay_move_interval_secs;
+                let after = settings
+                    .0
+                    .adjust_replay_move_interval(-REPLAY_MOVE_INTERVAL_STEP_SECS);
+                if (before - after).abs() > f32::EPSILON {
+                    persist(&path, &settings.0);
+                    changed.write(SettingsChangedEvent(settings.0.clone()));
+                    // The Text node is refreshed by
+                    // `update_replay_move_interval_text` on the next
+                    // frame via `settings.is_changed()`.
+                }
+            }
+            SettingsButton::ReplayMoveIntervalUp => {
+                let before = settings.0.replay_move_interval_secs;
+                let after = settings
+                    .0
+                    .adjust_replay_move_interval(REPLAY_MOVE_INTERVAL_STEP_SECS);
+                if (before - after).abs() > f32::EPSILON {
+                    persist(&path, &settings.0);
+                    changed.write(SettingsChangedEvent(settings.0.clone()));
+                }
+            }
             SettingsButton::ToggleTheme => {
                 settings.0.theme = match settings.0.theme {
                     Theme::Green => Theme::Blue,
@@ -874,6 +930,14 @@ fn time_bonus_label(value: f32) -> String {
     } else {
         format!("{value:.1}×")
     }
+}
+
+/// Formats the replay-playback per-move interval for display in the
+/// Settings panel. Mirrors [`tooltip_delay_label`] for parity — the
+/// readout is `"{n:.2} s/move"` (e.g. `"0.45 s/move"`, `"0.10 s/move"`),
+/// using two decimal places because the step is 0.05 s.
+fn replay_move_interval_label(secs: f32) -> String {
+    format!("{secs:.2} s/move")
 }
 
 /// Auto-attaches [`Focusable`] to every bespoke Settings button — icon
@@ -1228,6 +1292,11 @@ fn spawn_settings_panel(
                 settings.time_bonus_multiplier,
                 font_res,
             );
+            replay_move_interval_row(
+                body,
+                settings.replay_move_interval_secs,
+                font_res,
+            );
 
             // --- Cosmetic ---
             section_label(body, "Cosmetic", font_res);
@@ -1457,6 +1526,56 @@ fn time_bonus_multiplier_row(
                 "+",
                 SettingsButton::TimeBonusUp,
                 "Boost the time-bonus shown in the win modal. Cosmetic only.",
+                font_res,
+            );
+        });
+}
+
+/// `Replay speed  0.45 s/move  [−]  [+]` — slider row for the
+/// player-tunable replay-playback per-move interval. Mirrors
+/// [`tooltip_delay_row`] (label, current value, decrement, increment)
+/// but formats the value via [`replay_move_interval_label`] as
+/// `"{n:.2} s/move"`. The decrement button speeds playback up
+/// (smaller interval); the increment slows it down — same direction
+/// convention as the tooltip-delay slider.
+fn replay_move_interval_row(
+    parent: &mut ChildSpawnerCommands,
+    value_secs: f32,
+    font_res: Option<&FontResource>,
+) {
+    let label_font = label_text_font(font_res);
+    let value_font = value_text_font(font_res);
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: VAL_SPACE_2,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                Text::new("Replay speed".to_string()),
+                label_font,
+                TextColor(TEXT_SECONDARY),
+            ));
+            row.spawn((
+                ReplayMoveIntervalText,
+                Text::new(replay_move_interval_label(value_secs)),
+                value_font,
+                TextColor(TEXT_PRIMARY),
+            ));
+            icon_button(
+                row,
+                "−",
+                SettingsButton::ReplayMoveIntervalDown,
+                "Speed up replay playback (shorter per-move interval).",
+                font_res,
+            );
+            icon_button(
+                row,
+                "+",
+                SettingsButton::ReplayMoveIntervalUp,
+                "Slow down replay playback (longer per-move interval).",
                 font_res,
             );
         });

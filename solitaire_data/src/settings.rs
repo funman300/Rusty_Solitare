@@ -181,6 +181,17 @@ pub struct Settings {
     /// solver retry loop — see `solitaire_engine::handle_new_game`.
     #[serde(default)]
     pub winnable_deals_only: bool,
+    /// Per-move duration during replay playback, in seconds. Range
+    /// `[REPLAY_MOVE_INTERVAL_MIN_SECS, REPLAY_MOVE_INTERVAL_MAX_SECS]`;
+    /// default mirrors `solitaire_engine::replay_playback::REPLAY_MOVE_INTERVAL_SECS`
+    /// (0.45 s/move) so existing playback behaviour is unchanged for
+    /// players who never touch the slider. Smaller values scrub
+    /// faster through the recorded move list. Older `settings.json`
+    /// files written before this field existed deserialize cleanly to
+    /// the default via
+    /// `#[serde(default = "default_replay_move_interval_secs")]`.
+    #[serde(default = "default_replay_move_interval_secs")]
+    pub replay_move_interval_secs: f32,
 }
 
 fn default_draw_mode() -> DrawMode {
@@ -238,6 +249,33 @@ fn default_time_bonus_multiplier() -> f32 {
     1.0
 }
 
+/// Default per-move duration during replay playback, in seconds.
+/// Mirrors `solitaire_engine::replay_playback::REPLAY_MOVE_INTERVAL_SECS`
+/// so legacy `settings.json` files load to the existing baseline and
+/// playback feels identical for players who never touch the slider.
+/// The constant is duplicated across the data and engine crates
+/// because `solitaire_data` cannot depend on the engine crate — keep
+/// the two values in sync when adjusting either.
+fn default_replay_move_interval_secs() -> f32 {
+    0.45
+}
+
+/// Lower bound of the player-tunable replay-playback per-move interval,
+/// in seconds. Below this the cards barely register visually before
+/// the next move fires; the cap keeps the playback legible.
+pub const REPLAY_MOVE_INTERVAL_MIN_SECS: f32 = 0.10;
+
+/// Upper bound of the player-tunable replay-playback per-move interval,
+/// in seconds. One second per move is a comfortable upper limit for
+/// players who want to study a recorded game frame by frame.
+pub const REPLAY_MOVE_INTERVAL_MAX_SECS: f32 = 1.00;
+
+/// Increment applied by the replay-playback decrement / increment
+/// buttons. 0.05 s gives 19 stops between MIN and MAX — fine-grained
+/// enough to land on any "round" speed (0.10 s, 0.25 s, 0.45 s, etc.)
+/// without making the slider feel stuck on the same value.
+pub const REPLAY_MOVE_INTERVAL_STEP_SECS: f32 = 0.05;
+
 /// Maximum number of seed retries [`solitaire_engine::handle_new_game`]
 /// is willing to attempt before giving up and accepting the latest
 /// candidate seed when [`Settings::winnable_deals_only`] is on. If
@@ -268,14 +306,16 @@ impl Default for Settings {
             tooltip_delay_secs: default_tooltip_delay(),
             time_bonus_multiplier: default_time_bonus_multiplier(),
             winnable_deals_only: false,
+            replay_move_interval_secs: default_replay_move_interval_secs(),
         }
     }
 }
 
 impl Settings {
-    /// Clamps `sfx_volume`, `music_volume`, `tooltip_delay_secs`, and
-    /// `time_bonus_multiplier` into their respective ranges after
-    /// deserialization or hand-editing of `settings.json`.
+    /// Clamps `sfx_volume`, `music_volume`, `tooltip_delay_secs`,
+    /// `time_bonus_multiplier`, and `replay_move_interval_secs` into
+    /// their respective ranges after deserialization or hand-editing of
+    /// `settings.json`.
     pub fn sanitized(self) -> Self {
         Self {
             sfx_volume: self.sfx_volume.clamp(0.0, 1.0),
@@ -286,6 +326,9 @@ impl Settings {
             time_bonus_multiplier: self
                 .time_bonus_multiplier
                 .clamp(TIME_BONUS_MULTIPLIER_MIN, TIME_BONUS_MULTIPLIER_MAX),
+            replay_move_interval_secs: self
+                .replay_move_interval_secs
+                .clamp(REPLAY_MOVE_INTERVAL_MIN_SECS, REPLAY_MOVE_INTERVAL_MAX_SECS),
             ..self
         }
     }
@@ -323,6 +366,21 @@ impl Settings {
         // collapses any FP drift introduced by repeated additions.
         self.time_bonus_multiplier = (raw * 10.0).round() / 10.0;
         self.time_bonus_multiplier
+    }
+
+    /// Adjust the replay-playback per-move interval by `delta`
+    /// seconds, clamped to
+    /// `[REPLAY_MOVE_INTERVAL_MIN_SECS, REPLAY_MOVE_INTERVAL_MAX_SECS]`.
+    /// The result is rounded to two decimal places so the readout
+    /// stays clean across repeated `±` clicks at the 0.05 s step
+    /// (avoids float drift like `0.45000003`). Returns the new value.
+    pub fn adjust_replay_move_interval(&mut self, delta: f32) -> f32 {
+        let raw = (self.replay_move_interval_secs + delta)
+            .clamp(REPLAY_MOVE_INTERVAL_MIN_SECS, REPLAY_MOVE_INTERVAL_MAX_SECS);
+        // Round to 2 decimal places — the slider step is 0.05, so this
+        // collapses any FP drift introduced by repeated additions.
+        self.replay_move_interval_secs = (raw * 100.0).round() / 100.0;
+        self.replay_move_interval_secs
     }
 }
 
@@ -456,6 +514,7 @@ mod tests {
             tooltip_delay_secs: default_tooltip_delay(),
             time_bonus_multiplier: default_time_bonus_multiplier(),
             winnable_deals_only: false,
+            replay_move_interval_secs: default_replay_move_interval_secs(),
         };
         save_settings_to(&path, &s).expect("save");
         let loaded = load_settings_from(&path);
@@ -906,6 +965,103 @@ mod tests {
         assert!(
             !s.winnable_deals_only,
             "legacy settings.json missing winnable_deals_only must deserialize to false"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // replay_move_interval_secs — player-tunable replay playback speed
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn settings_replay_move_interval_default_is_zero_point_four_five() {
+        // The pre-slider baseline is 0.45 s/move, matching
+        // `solitaire_engine::replay_playback::REPLAY_MOVE_INTERVAL_SECS`.
+        // The default must not regress for players who never touch
+        // the slider.
+        let s = Settings::default();
+        assert!(
+            (s.replay_move_interval_secs - 0.45).abs() < 1e-6,
+            "replay_move_interval_secs default must be 0.45 (the pre-slider baseline), got {}",
+            s.replay_move_interval_secs
+        );
+    }
+
+    #[test]
+    fn settings_replay_move_interval_round_trip() {
+        let path = tmp_path("replay_move_interval_round_trip");
+        let _ = fs::remove_file(&path);
+        let s = Settings {
+            replay_move_interval_secs: 0.20,
+            ..Settings::default()
+        };
+        save_settings_to(&path, &s).expect("save");
+        let loaded = load_settings_from(&path);
+        assert!(
+            (loaded.replay_move_interval_secs - 0.20).abs() < 1e-6,
+            "replay_move_interval_secs must survive serde round-trip; got {}",
+            loaded.replay_move_interval_secs
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn legacy_settings_without_replay_move_interval_deserializes_to_default() {
+        // A settings.json written before this field existed must
+        // deserialize cleanly to the existing 0.45 s baseline so old
+        // players see no change to replay playback speed.
+        let json = br#"{ "sfx_volume": 0.7, "first_run_complete": true }"#;
+        let s: Settings = serde_json::from_slice(json).unwrap_or_default();
+        assert!(
+            (s.replay_move_interval_secs - default_replay_move_interval_secs()).abs() < 1e-6,
+            "legacy settings.json missing replay_move_interval_secs must deserialize to default ({}), got {}",
+            default_replay_move_interval_secs(),
+            s.replay_move_interval_secs
+        );
+    }
+
+    #[test]
+    fn settings_replay_move_interval_clamps_to_range() {
+        // Negative or oversized values from a hand-edited file must be
+        // clamped on load.
+        let s = Settings {
+            replay_move_interval_secs: 5.0,
+            ..Settings::default()
+        }
+        .sanitized();
+        assert_eq!(s.replay_move_interval_secs, REPLAY_MOVE_INTERVAL_MAX_SECS);
+
+        let s2 = Settings {
+            replay_move_interval_secs: -1.0,
+            ..Settings::default()
+        }
+        .sanitized();
+        assert_eq!(s2.replay_move_interval_secs, REPLAY_MOVE_INTERVAL_MIN_SECS);
+    }
+
+    #[test]
+    fn adjust_replay_move_interval_clamps_and_rounds() {
+        let mut s = Settings { replay_move_interval_secs: 0.45, ..Default::default() };
+        // Step down to 0.40.
+        assert!((s.adjust_replay_move_interval(-0.05) - 0.40).abs() < 1e-6);
+        // Big positive jump clamps to MAX.
+        assert!(
+            (s.adjust_replay_move_interval(99.0) - REPLAY_MOVE_INTERVAL_MAX_SECS).abs() < 1e-6
+        );
+        // Big negative jump clamps to MIN.
+        assert!(
+            (s.adjust_replay_move_interval(-99.0) - REPLAY_MOVE_INTERVAL_MIN_SECS).abs() < 1e-6
+        );
+
+        // Repeated 0.05 steps must not drift past the 0.05 grid.
+        let mut s2 = Settings { replay_move_interval_secs: 0.10, ..Default::default() };
+        for _ in 0..6 {
+            s2.adjust_replay_move_interval(0.05);
+        }
+        // After six +0.05 steps from 0.10, value should be exactly 0.40 (2 decimals).
+        assert!(
+            (s2.replay_move_interval_secs - 0.40).abs() < 1e-6,
+            "rounding should pin repeated 0.05 steps to the decimal grid, got {}",
+            s2.replay_move_interval_secs
         );
     }
 }

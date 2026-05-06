@@ -141,7 +141,8 @@ pub use challenge::{challenge_count, challenge_seed_for, CHALLENGE_SEEDS};
 pub mod settings;
 pub use settings::{
     load_settings_from, save_settings_to, settings_file_path, AnimSpeed, Settings, SyncBackend,
-    Theme, WindowGeometry, SOLVER_DEAL_RETRY_CAP, TIME_BONUS_MULTIPLIER_MAX,
+    Theme, WindowGeometry, REPLAY_MOVE_INTERVAL_MAX_SECS, REPLAY_MOVE_INTERVAL_MIN_SECS,
+    REPLAY_MOVE_INTERVAL_STEP_SECS, SOLVER_DEAL_RETRY_CAP, TIME_BONUS_MULTIPLIER_MAX,
     TIME_BONUS_MULTIPLIER_MIN, TIME_BONUS_MULTIPLIER_STEP, TOOLTIP_DELAY_MAX_SECS,
     TOOLTIP_DELAY_MIN_SECS, TOOLTIP_DELAY_STEP_SECS,
 };

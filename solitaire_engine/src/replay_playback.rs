@@ -45,10 +45,33 @@ use solitaire_data::{Replay, ReplayMove};
 use crate::events::{DrawRequestEvent, MoveRequestEvent, StateChangedEvent};
 use crate::game_plugin::{GameMutation, RecordingReplay};
 use crate::resources::GameStateResource;
+use crate::settings_plugin::SettingsResource;
 
-/// Per-move duration during playback. Tunable in Settings later;
-/// hardcoded for v1.
+/// Default per-move duration during playback, in seconds. Acts as the
+/// fallback when `SettingsResource` is absent — i.e. in headless test
+/// fixtures that don't install [`crate::settings_plugin::SettingsPlugin`].
+/// In production the live value is read from
+/// [`solitaire_data::Settings::replay_move_interval_secs`] every frame
+/// so Settings adjustments take effect on the next playback tick.
+///
+/// Kept in sync with `solitaire_data::settings::default_replay_move_interval_secs`
+/// (the data crate cannot depend on this engine crate, so the constant
+/// is duplicated). The
+/// `settings_replay_move_interval_default_matches_engine_constant`
+/// test in `solitaire_engine::settings_plugin` enforces equality.
 pub const REPLAY_MOVE_INTERVAL_SECS: f32 = 0.45;
+
+/// Helper: returns the live per-move replay interval. Reads
+/// [`SettingsResource::replay_move_interval_secs`] when the resource is
+/// installed, falling back to [`REPLAY_MOVE_INTERVAL_SECS`] otherwise.
+/// Also clamps below by `f32::EPSILON` so a hand-edited 0.0 cannot
+/// busy-loop the playback tick.
+fn current_move_interval_secs(settings: Option<&SettingsResource>) -> f32 {
+    let raw = settings
+        .map(|s| s.0.replay_move_interval_secs)
+        .unwrap_or(REPLAY_MOVE_INTERVAL_SECS);
+    raw.max(f32::EPSILON)
+}
 
 /// How long the [`ReplayPlaybackState::Completed`] state lingers before
 /// the auto-clear system transitions it back to
@@ -161,6 +184,12 @@ pub fn start_replay_playback(
     let fresh = GameState::new_with_mode(replay.seed, replay.draw_mode.clone(), replay.mode);
     commands.insert_resource(GameStateResource(fresh));
 
+    // Initial `secs_to_next` uses the constant rather than reading
+    // `SettingsResource` because this entry point takes `Commands` /
+    // `ResMut<ReplayPlaybackState>` only. The first-tick latency may
+    // therefore lag the configured interval by up to ~0.45 s on an
+    // unusually short setting; subsequent ticks read the live setting
+    // every frame via [`tick_replay_playback`].
     **state = ReplayPlaybackState::Playing {
         replay,
         cursor: 0,
@@ -207,11 +236,13 @@ pub fn stop_replay_playback(
 /// so the loop runs at most once per frame.
 fn tick_replay_playback(
     time: Res<Time>,
+    settings: Option<Res<SettingsResource>>,
     mut state: ResMut<ReplayPlaybackState>,
     mut moves_writer: MessageWriter<MoveRequestEvent>,
     mut draws_writer: MessageWriter<DrawRequestEvent>,
 ) {
     let dt = time.delta_secs();
+    let interval = current_move_interval_secs(settings.as_deref());
     let mut transition_to_completed = false;
 
     if let ReplayPlaybackState::Playing {
@@ -235,7 +266,7 @@ fn tick_replay_playback(
                 }
             }
             *cursor += 1;
-            *secs_to_next += REPLAY_MOVE_INTERVAL_SECS;
+            *secs_to_next += interval;
         }
 
         if *cursor >= replay.moves.len() {
@@ -677,6 +708,126 @@ mod tests {
         assert_eq!(
             after_len, baseline_len,
             "recording must not grow while playback is active",
+        );
+    }
+
+    /// With `SettingsResource::replay_move_interval_secs` set to 0.10 s
+    /// (well below the 0.45 s default), playback over a fixed
+    /// wall-clock window must dispatch strictly more moves than the
+    /// same fixture would at the 0.45 s default. This is the
+    /// regression check that the tick reads from the live Settings
+    /// value rather than the hardcoded
+    /// [`REPLAY_MOVE_INTERVAL_SECS`] constant.
+    ///
+    /// The follow-up assertion exercises the boundary condition: at
+    /// the 0.10 s/move setting, exactly six 0.10 s ticks must yield
+    /// fewer moves than six 0.20 s ticks (because the latter doubles
+    /// the per-update advance and pays off two intervals each tick).
+    #[test]
+    fn replay_playback_tick_uses_settings_interval() {
+        use solitaire_data::Settings;
+
+        #[derive(Resource, Default)]
+        struct CapturedDraws(usize);
+
+        fn collect_draws(
+            mut events: MessageReader<DrawRequestEvent>,
+            mut sink: ResMut<CapturedDraws>,
+        ) {
+            for _ in events.read() {
+                sink.0 += 1;
+            }
+        }
+
+        // Long replay so the fast cadence has plenty of moves to
+        // chew through and the 0.45 s vs 0.10 s difference is easy
+        // to observe.
+        fn ten_draws_replay() -> Replay {
+            Replay::new(
+                7,
+                DrawMode::DrawOne,
+                GameMode::Classic,
+                10,
+                100,
+                NaiveDate::from_ymd_opt(2026, 5, 5).expect("valid date"),
+                vec![ReplayMove::StockClick; 10],
+            )
+        }
+
+        // ---- Run 1: 0.10 s/move (Settings override) ----
+        let mut fast_app = headless_app();
+        fast_app.insert_resource(SettingsResource(Settings {
+            replay_move_interval_secs: 0.10,
+            ..Settings::default()
+        }));
+        fast_app
+            .init_resource::<CapturedDraws>()
+            .add_systems(Update, collect_draws);
+
+        start_playback(&mut fast_app, ten_draws_replay());
+        fast_app.update();
+        // 1.0 s of virtual time at 0.10 s/move dispatches ~5 moves
+        // after the default 0.45 s startup interval is consumed.
+        advance_by(&mut fast_app, 1.0);
+        let fast_count = fast_app.world().resource::<CapturedDraws>().0;
+
+        // ---- Run 2: 0.45 s/move (default — no SettingsResource) ----
+        let mut slow_app = headless_app();
+        // `tick_replay_playback` falls back to `REPLAY_MOVE_INTERVAL_SECS`
+        // (0.45 s) when `SettingsResource` is absent.
+        slow_app
+            .init_resource::<CapturedDraws>()
+            .add_systems(Update, collect_draws);
+
+        start_playback(&mut slow_app, ten_draws_replay());
+        slow_app.update();
+        advance_by(&mut slow_app, 1.0);
+        let slow_count = slow_app.world().resource::<CapturedDraws>().0;
+
+        assert!(
+            fast_count > slow_count,
+            "at 0.10 s/move the tick must dispatch strictly more moves \
+             than at the 0.45 s default over the same wall-clock window: \
+             fast={fast_count}, slow={slow_count}",
+        );
+
+        // ---- Boundary: a 0.05 s/tick cadence over the same window
+        // dispatches NO MORE moves than a 0.10 s/tick cadence, because
+        // 0.05 s < 0.10 s configured interval — the secs_to_next clock
+        // never crosses the threshold inside a single tick. ----
+        //
+        // We don't assert "exactly zero" because the leading update()
+        // after `start_playback` may run before the strategy is
+        // applied (cf. comments on `tick_advances_cursor_after_interval`),
+        // but the count must not exceed what we'd get with one-tick
+        // advances at the same total wall-clock window.
+        fn count_after_window(interval_secs: f32, tick_secs: f32, total_secs: f32) -> usize {
+            let mut app = headless_app();
+            app.insert_resource(SettingsResource(Settings {
+                replay_move_interval_secs: interval_secs,
+                ..Settings::default()
+            }));
+            app.init_resource::<CapturedDraws>()
+                .add_systems(Update, collect_draws);
+            start_playback(&mut app, ten_draws_replay());
+            app.update();
+            app.insert_resource(TimeUpdateStrategy::ManualDuration(
+                Duration::from_secs_f32(tick_secs),
+            ));
+            let ticks = (total_secs / tick_secs).ceil() as usize + 1;
+            for _ in 0..ticks {
+                app.update();
+            }
+            app.world().resource::<CapturedDraws>().0
+        }
+
+        let count_at_05 = count_after_window(0.10, 0.05, 1.0);
+        let count_at_20 = count_after_window(0.10, 0.20, 1.0);
+        assert!(
+            count_at_05 <= count_at_20,
+            "0.05 s ticks (strictly less than the 0.10 s interval) must \
+             dispatch no more moves than 0.20 s ticks over the same \
+             wall-clock window: count_at_05={count_at_05}, count_at_20={count_at_20}",
         );
     }
 }
