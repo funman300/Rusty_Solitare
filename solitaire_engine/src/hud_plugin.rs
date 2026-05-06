@@ -62,6 +62,18 @@ pub struct HudMode;
 #[derive(Component, Debug)]
 pub struct HudChallenge;
 
+/// Marker on the "won this deal before" indicator text node.
+///
+/// Displays `"✓ Won before"` when the current deal's seed + draw_mode +
+/// mode triple matches one of the entries in `ReplayHistoryResource`.
+/// Empty string otherwise (including won games — the score readout
+/// already conveys the win on the active deal). Only meaningful for
+/// Classic / Zen / Challenge — daily-challenge and time-attack seeds
+/// are filtered out implicitly because their replay entries always
+/// carry a different mode tag.
+#[derive(Component, Debug)]
+pub struct HudWonPreviously;
+
 /// Marker on the undo-count text node.
 ///
 /// Shows how many undos have been used this game. Displayed in amber when
@@ -302,6 +314,7 @@ impl Plugin for HudPlugin {
             .init_resource::<HudActionFade>()
             .add_systems(Startup, (spawn_hud_band, spawn_hud, spawn_action_buttons))
             .add_systems(Update, update_hud.after(GameMutation))
+            .add_systems(Update, update_won_previously.after(GameMutation))
             .add_systems(Update, announce_auto_complete.after(GameMutation))
             .add_systems(Update, update_selection_hud)
             .add_systems(
@@ -480,6 +493,15 @@ fn spawn_hud(font_res: Option<Res<FontResource>>, mut commands: Commands) {
                     Text::new(""),
                     font_body.clone(),
                     TextColor(STATE_INFO),
+                ));
+                t2.spawn((
+                    HudWonPreviously,
+                    Tooltip::new(
+                        "You've won this deal before. Same seed in your replay history.",
+                    ),
+                    Text::new(""),
+                    font_body.clone(),
+                    TextColor(STATE_SUCCESS),
                 ));
             });
 
@@ -1478,6 +1500,42 @@ fn lerp_text_color(from: Color, to: Color, t: f32) -> Color {
         from.blue + (to.blue - from.blue) * t,
         from.alpha + (to.alpha - from.alpha) * t,
     )
+}
+
+/// Sets the [`HudWonPreviously`] text to "✓ Won before" whenever the
+/// current deal's seed + draw_mode + mode triple matches an entry in
+/// the rolling [`ReplayHistory`]. Cleared while the active game is won
+/// (the on-screen "Game won!" cue already conveys victory) and on
+/// fresh deals the player hasn't won before.
+///
+/// Lives in its own system rather than `update_hud` to keep this
+/// orthogonal: `update_hud`'s query disambiguation is already busy
+/// enough; threading another marker through every Without filter
+/// would touch ~10 unrelated queries for no benefit.
+fn update_won_previously(
+    game: Res<GameStateResource>,
+    // Optional because the HUD plugin's headless tests run without
+    // `StatsPlugin` and therefore without this resource. With the
+    // resource absent there's no history to compare against; the
+    // indicator just stays empty.
+    history: Option<Res<crate::stats_plugin::ReplayHistoryResource>>,
+    mut q: Query<&mut Text, With<HudWonPreviously>>,
+) {
+    let Ok(mut text) = q.single_mut() else {
+        return;
+    };
+    let won_before = !game.0.is_won
+        && history.as_ref().is_some_and(|h| {
+            h.0.replays.iter().any(|r| {
+                r.seed == game.0.seed
+                    && r.draw_mode == game.0.draw_mode
+                    && r.mode == game.0.mode
+            })
+        });
+    let next = if won_before { "\u{2713} Won before" } else { "" };
+    if text.0 != next {
+        text.0 = next.to_string();
+    }
 }
 
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
