@@ -2,8 +2,18 @@
 //!
 //! **Cursor icons** (`update_cursor_icon`)
 //! - Cards are being dragged → `Grabbing` (closed hand)
+//! - A UI `Button` entity is hovered (and no drag in progress) → `Pointer`
+//!   (the hand-with-extended-index-finger icon). This telegraphs
+//!   clickability for every modal button, HUD action, mode-launcher
+//!   card, settings toggle, etc.
 //! - Cursor hovers over a face-up draggable card → `Grab` (open hand)
 //! - Otherwise → `Default` (arrow)
+//!
+//! Priority order: dragging > button-hover > card-hover > default. A
+//! button-overlapping-a-card edge case favours `Pointer` because UI
+//! elements take precedence over world-space cards; in practice
+//! buttons are always on UI nodes and cards are sprites, so they
+//! cannot occupy the same hit region simultaneously.
 //!
 //! **Drop-target highlights** (`update_drop_highlights`)
 //! While a drag is in progress every `PileMarker` sprite is tinted:
@@ -70,6 +80,31 @@ impl Plugin for CursorPlugin {
 // #31 — Cursor icon
 // ---------------------------------------------------------------------------
 
+/// Pure decision function for the cursor icon, separated from the Bevy
+/// system so it can be unit-tested without `PrimaryWindow` /
+/// `Camera` / `Time` plumbing.
+///
+/// Priority order (highest first):
+/// 1. `is_dragging` → `Grabbing`
+/// 2. `any_button_hovered` → `Pointer`
+/// 3. `any_card_hovered` → `Grab`
+/// 4. otherwise → `Default`
+fn pick_cursor_icon(
+    is_dragging: bool,
+    any_button_hovered: bool,
+    any_card_hovered: bool,
+) -> SystemCursorIcon {
+    if is_dragging {
+        SystemCursorIcon::Grabbing
+    } else if any_button_hovered {
+        SystemCursorIcon::Pointer
+    } else if any_card_hovered {
+        SystemCursorIcon::Grab
+    } else {
+        SystemCursorIcon::Default
+    }
+}
+
 /// Updates the primary-window cursor icon based on drag state and hover.
 fn update_cursor_icon(
     drag: Res<DragState>,
@@ -77,32 +112,39 @@ fn update_cursor_icon(
     cameras: Query<(&Camera, &GlobalTransform)>,
     layout: Option<Res<LayoutResource>>,
     game: Option<Res<GameStateResource>>,
+    button_q: Query<&Interaction, With<Button>>,
     mut commands: Commands,
 ) {
     let Ok((win_entity, window)) = windows.single() else { return };
 
-    if !drag.is_idle() {
-        commands
-            .entity(win_entity)
-            .insert(CursorIcon::from(SystemCursorIcon::Grabbing));
-        return;
-    }
+    let is_dragging = !drag.is_idle();
 
-    let hovering = (|| {
-        let cursor = window.cursor_position()?;
-        let (camera, cam_xf) = cameras.single().ok()?;
-        let world = camera.viewport_to_world_2d(cam_xf, cursor).ok()?;
-        let layout = layout.as_ref()?.0.clone();
-        let game = game.as_ref()?;
-        Some(cursor_over_draggable(world, &game.0, &layout))
-    })()
-    .unwrap_or(false);
+    // A UI button is "hovered" if any `Button` entity has its
+    // `Interaction` set to `Hovered` or `Pressed`. We include
+    // `Pressed` so the pointer icon stays visible while a click is
+    // being held, matching browser behaviour.
+    let any_button_hovered = button_q
+        .iter()
+        .any(|i| matches!(i, Interaction::Hovered | Interaction::Pressed));
 
-    commands.entity(win_entity).insert(CursorIcon::from(if hovering {
-        SystemCursorIcon::Grab
+    let any_card_hovered = if is_dragging || any_button_hovered {
+        // No need to do the world-space hit test when a higher
+        // priority branch already wins.
+        false
     } else {
-        SystemCursorIcon::Default
-    }));
+        (|| {
+            let cursor = window.cursor_position()?;
+            let (camera, cam_xf) = cameras.single().ok()?;
+            let world = camera.viewport_to_world_2d(cam_xf, cursor).ok()?;
+            let layout = layout.as_ref()?.0.clone();
+            let game = game.as_ref()?;
+            Some(cursor_over_draggable(world, &game.0, &layout))
+        })()
+        .unwrap_or(false)
+    };
+
+    let icon = pick_cursor_icon(is_dragging, any_button_hovered, any_card_hovered);
+    commands.entity(win_entity).insert(CursorIcon::from(icon));
 }
 
 /// Returns `true` if `cursor` (world-space) is over any face-up draggable card.
@@ -480,6 +522,53 @@ mod tests {
             format!("{MARKER_VALID:?}"),
             format!("{MARKER_DEFAULT:?}")
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // pick_cursor_icon priority-order tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn cursor_picks_grabbing_when_dragging_overrides_button_hover() {
+        // Dragging always wins regardless of button or card hover state.
+        assert!(matches!(
+            pick_cursor_icon(true, true, true),
+            SystemCursorIcon::Grabbing
+        ));
+        assert!(matches!(
+            pick_cursor_icon(true, false, false),
+            SystemCursorIcon::Grabbing
+        ));
+    }
+
+    #[test]
+    fn cursor_picks_pointer_when_button_hovered_and_no_drag() {
+        // Button hover beats card hover when not dragging.
+        assert!(matches!(
+            pick_cursor_icon(false, true, false),
+            SystemCursorIcon::Pointer
+        ));
+        assert!(matches!(
+            pick_cursor_icon(false, true, true),
+            SystemCursorIcon::Pointer
+        ));
+    }
+
+    #[test]
+    fn cursor_picks_grab_when_card_hovered_and_no_button() {
+        // Card hover wins only when no drag and no button-hover.
+        assert!(matches!(
+            pick_cursor_icon(false, false, true),
+            SystemCursorIcon::Grab
+        ));
+    }
+
+    #[test]
+    fn cursor_picks_default_when_nothing_hovered() {
+        assert!(matches!(
+            pick_cursor_icon(false, false, false),
+            SystemCursorIcon::Default
+        ));
     }
 
     #[test]
