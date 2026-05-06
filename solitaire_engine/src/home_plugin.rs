@@ -15,23 +15,30 @@
 
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
+use solitaire_core::game_state::DrawMode;
+use solitaire_data::save_settings_to;
 
 use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
 use crate::events::{
     InfoToastEvent, NewGameRequestEvent, StartChallengeRequestEvent,
     StartDailyChallengeRequestEvent, StartTimeAttackRequestEvent, StartZenRequestEvent,
+    ToggleProfileRequestEvent,
 };
 use crate::font_plugin::FontResource;
 use crate::progress_plugin::ProgressResource;
+use crate::settings_plugin::{
+    SettingsChangedEvent, SettingsResource, SettingsStoragePath,
+};
+use crate::stats_plugin::StatsResource;
 use crate::ui_focus::{Disabled, FocusGroup, Focusable};
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
     ScrimDismissible,
 };
 use crate::ui_theme::{
-    ACCENT_PRIMARY, BG_ELEVATED_HI, BORDER_STRONG, BORDER_SUBTLE, RADIUS_MD, STATE_INFO,
-    TEXT_DISABLED, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY, TYPE_BODY_LG, TYPE_CAPTION,
-    VAL_SPACE_1, VAL_SPACE_2, VAL_SPACE_3, Z_MODAL_PANEL,
+    ACCENT_PRIMARY, BG_ELEVATED, BG_ELEVATED_HI, BORDER_STRONG, BORDER_SUBTLE, RADIUS_MD,
+    STATE_INFO, TEXT_DISABLED, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY, TYPE_BODY_LG,
+    TYPE_CAPTION, VAL_SPACE_1, VAL_SPACE_2, VAL_SPACE_3, Z_MODAL_PANEL,
 };
 
 // ---------------------------------------------------------------------------
@@ -46,6 +53,23 @@ pub struct HomeScreen;
 /// without launching a mode.
 #[derive(Component, Debug)]
 pub struct HomeCancelButton;
+
+/// Marker on the player-stats chip strip at the top of the Home modal.
+/// Clicking the strip opens the Profile overlay so the player can drill
+/// into level / XP / cosmetics without first dismissing Home.
+#[derive(Component, Debug)]
+struct HomeProfileChip;
+
+/// Marker on the "Draw 1" toggle button inside the Home modal's
+/// draw-mode row. Clicking flips `Settings.draw_mode` to `DrawOne` and
+/// fires `SettingsChangedEvent` so audio / UI dependents react.
+#[derive(Component, Debug)]
+struct HomeDrawOneButton;
+
+/// Marker on the "Draw 3" toggle button inside the Home modal's
+/// draw-mode row. Mirror of [`HomeDrawOneButton`] for `DrawThree`.
+#[derive(Component, Debug)]
+struct HomeDrawThreeButton;
 
 // ---------------------------------------------------------------------------
 // Private mode-card data shape
@@ -173,6 +197,8 @@ impl Plugin for HomePlugin {
             .add_message::<StartTimeAttackRequestEvent>()
             .add_message::<StartDailyChallengeRequestEvent>()
             .add_message::<InfoToastEvent>()
+            .add_message::<ToggleProfileRequestEvent>()
+            .add_message::<SettingsChangedEvent>()
             // `.chain()` because several systems (M-toggle, card click,
             // cancel button, digit-key shortcut) all read the
             // `HomeScreen` entity and may queue a despawn on it in the
@@ -189,6 +215,8 @@ impl Plugin for HomePlugin {
                     attach_focusable_to_home_mode_cards,
                     handle_home_card_click,
                     handle_home_cancel_button,
+                    handle_home_profile_chip,
+                    handle_home_draw_mode_buttons,
                     handle_home_digit_keys,
                 )
                     .chain(),
@@ -228,6 +256,8 @@ fn spawn_home_on_launch(
     pending_restore: Option<Res<crate::game_plugin::PendingRestoredGame>>,
     existing: Query<(), With<HomeScreen>>,
     progress: Option<Res<ProgressResource>>,
+    stats: Option<Res<StatsResource>>,
+    settings: Option<Res<SettingsResource>>,
     font_res: Option<Res<FontResource>>,
 ) {
     if shown.0
@@ -239,8 +269,15 @@ fn spawn_home_on_launch(
         return;
     }
 
-    let level = progress.as_ref().map_or(0, |p| p.0.level);
-    spawn_home_screen(&mut commands, level, font_res.as_deref());
+    spawn_home_screen(
+        &mut commands,
+        build_home_context(
+            progress.as_deref(),
+            stats.as_deref(),
+            settings.as_deref(),
+            font_res.as_deref(),
+        ),
+    );
     shown.0 = true;
 }
 
@@ -252,6 +289,8 @@ fn toggle_home_screen(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     progress: Option<Res<ProgressResource>>,
+    stats: Option<Res<StatsResource>>,
+    settings: Option<Res<SettingsResource>>,
     font_res: Option<Res<FontResource>>,
     screens: Query<Entity, With<HomeScreen>>,
 ) {
@@ -261,8 +300,40 @@ fn toggle_home_screen(
     if let Ok(entity) = screens.single() {
         commands.entity(entity).despawn();
     } else {
-        let level = progress.as_ref().map_or(0, |p| p.0.level);
-        spawn_home_screen(&mut commands, level, font_res.as_deref());
+        spawn_home_screen(
+            &mut commands,
+            build_home_context(
+                progress.as_deref(),
+                stats.as_deref(),
+                settings.as_deref(),
+                font_res.as_deref(),
+            ),
+        );
+    }
+}
+
+/// Builds a [`HomeContext`] from the live resources the Home modal
+/// reads. Falls back to safe defaults when a resource is missing
+/// (typical for `MinimalPlugins` headless tests that don't install
+/// every contributor plugin).
+fn build_home_context<'a>(
+    progress: Option<&ProgressResource>,
+    stats: Option<&StatsResource>,
+    settings: Option<&SettingsResource>,
+    font_res: Option<&'a FontResource>,
+) -> HomeContext<'a> {
+    HomeContext {
+        level: progress.map_or(0, |p| p.0.level),
+        total_xp: progress.map_or(0, |p| p.0.total_xp),
+        daily_streak: progress.map_or(0, |p| p.0.daily_challenge_streak),
+        lifetime_score: stats.map_or(0, |s| s.0.lifetime_score),
+        classic_best: stats.map_or(0, |s| s.0.classic_best_score),
+        zen_best: stats.map_or(0, |s| s.0.zen_best_score),
+        challenge_best: stats.map_or(0, |s| s.0.challenge_best_score),
+        draw_mode: settings
+            .map(|s| s.0.draw_mode.clone())
+            .unwrap_or(DrawMode::DrawOne),
+        font_res,
     }
 }
 
@@ -352,6 +423,86 @@ fn handle_home_cancel_button(
     for entity in &screens {
         commands.entity(entity).despawn();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Header chip + draw-mode button handlers
+// ---------------------------------------------------------------------------
+
+/// Click on the player-stats header chip → fire
+/// [`ToggleProfileRequestEvent`] so the Profile overlay opens on top
+/// of Home. Closing Profile (`P` / `Esc`) returns the player to the
+/// Home picker without losing their context.
+fn handle_home_profile_chip(
+    chips: Query<&Interaction, (With<HomeProfileChip>, Changed<Interaction>)>,
+    mut profile: MessageWriter<ToggleProfileRequestEvent>,
+) {
+    if chips.iter().any(|i| *i == Interaction::Pressed) {
+        profile.write(ToggleProfileRequestEvent);
+    }
+}
+
+/// Click on a draw-mode chip — flip `Settings.draw_mode`, persist,
+/// fire `SettingsChangedEvent`, and respawn the Home modal so the
+/// active-chip styling reflects the new state. Repaint by full
+/// rebuild keeps the helper code small (no per-entity colour
+/// surgery) and the modal is light enough to respawn cleanly.
+#[allow(clippy::too_many_arguments)]
+fn handle_home_draw_mode_buttons(
+    mut commands: Commands,
+    one_buttons: Query<&Interaction, (With<HomeDrawOneButton>, Changed<Interaction>)>,
+    three_buttons: Query<&Interaction, (With<HomeDrawThreeButton>, Changed<Interaction>)>,
+    screens: Query<Entity, With<HomeScreen>>,
+    mut settings: Option<ResMut<SettingsResource>>,
+    storage_path: Option<Res<SettingsStoragePath>>,
+    mut changed: MessageWriter<SettingsChangedEvent>,
+    progress: Option<Res<ProgressResource>>,
+    stats: Option<Res<StatsResource>>,
+    font_res: Option<Res<FontResource>>,
+) {
+    if screens.is_empty() {
+        return;
+    }
+    let want_one = one_buttons.iter().any(|i| *i == Interaction::Pressed);
+    let want_three = three_buttons.iter().any(|i| *i == Interaction::Pressed);
+    if !want_one && !want_three {
+        return;
+    }
+    let Some(settings) = settings.as_mut() else {
+        return;
+    };
+    let target = if want_one {
+        DrawMode::DrawOne
+    } else {
+        DrawMode::DrawThree
+    };
+    if settings.0.draw_mode == target {
+        return; // already in this mode — avoid a redundant respawn.
+    }
+    settings.0.draw_mode = target;
+    if let Some(p) = storage_path
+        && let Some(path) = p.0.as_deref()
+        && let Err(e) = save_settings_to(path, &settings.0)
+    {
+        warn!("home: failed to persist draw-mode change: {e}");
+    }
+    changed.write(SettingsChangedEvent(settings.0.clone()));
+
+    // Repaint by despawn + respawn so the chip styling and any
+    // dependent labels (none today, but Phase B may surface a
+    // "Standard (Draw 1)" caption like MSSC) reflect the new state.
+    for entity in &screens {
+        commands.entity(entity).despawn();
+    }
+    spawn_home_screen(
+        &mut commands,
+        build_home_context(
+            progress.as_deref(),
+            stats.as_deref(),
+            Some(settings),
+            font_res.as_deref(),
+        ),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -450,10 +601,33 @@ fn handle_home_digit_keys(
 // Spawn helpers
 // ---------------------------------------------------------------------------
 
-/// Spawns the Home modal with five mode cards plus a Cancel button.
-fn spawn_home_screen(commands: &mut Commands, level: u32, font_res: Option<&FontResource>) {
+/// Bundles the data the Home modal needs to render the new
+/// MSSC-inspired header chips, per-mode score chips, and draw-mode
+/// row. Built fresh by the two call sites (`spawn_home_on_launch`
+/// and `toggle_home_screen`) from the live progress / stats /
+/// settings resources, with sensible defaults when a resource is
+/// missing under `MinimalPlugins` headless tests.
+struct HomeContext<'a> {
+    level: u32,
+    total_xp: u64,
+    lifetime_score: u64,
+    classic_best: u32,
+    zen_best: u32,
+    challenge_best: u32,
+    daily_streak: u32,
+    draw_mode: DrawMode,
+    font_res: Option<&'a FontResource>,
+}
+
+/// Spawns the Home modal with the player-stats header strip, draw-mode
+/// row, five mode cards, and a Cancel button.
+fn spawn_home_screen(commands: &mut Commands, ctx: HomeContext<'_>) {
+    let HomeContext { font_res, .. } = ctx;
     let scrim = spawn_modal(commands, HomeScreen, Z_MODAL_PANEL, |card| {
         spawn_modal_header(card, "Choose a Mode", font_res);
+
+        spawn_home_header_chips(card, &ctx);
+        spawn_draw_mode_row(card, &ctx);
 
         for mode in [
             HomeMode::Classic,
@@ -462,7 +636,7 @@ fn spawn_home_screen(commands: &mut Commands, level: u32, font_res: Option<&Font
             HomeMode::Challenge,
             HomeMode::TimeAttack,
         ] {
-            spawn_mode_card(card, mode, level, font_res);
+            spawn_mode_card(card, mode, &ctx);
         }
 
         spawn_modal_actions(card, |actions| {
@@ -478,6 +652,188 @@ fn spawn_home_screen(commands: &mut Commands, level: u32, font_res: Option<&Font
     });
     // Home is read-only — opt into click-outside-to-dismiss.
     commands.entity(scrim).insert(ScrimDismissible);
+}
+
+/// Player-stats chip strip — Level, XP, Lifetime Score. Clickable as a
+/// whole to open the Profile overlay (mirrors the MSSC top-right
+/// avatar+rewards corner that surfaces level + premium status). Falls
+/// back to plain Text in headless contexts where `Button` interaction
+/// isn't driven by the input pipeline anyway.
+fn spawn_home_header_chips(parent: &mut ChildSpawnerCommands, ctx: &HomeContext<'_>) {
+    let font_handle = ctx.font_res.map(|f| f.0.clone()).unwrap_or_default();
+    let font_label = TextFont {
+        font: font_handle.clone(),
+        font_size: TYPE_CAPTION,
+        ..default()
+    };
+    let font_value = TextFont {
+        font: font_handle,
+        font_size: TYPE_BODY,
+        ..default()
+    };
+
+    parent
+        .spawn((
+            HomeProfileChip,
+            Button,
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::SpaceBetween,
+                column_gap: VAL_SPACE_2,
+                padding: UiRect::axes(VAL_SPACE_3, VAL_SPACE_2),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(RADIUS_MD)),
+                width: Val::Percent(100.0),
+                ..default()
+            },
+            BackgroundColor(BG_ELEVATED),
+            BorderColor::all(BORDER_SUBTLE),
+        ))
+        .with_children(|row| {
+            for (label, value) in [
+                ("Level".to_string(), format_compact(ctx.level as u64)),
+                ("XP".to_string(), format_compact(ctx.total_xp)),
+                ("Score".to_string(), format_compact(ctx.lifetime_score)),
+            ] {
+                row.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: VAL_SPACE_1,
+                    ..default()
+                })
+                .with_children(|col| {
+                    col.spawn((
+                        Text::new(label),
+                        font_label.clone(),
+                        TextColor(TEXT_SECONDARY),
+                    ));
+                    col.spawn((
+                        Text::new(value),
+                        font_value.clone(),
+                        TextColor(ACCENT_PRIMARY),
+                    ));
+                });
+            }
+        });
+}
+
+/// Draw-mode row — "Draw 1" / "Draw 3" toggle. Affects the next Classic
+/// deal (the Settings value the new-game flow reads). Surfacing it on
+/// the Home modal keeps the per-game choice one tap away rather than
+/// buried in Settings, mirroring the dropdown MSSC puts on its
+/// difficulty picker.
+fn spawn_draw_mode_row(parent: &mut ChildSpawnerCommands, ctx: &HomeContext<'_>) {
+    let font_handle = ctx.font_res.map(|f| f.0.clone()).unwrap_or_default();
+    let font_label = TextFont {
+        font: font_handle.clone(),
+        font_size: TYPE_CAPTION,
+        ..default()
+    };
+    let font_btn = TextFont {
+        font: font_handle,
+        font_size: TYPE_BODY,
+        ..default()
+    };
+
+    let active_one = matches!(ctx.draw_mode, DrawMode::DrawOne);
+
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: VAL_SPACE_3,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                Text::new("Draw mode"),
+                font_label.clone(),
+                TextColor(TEXT_SECONDARY),
+            ));
+            spawn_draw_mode_chip::<HomeDrawOneButton>(
+                row,
+                HomeDrawOneButton,
+                "Draw 1",
+                active_one,
+                &font_btn,
+            );
+            spawn_draw_mode_chip::<HomeDrawThreeButton>(
+                row,
+                HomeDrawThreeButton,
+                "Draw 3",
+                !active_one,
+                &font_btn,
+            );
+        });
+}
+
+fn spawn_draw_mode_chip<M: Component>(
+    parent: &mut ChildSpawnerCommands,
+    marker: M,
+    label: &str,
+    active: bool,
+    font: &TextFont,
+) {
+    let (bg, fg) = if active {
+        (ACCENT_PRIMARY, BG_ELEVATED)
+    } else {
+        (BG_ELEVATED_HI, TEXT_PRIMARY)
+    };
+    parent
+        .spawn((
+            marker,
+            Button,
+            Node {
+                padding: UiRect::axes(VAL_SPACE_3, VAL_SPACE_1),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(RADIUS_MD)),
+                ..default()
+            },
+            BackgroundColor(bg),
+            BorderColor::all(BORDER_SUBTLE),
+        ))
+        .with_children(|c| {
+            c.spawn((Text::new(label.to_string()), font.clone(), TextColor(fg)));
+        });
+}
+
+/// Compact decimal formatter: `1234567` → `"1.2M"`, `12345` → `"12.3K"`,
+/// otherwise the raw number with thousands separators. Keeps chip text
+/// short enough to fit a 3-up header strip without wrapping.
+fn format_compact(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 10_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else if n >= 1_000 {
+        let (high, low) = (n / 1_000, n % 1_000);
+        format!("{high},{low:03}")
+    } else {
+        n.to_string()
+    }
+}
+
+/// Per-mode score / streak chip text. `None` for modes where no
+/// per-mode best exists yet (Time Attack uses session scoring; modes
+/// with `0` recorded mean "no win yet" and we hide the chip rather
+/// than show a 0).
+fn score_chip_text_for(mode: HomeMode, ctx: &HomeContext<'_>) -> Option<String> {
+    match mode {
+        HomeMode::Classic if ctx.classic_best > 0 => {
+            Some(format!("Best {}", format_compact(ctx.classic_best as u64)))
+        }
+        HomeMode::Zen if ctx.zen_best > 0 => {
+            Some(format!("Best {}", format_compact(ctx.zen_best as u64)))
+        }
+        HomeMode::Challenge if ctx.challenge_best > 0 => {
+            Some(format!("Best {}", format_compact(ctx.challenge_best as u64)))
+        }
+        HomeMode::Daily if ctx.daily_streak > 0 => {
+            Some(format!("Streak {}", ctx.daily_streak))
+        }
+        _ => None,
+    }
 }
 
 /// Tab-walk order for each mode card, matching the visual top-to-bottom
@@ -551,9 +907,11 @@ fn attach_focusable_to_home_mode_cards(
 fn spawn_mode_card(
     parent: &mut ChildSpawnerCommands,
     mode: HomeMode,
-    level: u32,
-    font_res: Option<&FontResource>,
+    ctx: &HomeContext<'_>,
 ) {
+    let level = ctx.level;
+    let font_res = ctx.font_res;
+    let score_chip = score_chip_text_for(mode, ctx);
     let unlocked = mode.is_unlocked(level);
     let font_handle = font_res.map(|f| f.0.clone()).unwrap_or_default();
     let font_title = TextFont {
@@ -653,6 +1011,23 @@ fn spawn_mode_card(
                 font_desc.clone(),
                 TextColor(desc_color),
             ));
+
+            // Per-mode score / streak chip — populated only when the
+            // player has data for this mode. Hidden on a 0 best so a
+            // fresh profile doesn't show "Best 0" everywhere.
+            if let Some(text) = score_chip.clone()
+                && unlocked
+            {
+                c.spawn((
+                    Text::new(text),
+                    font_chip.clone(),
+                    TextColor(ACCENT_PRIMARY),
+                    Node {
+                        margin: UiRect::top(VAL_SPACE_1),
+                        ..default()
+                    },
+                ));
+            }
 
             // Locked footnote — explicit copy so the gate is unambiguous.
             if !unlocked {
