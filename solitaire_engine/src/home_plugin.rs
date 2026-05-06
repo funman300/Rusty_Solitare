@@ -19,6 +19,7 @@ use solitaire_core::game_state::DrawMode;
 use solitaire_data::save_settings_to;
 
 use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
+use crate::daily_challenge_plugin::DailyChallengeResource;
 use crate::events::{
     InfoToastEvent, NewGameRequestEvent, StartChallengeRequestEvent,
     StartDailyChallengeRequestEvent, StartTimeAttackRequestEvent, StartZenRequestEvent,
@@ -258,6 +259,7 @@ fn spawn_home_on_launch(
     progress: Option<Res<ProgressResource>>,
     stats: Option<Res<StatsResource>>,
     settings: Option<Res<SettingsResource>>,
+    daily: Option<Res<DailyChallengeResource>>,
     font_res: Option<Res<FontResource>>,
 ) {
     if shown.0
@@ -275,6 +277,7 @@ fn spawn_home_on_launch(
             progress.as_deref(),
             stats.as_deref(),
             settings.as_deref(),
+            daily.as_deref(),
             font_res.as_deref(),
         ),
     );
@@ -285,12 +288,14 @@ fn spawn_home_on_launch(
 // M-key toggle
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn toggle_home_screen(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     progress: Option<Res<ProgressResource>>,
     stats: Option<Res<StatsResource>>,
     settings: Option<Res<SettingsResource>>,
+    daily: Option<Res<DailyChallengeResource>>,
     font_res: Option<Res<FontResource>>,
     screens: Query<Entity, With<HomeScreen>>,
 ) {
@@ -306,6 +311,7 @@ fn toggle_home_screen(
                 progress.as_deref(),
                 stats.as_deref(),
                 settings.as_deref(),
+                daily.as_deref(),
                 font_res.as_deref(),
             ),
         );
@@ -320,8 +326,20 @@ fn build_home_context<'a>(
     progress: Option<&ProgressResource>,
     stats: Option<&StatsResource>,
     settings: Option<&SettingsResource>,
+    daily: Option<&DailyChallengeResource>,
     font_res: Option<&'a FontResource>,
 ) -> HomeContext<'a> {
+    let daily_today = daily.map(|d| {
+        let completed_today = progress
+            .and_then(|p| p.0.daily_challenge_last_completed)
+            .is_some_and(|d_last| d_last == d.date);
+        DailyToday {
+            date_label: d.date.format("%b %-d").to_string(),
+            goal: d.goal_description.clone(),
+            completed_today,
+        }
+    });
+
     HomeContext {
         level: progress.map_or(0, |p| p.0.level),
         total_xp: progress.map_or(0, |p| p.0.total_xp),
@@ -330,6 +348,7 @@ fn build_home_context<'a>(
         classic_best: stats.map_or(0, |s| s.0.classic_best_score),
         zen_best: stats.map_or(0, |s| s.0.zen_best_score),
         challenge_best: stats.map_or(0, |s| s.0.challenge_best_score),
+        daily_today,
         draw_mode: settings
             .map(|s| s.0.draw_mode.clone())
             .unwrap_or(DrawMode::DrawOne),
@@ -458,6 +477,7 @@ fn handle_home_draw_mode_buttons(
     mut changed: MessageWriter<SettingsChangedEvent>,
     progress: Option<Res<ProgressResource>>,
     stats: Option<Res<StatsResource>>,
+    daily: Option<Res<DailyChallengeResource>>,
     font_res: Option<Res<FontResource>>,
 ) {
     if screens.is_empty() {
@@ -500,6 +520,7 @@ fn handle_home_draw_mode_buttons(
             progress.as_deref(),
             stats.as_deref(),
             Some(settings),
+            daily.as_deref(),
             font_res.as_deref(),
         ),
     );
@@ -615,8 +636,26 @@ struct HomeContext<'a> {
     zen_best: u32,
     challenge_best: u32,
     daily_streak: u32,
+    daily_today: Option<DailyToday>,
     draw_mode: DrawMode,
     font_res: Option<&'a FontResource>,
+}
+
+/// Today's daily-challenge metadata as the Home picker needs it. Only
+/// populated when both [`DailyChallengeResource`] is present (the
+/// plugin is wired) and we have something useful to show — otherwise
+/// the Daily card falls back to its baseline description without a
+/// dated callout.
+struct DailyToday {
+    /// Short calendar label, e.g. `"May 6"`. Always populated.
+    date_label: String,
+    /// Server-supplied goal copy ("Win in under 5 minutes"). `None`
+    /// when no server backend is wired or the fetch hasn't returned.
+    goal: Option<String>,
+    /// `true` when the player has already recorded today's daily.
+    /// Surfaces a "Done" badge so the picker reads as reward-state
+    /// rather than "you still owe today's run".
+    completed_today: bool,
 }
 
 /// Spawns the Home modal with the player-stats header strip, draw-mode
@@ -1027,6 +1066,42 @@ fn spawn_mode_card(
                         ..default()
                     },
                 ));
+            }
+
+            // Daily-only "Today's Event" caption — date, optional
+            // server goal, and a "Done" badge once the player has
+            // already recorded today's completion. Only renders for
+            // the Daily card when DailyChallengeResource is present.
+            if matches!(mode, HomeMode::Daily)
+                && unlocked
+                && let Some(today) = ctx.daily_today.as_ref()
+            {
+                let date_text = if today.completed_today {
+                    format!("Today, {} \u{2022} Done", today.date_label)
+                } else {
+                    format!("Today, {}", today.date_label)
+                };
+                let date_color = if today.completed_today {
+                    ACCENT_PRIMARY
+                } else {
+                    STATE_INFO
+                };
+                c.spawn((
+                    Text::new(date_text),
+                    font_chip.clone(),
+                    TextColor(date_color),
+                    Node {
+                        margin: UiRect::top(VAL_SPACE_1),
+                        ..default()
+                    },
+                ));
+                if let Some(goal) = today.goal.as_ref() {
+                    c.spawn((
+                        Text::new(format!("Goal: {goal}")),
+                        font_chip.clone(),
+                        TextColor(TEXT_SECONDARY),
+                    ));
+                }
             }
 
             // Locked footnote — explicit copy so the gate is unambiguous.
