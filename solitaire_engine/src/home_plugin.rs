@@ -13,6 +13,7 @@
 //! [`InfoToastEvent`] explaining the gate but does not launch the mode
 //! or close the overlay.
 
+use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use solitaire_core::game_state::DrawMode;
@@ -72,6 +73,14 @@ struct HomeDrawOneButton;
 #[derive(Component, Debug)]
 struct HomeDrawThreeButton;
 
+/// Marker on the scrollable inner Node containing the player chips,
+/// draw-mode row, and tile grid. Wrapping these in a scrollable
+/// container keeps the modal usable on small viewports — without it,
+/// the 3-row tile stack pushes the Cancel button off the bottom of
+/// the screen on 800x600 hardware. Mirrors `SettingsPanelScrollable`.
+#[derive(Component, Debug)]
+struct HomeScrollable;
+
 // ---------------------------------------------------------------------------
 // Private mode-card data shape
 // ---------------------------------------------------------------------------
@@ -116,20 +125,24 @@ impl HomeMode {
     /// for real per-mode artwork — chosen for one-glyph-tells-the-mode
     /// readability rather than visual fidelity. Swap to `Image` nodes
     /// when art lands; the rest of the tile layout doesn't change.
+    ///
+    /// Picks are deliberately constrained to BMP / Dingbats codepoints
+    /// (Unicode 1.x) so the project's system-default font fallback
+    /// renders every glyph. Earlier emoji choices (📅 🌸 ⚡ ⏱) showed
+    /// up as missing-glyph rectangles on Linux desktops without an
+    /// emoji font in the system font stack.
     fn glyph(self) -> &'static str {
         match self {
-            // Black club is the densest card-suit glyph at small sizes.
+            // Black club — card suit, every font has it.
             HomeMode::Classic => "\u{2663}",
-            // Calendar emoji — matches the date callout below.
-            HomeMode::Daily => "\u{1F4C5}",
-            // Lotus flower stands in for the lotus-position emoji
-            // because the latter renders inconsistently across
-            // platforms; the flower is a single codepoint.
-            HomeMode::Zen => "\u{1F338}",
-            // High-voltage / lightning bolt for the hardest mode.
-            HomeMode::Challenge => "\u{26A1}",
-            // Stopwatch matches the timer concept of Time Attack.
-            HomeMode::TimeAttack => "\u{23F1}",
+            // Black star — Dingbats; reads as "today's special".
+            HomeMode::Daily => "\u{2605}",
+            // White florette — Dingbats; reads as a calm bloom for Zen.
+            HomeMode::Zen => "\u{2740}",
+            // Black four-pointed star — Dingbats; reads as a hard target.
+            HomeMode::Challenge => "\u{2726}",
+            // Watch face — Misc Symbols (Unicode 1.1), pre-emoji vintage.
+            HomeMode::TimeAttack => "\u{231A}",
         }
     }
 
@@ -221,6 +234,9 @@ impl Plugin for HomePlugin {
             .add_message::<InfoToastEvent>()
             .add_message::<ToggleProfileRequestEvent>()
             .add_message::<SettingsChangedEvent>()
+            // Defensively register MouseWheel so `scroll_home_panel`
+            // runs cleanly under MinimalPlugins headless tests too.
+            .add_message::<MouseWheel>()
             // `.chain()` because several systems (M-toggle, card click,
             // cancel button, digit-key shortcut) all read the
             // `HomeScreen` entity and may queue a despawn on it in the
@@ -242,7 +258,8 @@ impl Plugin for HomePlugin {
                     handle_home_digit_keys,
                 )
                     .chain(),
-            );
+            )
+            .add_systems(Update, scroll_home_panel);
     }
 }
 
@@ -469,6 +486,33 @@ fn handle_home_cancel_button(
 // Header chip + draw-mode button handlers
 // ---------------------------------------------------------------------------
 
+/// Routes mouse-wheel events into the Home modal's scrollable body
+/// while the modal is open. No-op when no `HomeScrollable` exists in
+/// the world (modal closed). Mirrors `scroll_settings_panel` and
+/// `scroll_leaderboard_panel`.
+fn scroll_home_panel(
+    mut scroll_evr: MessageReader<MouseWheel>,
+    mut scrollables: Query<&mut ScrollPosition, With<HomeScrollable>>,
+) {
+    if scrollables.is_empty() {
+        scroll_evr.clear();
+        return;
+    }
+    let delta_y: f32 = scroll_evr
+        .read()
+        .map(|ev| match ev.unit {
+            MouseScrollUnit::Line => ev.y * 50.0,
+            MouseScrollUnit::Pixel => ev.y,
+        })
+        .sum();
+    if delta_y == 0.0 {
+        return;
+    }
+    for mut sp in scrollables.iter_mut() {
+        sp.0.y = (sp.0.y - delta_y).max(0.0);
+    }
+}
+
 /// Click on the player-stats header chip → fire
 /// [`ToggleProfileRequestEvent`] so the Profile overlay opens on top
 /// of Home. Closing Profile (`P` / `Esc`) returns the player to the
@@ -686,33 +730,51 @@ fn spawn_home_screen(commands: &mut Commands, ctx: HomeContext<'_>) {
     let scrim = spawn_modal(commands, HomeScreen, Z_MODAL_PANEL, |card| {
         spawn_modal_header(card, "Choose a Mode", font_res);
 
-        spawn_home_header_chips(card, &ctx);
-        spawn_draw_mode_row(card, &ctx);
+        // Scrollable middle — chips + draw row + tile grid. Constrained
+        // to 70vh so the modal fits on small viewports (the 5-tile
+        // grid alone is ~540 px). Cancel button sits outside this
+        // node so it's always one click away.
+        card.spawn((
+            HomeScrollable,
+            ScrollPosition::default(),
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: VAL_SPACE_3,
+                width: Val::Percent(100.0),
+                max_height: Val::Vh(70.0),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+        ))
+        .with_children(|body| {
+            spawn_home_header_chips(body, &ctx);
+            spawn_draw_mode_row(body, &ctx);
 
-        // Mode tiles in a wrapping 2-column grid. Each tile takes 48%
-        // of the row so column_gap fits comfortably; the 5 modes wrap
-        // to a third row of one tile, which we leave left-aligned —
-        // the asymmetry matches MSSC's "Daily Challenges / Today's
-        // Event" half-cell on the right of their grid and keeps the
-        // visual rhythm.
-        card.spawn(Node {
-            flex_direction: FlexDirection::Row,
-            flex_wrap: FlexWrap::Wrap,
-            row_gap: VAL_SPACE_3,
-            column_gap: VAL_SPACE_3,
-            width: Val::Percent(100.0),
-            ..default()
-        })
-        .with_children(|grid| {
-            for mode in [
-                HomeMode::Classic,
-                HomeMode::Daily,
-                HomeMode::Zen,
-                HomeMode::Challenge,
-                HomeMode::TimeAttack,
-            ] {
-                spawn_mode_card(grid, mode, &ctx);
-            }
+            // Mode tiles in a wrapping 2-column grid. Each tile takes 48%
+            // of the row so column_gap fits comfortably; the 5 modes wrap
+            // to a third row of one tile, which we leave left-aligned —
+            // the asymmetry matches MSSC's "Daily Challenges / Today's
+            // Event" half-cell on the right of their grid and keeps the
+            // visual rhythm.
+            body.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: VAL_SPACE_3,
+                column_gap: VAL_SPACE_3,
+                width: Val::Percent(100.0),
+                ..default()
+            })
+            .with_children(|grid| {
+                for mode in [
+                    HomeMode::Classic,
+                    HomeMode::Daily,
+                    HomeMode::Zen,
+                    HomeMode::Challenge,
+                    HomeMode::TimeAttack,
+                ] {
+                    spawn_mode_card(grid, mode, &ctx);
+                }
+            });
         });
 
         spawn_modal_actions(card, |actions| {
