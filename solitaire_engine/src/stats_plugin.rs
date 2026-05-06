@@ -29,6 +29,7 @@ use crate::resources::GameStateResource;
 use crate::time_attack_plugin::TimeAttackResource;
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
+    ScrimDismissible,
 };
 use crate::ui_theme::{
     ACCENT_PRIMARY, BORDER_SUBTLE, RADIUS_SM, STATE_INFO, STATE_WARNING, STREAK_MILESTONES,
@@ -602,7 +603,7 @@ fn spawn_stats_screen(
         ..default()
     };
 
-    spawn_modal(commands, StatsScreen, Z_MODAL_PANEL, |card| {
+    let scrim = spawn_modal(commands, StatsScreen, Z_MODAL_PANEL, |card| {
         spawn_modal_header(card, "Statistics", font_res);
 
         // Scrollable body — the Stats panel renders an 8-cell grid plus
@@ -820,6 +821,8 @@ fn spawn_stats_screen(
             );
         });
     });
+    // Stats is read-only — opt into click-outside-to-dismiss.
+    commands.entity(scrim).insert(ScrimDismissible);
 }
 
 /// Spawn one row of the "Per-mode bests" section: the mode label on the

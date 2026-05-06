@@ -49,6 +49,8 @@
 //! ```
 
 use bevy::prelude::*;
+use bevy::ui::{ComputedNode, UiGlobalTransform};
+use bevy::window::PrimaryWindow;
 use solitaire_data::AnimSpeed;
 
 use crate::font_plugin::FontResource;
@@ -73,6 +75,19 @@ pub struct ModalScrim;
 /// Marker on the centred card entity. Child of the scrim.
 #[derive(Component, Debug)]
 pub struct ModalCard;
+
+/// Marker on a [`ModalScrim`] entity opting that modal into the
+/// click-outside-to-dismiss behaviour.
+///
+/// When attached, [`dismiss_modal_on_scrim_click`] despawns the scrim
+/// (and its hierarchy) on a left mouse press whose cursor falls on the
+/// scrim and outside every [`ModalCard`]. Modals with destructive
+/// actions or unsaved state (Settings, Onboarding, Pause, Forfeit
+/// confirmation, Confirm New Game, etc.) intentionally do not opt in
+/// — those require an explicit Cancel / Done / Confirm so an
+/// accidental scrim click cannot lose work.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct ScrimDismissible;
 
 /// Marker on a header `Text` (`TYPE_HEADLINE` + `TEXT_PRIMARY`).
 #[derive(Component, Debug)]
@@ -474,6 +489,89 @@ pub fn advance_modal_enter(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Click-outside-to-dismiss
+// ---------------------------------------------------------------------------
+
+/// Returns `true` when the cursor at `cursor_logical` falls inside the
+/// axis-aligned rectangle described by `centre_logical` (rectangle
+/// centre, logical pixels) and `size_logical` (full width × height,
+/// logical pixels).
+///
+/// Pure helper extracted from [`dismiss_modal_on_scrim_click`] so the
+/// hit-test decision can be tested without a real `Window` /
+/// rendered UI tree.
+#[inline]
+fn cursor_is_inside_rect(cursor_logical: Vec2, centre_logical: Vec2, size_logical: Vec2) -> bool {
+    let half = size_logical * 0.5;
+    cursor_logical.x >= centre_logical.x - half.x
+        && cursor_logical.x <= centre_logical.x + half.x
+        && cursor_logical.y >= centre_logical.y - half.y
+        && cursor_logical.y <= centre_logical.y + half.y
+}
+
+/// Despawns the topmost [`ScrimDismissible`] modal when the player
+/// presses the left mouse button while the cursor is over the scrim
+/// AND outside every [`ModalCard`]. Modals without the marker are
+/// untouched, and existing dismiss paths (Cancel / Done / Esc /
+/// dedicated buttons) keep working unchanged.
+///
+/// **Topmost-only.** Stacked dismissible modals would otherwise all
+/// dismiss together on a single click. The system processes at most
+/// one entity per frame: the first match in the query is taken,
+/// matching the click-handler convention used elsewhere in the engine.
+/// Spawn order is the practical tiebreaker — dismissible modals are
+/// rarely stacked, so picking any one is acceptable.
+///
+/// **No same-frame dismissal.** `just_pressed` is true only on the
+/// frame the button transitions to pressed. The press that *opens* a
+/// modal happens on one frame; this system fires on a subsequent
+/// press, so a modal can never be opened and dismissed in a single
+/// click.
+///
+/// `cards`/`scrims` queries read [`UiGlobalTransform`] (window-space
+/// physical pixels) and [`ComputedNode`] (size in physical pixels);
+/// both are converted to logical pixels via
+/// `ComputedNode::inverse_scale_factor` so they can be compared with
+/// the cursor position from `Window::cursor_position` (logical px).
+#[allow(clippy::type_complexity)]
+pub fn dismiss_modal_on_scrim_click(
+    mut commands: Commands,
+    mouse: Option<Res<ButtonInput<MouseButton>>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    scrims: Query<Entity, (With<ModalScrim>, With<ScrimDismissible>)>,
+    cards: Query<(&UiGlobalTransform, &ComputedNode), With<ModalCard>>,
+) {
+    let Some(mouse) = mouse else { return };
+    if !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+
+    // Topmost-only: bail after the first dismissible scrim. Stacked
+    // dismissible modals are not currently a real case, but this guard
+    // keeps the behaviour predictable if they ever arise.
+    let Some(scrim_entity) = scrims.iter().next() else {
+        return;
+    };
+
+    let cursor_over_card = cards.iter().any(|(transform, computed)| {
+        let inv = computed.inverse_scale_factor;
+        let size_logical = computed.size() * inv;
+        let centre_logical = transform.translation * inv;
+        cursor_is_inside_rect(cursor, centre_logical, size_logical)
+    });
+
+    if !cursor_over_card {
+        commands.entity(scrim_entity).despawn();
+    }
+}
+
 /// Repaints every `ModalButton` on `Changed<Interaction>` so hover and
 /// press states are visible without each overlay registering its own
 /// paint system.
@@ -515,6 +613,12 @@ impl Plugin for UiModalPlugin {
             Update,
             (apply_modal_enter_speed, advance_modal_enter, paint_modal_buttons).chain(),
         );
+        // Click-outside-to-dismiss is independent of the open
+        // animation chain — it reads `just_pressed(Left)` and runs
+        // every tick. `just_pressed` is true only on the frame the
+        // button transitions to pressed, so the press that *opens* a
+        // modal cannot dismiss the same modal on the next frame.
+        app.add_systems(Update, dismiss_modal_on_scrim_click);
     }
 }
 
@@ -667,6 +771,225 @@ mod tests {
         app.insert_resource(TimeUpdateStrategy::ManualDuration(
             Duration::from_secs_f32(secs),
         ));
+    }
+
+    // -----------------------------------------------------------------------
+    // Click-outside-to-dismiss
+    // -----------------------------------------------------------------------
+
+    /// Pure-helper hit-test: cursor inside the rectangle returns true.
+    #[test]
+    fn cursor_is_inside_rect_inside_returns_true() {
+        // 100×60 rectangle centred at (200, 150).
+        let centre = Vec2::new(200.0, 150.0);
+        let size = Vec2::new(100.0, 60.0);
+        // Centre + a few corners just inside.
+        assert!(cursor_is_inside_rect(centre, centre, size));
+        assert!(cursor_is_inside_rect(Vec2::new(151.0, 121.0), centre, size));
+        assert!(cursor_is_inside_rect(Vec2::new(249.0, 179.0), centre, size));
+    }
+
+    /// Pure-helper hit-test: cursor outside the rectangle returns false
+    /// on every side.
+    #[test]
+    fn cursor_is_inside_rect_outside_returns_false() {
+        let centre = Vec2::new(200.0, 150.0);
+        let size = Vec2::new(100.0, 60.0);
+        assert!(!cursor_is_inside_rect(Vec2::new(149.0, 150.0), centre, size)); // left
+        assert!(!cursor_is_inside_rect(Vec2::new(251.0, 150.0), centre, size)); // right
+        assert!(!cursor_is_inside_rect(Vec2::new(200.0, 119.0), centre, size)); // above
+        assert!(!cursor_is_inside_rect(Vec2::new(200.0, 181.0), centre, size)); // below
+    }
+
+    /// Builds a headless app capable of running
+    /// `dismiss_modal_on_scrim_click`: registers the plugin, primes the
+    /// `ButtonInput<MouseButton>` resource that `MinimalPlugins`
+    /// doesn't provide, and spawns a synthetic `PrimaryWindow`.
+    fn dismiss_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(UiModalPlugin);
+        app.init_resource::<ButtonInput<MouseButton>>();
+        // Synthetic primary window. `MinimalPlugins` doesn't ship
+        // `WindowPlugin`, so spawning the entity by hand is fine —
+        // `dismiss_modal_on_scrim_click` only reads `cursor_position`
+        // off it, not any platform-backed state.
+        app.world_mut().spawn((
+            Window {
+                resolution: bevy::window::WindowResolution::new(800, 600),
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        app
+    }
+
+    /// Marker for synthetic-modal tests below.
+    #[derive(Component, Debug)]
+    struct DismissTestModal;
+
+    /// Spawns a synthetic scrim + card pair pre-populated with
+    /// `ComputedNode` + `UiGlobalTransform` so the dismiss system has
+    /// real geometry to hit-test against without running the full UI
+    /// layout pipeline. `card_centre` and `card_size` are in physical
+    /// pixels (matching `ComputedNode.size`); the synthetic
+    /// `inverse_scale_factor` is 1.0 so logical == physical.
+    fn spawn_synthetic_modal(
+        app: &mut App,
+        dismissible: bool,
+        card_centre: Vec2,
+        card_size: Vec2,
+    ) -> Entity {
+        let world = app.world_mut();
+        let mut scrim = world.spawn((DismissTestModal, ModalScrim));
+        if dismissible {
+            scrim.insert(ScrimDismissible);
+        }
+        let scrim_entity = scrim.id();
+        let card_entity = world
+            .spawn((
+                ModalCard,
+                {
+                    let mut node = ComputedNode {
+                        stack_index: 0,
+                        size: card_size,
+                        content_size: card_size,
+                        scrollbar_size: Vec2::ZERO,
+                        scroll_position: Vec2::ZERO,
+                        outline_width: 0.0,
+                        outline_offset: 0.0,
+                        unrounded_size: card_size,
+                        border: bevy::sprite::BorderRect::default(),
+                        border_radius: bevy::ui::ResolvedBorderRadius::default(),
+                        padding: bevy::sprite::BorderRect::default(),
+                        inverse_scale_factor: 1.0,
+                    };
+                    // `is_empty` guard inside Bevy treats zero-size
+                    // nodes as inert; we always pass a non-zero size.
+                    node.size = card_size;
+                    node
+                },
+                UiGlobalTransform::from_translation(card_centre),
+            ))
+            .id();
+        // Parent the card to the scrim so a `commands.entity(scrim).despawn()`
+        // also takes the card down — matching the real `spawn_modal` hierarchy.
+        world.entity_mut(scrim_entity).add_child(card_entity);
+        scrim_entity
+    }
+
+    /// Sets the synthetic primary window's cursor position (logical px,
+    /// since we use `inverse_scale_factor = 1.0` everywhere in tests).
+    fn set_cursor(app: &mut App, position: Option<Vec2>) {
+        let world = app.world_mut();
+        let mut q = world.query_filtered::<&mut Window, With<PrimaryWindow>>();
+        let mut window = q.single_mut(world).expect("primary window");
+        window.set_cursor_position(position);
+    }
+
+    /// Drives a fresh `just_pressed(Left)` for the next `app.update()`.
+    /// `MinimalPlugins` doesn't run the input clear pass, so we mark
+    /// the clear by hand on the resource between presses.
+    fn press_left_mouse(app: &mut App) {
+        let mut input = app
+            .world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>();
+        input.clear();
+        input.press(MouseButton::Left);
+    }
+
+    /// Click outside the card on a dismissible modal despawns it.
+    #[test]
+    fn dismissible_scrim_despawns_on_scrim_click_outside_card() {
+        let mut app = dismiss_test_app();
+        let scrim = spawn_synthetic_modal(
+            &mut app,
+            /* dismissible: */ true,
+            Vec2::new(400.0, 300.0),
+            Vec2::new(200.0, 100.0),
+        );
+        // Cursor far outside the card — top-left corner of the window.
+        set_cursor(&mut app, Some(Vec2::new(50.0, 50.0)));
+        press_left_mouse(&mut app);
+        app.update();
+
+        assert!(
+            app.world().get_entity(scrim).is_err(),
+            "dismissible scrim should be despawned on a scrim-area click"
+        );
+    }
+
+    /// Click *inside* the card area must NOT dismiss the modal — the
+    /// player intends to interact with the card content.
+    #[test]
+    fn dismissible_scrim_does_not_despawn_on_card_click() {
+        let mut app = dismiss_test_app();
+        let scrim = spawn_synthetic_modal(
+            &mut app,
+            /* dismissible: */ true,
+            Vec2::new(400.0, 300.0),
+            Vec2::new(200.0, 100.0),
+        );
+        // Cursor at the card centre — definitely inside.
+        set_cursor(&mut app, Some(Vec2::new(400.0, 300.0)));
+        press_left_mouse(&mut app);
+        app.update();
+
+        assert!(
+            app.world().get_entity(scrim).is_ok(),
+            "click inside the card must not dismiss the modal"
+        );
+    }
+
+    /// Modals without `ScrimDismissible` ignore scrim clicks entirely.
+    /// Settings, Onboarding, Pause, etc. rely on this opt-out.
+    #[test]
+    fn non_dismissible_scrim_does_not_despawn_on_scrim_click() {
+        let mut app = dismiss_test_app();
+        let scrim = spawn_synthetic_modal(
+            &mut app,
+            /* dismissible: */ false,
+            Vec2::new(400.0, 300.0),
+            Vec2::new(200.0, 100.0),
+        );
+        set_cursor(&mut app, Some(Vec2::new(50.0, 50.0)));
+        press_left_mouse(&mut app);
+        app.update();
+
+        assert!(
+            app.world().get_entity(scrim).is_ok(),
+            "non-dismissible scrim must survive a scrim-area click"
+        );
+    }
+
+    /// Stacked dismissible modals: one click despawns at most one
+    /// modal per frame (the one the query yields first). The other
+    /// stays put until the next press.
+    #[test]
+    fn stacked_modals_dismiss_at_most_one_per_click() {
+        let mut app = dismiss_test_app();
+        let a = spawn_synthetic_modal(
+            &mut app,
+            /* dismissible: */ true,
+            Vec2::new(400.0, 300.0),
+            Vec2::new(200.0, 100.0),
+        );
+        let b = spawn_synthetic_modal(
+            &mut app,
+            /* dismissible: */ true,
+            Vec2::new(400.0, 300.0),
+            Vec2::new(200.0, 100.0),
+        );
+        // Cursor outside both cards.
+        set_cursor(&mut app, Some(Vec2::new(50.0, 50.0)));
+        press_left_mouse(&mut app);
+        app.update();
+
+        let a_alive = app.world().get_entity(a).is_ok();
+        let b_alive = app.world().get_entity(b).is_ok();
+        assert!(
+            a_alive ^ b_alive,
+            "exactly one of the two stacked dismissible modals should remain"
+        );
     }
 }
 

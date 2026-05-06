@@ -11,6 +11,7 @@ use crate::events::HelpRequestEvent;
 use crate::font_plugin::FontResource;
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
+    ScrimDismissible,
 };
 use crate::ui_theme::{
     Z_MODAL_PANEL, BORDER_SUBTLE, RADIUS_SM, SPACE_2, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY,
@@ -209,7 +210,7 @@ fn spawn_help_screen(commands: &mut Commands, font_res: Option<&FontResource>) {
         ..default()
     };
 
-    spawn_modal(commands, HelpScreen, Z_MODAL_PANEL, |card| {
+    let scrim = spawn_modal(commands, HelpScreen, Z_MODAL_PANEL, |card| {
         spawn_modal_header(card, "Controls", font_res);
 
         // Scrollable body — the controls reference is six sections totalling
@@ -295,6 +296,9 @@ fn spawn_help_screen(commands: &mut Commands, font_res: Option<&FontResource>) {
             );
         });
     });
+    // Help is read-only — clicking the scrim outside the card dismisses
+    // alongside the existing F1 / Esc / Done paths.
+    commands.entity(scrim).insert(ScrimDismissible);
 }
 
 #[cfg(test)]

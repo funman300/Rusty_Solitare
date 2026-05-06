@@ -32,6 +32,7 @@ use crate::settings_plugin::{SettingsResource, SettingsStoragePath};
 use crate::stats_plugin::{StatsResource, StatsUpdate};
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
+    ScrimDismissible,
 };
 use crate::ui_theme::{
     ACCENT_PRIMARY, BORDER_SUBTLE, STATE_SUCCESS, TEXT_DISABLED, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -473,7 +474,7 @@ fn spawn_achievements_screen(
         ..default()
     };
 
-    spawn_modal(commands, AchievementsScreen, Z_MODAL_PANEL, |card| {
+    let scrim = spawn_modal(commands, AchievementsScreen, Z_MODAL_PANEL, |card| {
         spawn_modal_header(card, header, font_res);
 
         // Scrollable body — the achievements list grows to ~19 rows which
@@ -577,6 +578,9 @@ fn spawn_achievements_screen(
             );
         });
     });
+    // Achievements is a read-only list — clicking the scrim outside
+    // the card dismisses alongside the existing A / Done paths.
+    commands.entity(scrim).insert(ScrimDismissible);
 }
 
 fn format_reward(reward: Reward) -> String {
