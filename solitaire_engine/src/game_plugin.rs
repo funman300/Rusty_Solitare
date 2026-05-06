@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
+use bevy::tasks::{futures_lite::future, AsyncComputeTaskPool, Task};
 use chrono::Utc;
 use solitaire_core::game_state::{DrawMode, GameMode, GameState};
 use solitaire_core::pile::PileType;
@@ -137,6 +138,7 @@ impl Plugin for GamePlugin {
             .insert_resource(GameStatePath(path))
             .insert_resource(ReplayPath(history_path))
             .init_resource::<RecordingReplay>()
+            .init_resource::<PendingNewGameSeed>()
             .init_resource::<DragState>()
             .init_resource::<SyncStatusResource>()
             .add_message::<MoveRequestEvent>()
@@ -150,6 +152,10 @@ impl Plugin for GamePlugin {
             .add_message::<crate::events::AchievementUnlockedEvent>()
             .add_message::<FoundationCompletedEvent>()
             .add_message::<InfoToastEvent>()
+            .add_systems(
+                Update,
+                poll_pending_new_game_seed.before(GameMutation),
+            )
             .add_systems(
                 Update,
                 (
@@ -237,6 +243,60 @@ fn seed_from_system_time() -> u64 {
 /// seed so the player still gets a deal — better a possibly-unwinnable
 /// hand than an infinite loop.
 ///
+/// In-flight async work for "Winnable deals only" seed selection.
+///
+/// `handle_new_game` writes here when it needs the solver to vet a deal;
+/// `poll_pending_new_game_seed` reads from here, polls the task, and
+/// re-emits a `NewGameRequestEvent` with the chosen seed once the task
+/// completes. The desktop client's UI never blocks on the worst-case
+/// 50 × ~120 ms solver runs that can pile up on pathological deals.
+///
+/// At most one task is ever in flight: a fresh new-game request while
+/// a previous task is still running drops the previous task (Bevy's
+/// `Task` `Drop` cancels it cooperatively at the next await point) and
+/// queues the new one.
+#[derive(Resource, Default)]
+pub struct PendingNewGameSeed {
+    /// `Some` while a solver-vetted seed is being computed.
+    inner: Option<PendingSeedTask>,
+}
+
+/// One in-flight winnable-seed search plus the request fields that
+/// would have flowed through `handle_new_game` synchronously. The
+/// poll system replays them on a synthetic `NewGameRequestEvent` once
+/// the task completes — `seed: Some(...)` skips the solver branch on
+/// the second pass so we don't loop.
+struct PendingSeedTask {
+    handle: Task<u64>,
+    mode: Option<GameMode>,
+    confirmed: bool,
+}
+
+/// Update system: poll the in-flight winnable-seed search. When the
+/// task resolves, emit a synthetic `NewGameRequestEvent` carrying the
+/// chosen seed. Ordered `.before(GameMutation)` so `handle_new_game`
+/// picks up the synthetic event on the same frame, completing the
+/// new-game flow without a one-frame visual lag.
+fn poll_pending_new_game_seed(
+    mut pending: ResMut<PendingNewGameSeed>,
+    mut new_game_writer: MessageWriter<NewGameRequestEvent>,
+) {
+    let Some(p) = pending.inner.as_mut() else {
+        return;
+    };
+    let Some(seed) = future::block_on(future::poll_once(&mut p.handle)) else {
+        return;
+    };
+    let mode = p.mode;
+    let confirmed = p.confirmed;
+    pending.inner = None;
+    new_game_writer.write(NewGameRequestEvent {
+        seed: Some(seed),
+        mode,
+        confirmed,
+    });
+}
+
 /// Pure helper extracted for testability — `new_game_with_solver_*`
 /// engine tests in the same file exercise this path.
 pub(crate) fn choose_winnable_seed(initial_seed: u64, draw_mode: &DrawMode) -> u64 {
@@ -262,6 +322,7 @@ fn handle_new_game(
     mut game: ResMut<GameStateResource>,
     mut changed: MessageWriter<StateChangedEvent>,
     mut recording: ResMut<RecordingReplay>,
+    mut pending_seed: ResMut<PendingNewGameSeed>,
     settings: Option<Res<crate::settings_plugin::SettingsResource>>,
     path: Option<Res<GameStatePath>>,
     font_res: Option<Res<FontResource>>,
@@ -296,6 +357,13 @@ fn handle_new_game(
             commands.entity(entity).despawn();
         }
 
+        // Drop any in-flight winnable-seed search now that we've
+        // committed to acting on a new request. Its result was for
+        // the previous user intent — the new request supersedes it
+        // regardless of which branch we take below (synchronous
+        // explicit-seed deal vs. another async solver search).
+        pending_seed.inner = None;
+
         let initial_seed = ev.seed.unwrap_or_else(seed_from_system_time);
         // Prefer the draw mode from Settings when starting a fresh game.
         // Fall back to the current game's draw mode in headless/test contexts
@@ -323,11 +391,22 @@ fn handle_new_game(
         let winnable_only = settings
             .as_ref()
             .is_some_and(|s| s.0.winnable_deals_only);
-        let chosen_seed = if winnable_only && mode == GameMode::Classic && ev.seed.is_none() {
-            choose_winnable_seed(initial_seed, &draw_mode)
-        } else {
-            initial_seed
-        };
+        if winnable_only && mode == GameMode::Classic && ev.seed.is_none() {
+            let dm = draw_mode.clone();
+            let task = AsyncComputeTaskPool::get()
+                .spawn(async move { choose_winnable_seed(initial_seed, &dm) });
+            pending_seed.inner = Some(PendingSeedTask {
+                handle: task,
+                mode: ev.mode,
+                confirmed: ev.confirmed,
+            });
+            // Skip the rest of the new-game flow; the polling system
+            // will re-emit a synthetic event with a chosen seed once
+            // the task resolves.
+            continue;
+        }
+
+        let chosen_seed = initial_seed;
 
         game.0 = GameState::new_with_mode(chosen_seed, draw_mode, mode);
         // Reset the in-flight replay buffer — a fresh deal starts with
@@ -2318,6 +2397,113 @@ mod tests {
         assert_eq!(
             app.world().resource::<GameStateResource>().0.undo_stack_len(),
             0
+        );
+    }
+
+    /// Async-solver flow: a winnable-only request with no explicit
+    /// seed must populate `PendingNewGameSeed` on the same frame the
+    /// request fires (no main-thread stall waiting on the solver),
+    /// and subsequent updates must clear the pending state and
+    /// produce a new GameState.
+    ///
+    /// Drives multiple `app.update()` calls because the polling
+    /// system needs at least one tick after spawn to observe the
+    /// task as ready and re-emit the synthetic event.
+    #[test]
+    fn winnable_seed_search_runs_async_and_completes_eventually() {
+        let mut app = test_app(394);
+        insert_settings(&mut app, true);
+
+        app.world_mut().write_message(NewGameRequestEvent {
+            seed: None,
+            mode: None,
+            confirmed: false,
+        });
+        // First update: handle_new_game spawns the solver task and
+        // returns. The GameStateResource is unchanged on this tick —
+        // the player's previous game is still on screen, so the UI
+        // doesn't visually stall.
+        app.update();
+        assert!(
+            app.world().resource::<PendingNewGameSeed>().inner.is_some(),
+            "first frame should have an in-flight solver task",
+        );
+
+        // Pump frames until the polling system observes the task as
+        // ready and re-emits the synthetic event. AsyncComputeTaskPool
+        // is a shared pool across the whole `cargo test` run — when
+        // dozens of tests execute in parallel the pool can take a
+        // while to actually schedule our future. The yield_now() lets
+        // the pool's worker threads make progress between our polls
+        // without burning wall-clock time.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while app.world().resource::<PendingNewGameSeed>().inner.is_some() {
+            app.update();
+            std::thread::yield_now();
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+        }
+        assert!(
+            app.world().resource::<PendingNewGameSeed>().inner.is_none(),
+            "solver task should have completed within 15 s wall-clock",
+        );
+        // New game completed: a fresh deal carries 0 moves.
+        assert_eq!(
+            app.world().resource::<GameStateResource>().0.move_count,
+            0,
+            "completed new game must be in fresh-deal state",
+        );
+    }
+
+    /// Cancel-on-replace: a winnable-only request that arrives while
+    /// a previous solver task is in flight must drop the previous
+    /// task and queue the new one. The most recently-fired request
+    /// is the one whose seed wins, regardless of which task started
+    /// first.
+    #[test]
+    fn winnable_seed_search_drops_in_flight_task_on_new_request() {
+        let mut app = test_app(394);
+        insert_settings(&mut app, true);
+
+        // Fire the first request; first update spawns the task.
+        app.world_mut().write_message(NewGameRequestEvent {
+            seed: None,
+            mode: None,
+            confirmed: false,
+        });
+        app.update();
+        assert!(
+            app.world().resource::<PendingNewGameSeed>().inner.is_some(),
+            "first request should be in flight",
+        );
+
+        // Fire a SECOND request with an explicit seed before the
+        // first task can complete. handle_new_game's `pending.inner =
+        // None` line must drop the in-flight task; the explicit-seed
+        // branch then bypasses the solver entirely. After this tick
+        // the GameStateResource carries seed 12345, not whatever the
+        // solver would have picked for the first request.
+        app.world_mut().write_message(NewGameRequestEvent {
+            seed: Some(12345),
+            mode: None,
+            confirmed: true,
+        });
+        app.update();
+
+        // Drive a few more ticks to drain any stragglers.
+        for _ in 0..5 {
+            app.update();
+        }
+
+        assert!(
+            app.world().resource::<PendingNewGameSeed>().inner.is_none(),
+            "explicit-seed request must have cancelled the in-flight task",
+        );
+        assert_eq!(
+            app.world().resource::<GameStateResource>().0.seed,
+            12345,
+            "explicit-seed request takes precedence over the dropped solver task",
         );
     }
 }
