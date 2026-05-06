@@ -43,7 +43,7 @@ The post-v0.15.0 next-round candidates are still mostly open — solver-driven h
 | Area | Commit | What landed |
 |---|---|---|
 | Solver-driven hints | `87275bf` | The H-key hint now asks the v0.15.0 solver for the actual best first move via the new `try_solve_with_first_move` / `try_solve_from_state` APIs. Heuristic stays as the fallback for inconclusive deals. Median 2 ms per H press. |
-| Replay-rate slider | (pending) | Settings → Gameplay slider tunes `replay_move_interval_secs` 0.10–1.00 s in 0.05 s steps; default 0.45 s. `tick_replay_playback` reads from `SettingsResource` per frame so the slider takes effect on the next playback tick. |
+| Replay-rate slider | `53e3b81` | Settings → Gameplay slider tunes `replay_move_interval_secs` 0.10–1.00 s in 0.05 s steps; default 0.45 s. `tick_replay_playback` reads from `SettingsResource` per frame so the slider takes effect on the next playback tick. |
 
 ## Open punch list
 
@@ -72,10 +72,12 @@ Branch: master. Direction is OPEN — v0.16.0 just shipped covering
 modal scroll fixes, pointer cursor, same-frame focus, and scrim-click
 dismiss across all six read-only modals.
 
-State: HEAD at v0.16.0. Working tree clean apart from untracked
-CARD_PLAN.md (intentional).
+State: HEAD post-v0.16.0 with two follow-up commits (87275bf
+solver-driven hints, 53e3b81 replay-rate slider). v0.17.0 not yet
+cut. Working tree clean apart from untracked CARD_PLAN.md
+(intentional).
 Build: cargo clippy --workspace --all-targets -- -D warnings clean.
-Tests: 1196 passed / 0 failed.
+Tests: 1208 passed / 0 failed.
 
 READ FIRST (in order, before doing anything):
   1. SESSION_HANDOFF.md  — v0.16.0 changelog + open punch list
@@ -87,15 +89,15 @@ READ FIRST (in order, before doing anything):
                            may be missing on a fresh machine)
 
 DECISION TO ASK THE PLAYER FIRST:
-  A. Smoke-test v0.16.0. Scroll on Achievements, pointer cursor on
-     buttons, first Tab in a modal activates rather than advances,
-     scrim click dismisses Stats/Achievements/Help/Profile/
-     Leaderboard/Home but NOT Settings/Pause/etc.
-  B. Solver-driven hints — replace heuristic with try_solve's
-     best-move suggestion. ~100 LOC.
-  C. Solver-on-AsyncComputeTaskPool with progress toast + cancel.
-     Eliminates the worst-case 6 s stall.
-  D. Pick from the remaining "next-round candidates" in this doc.
+  A. Cut v0.17.0 (solver hints + replay-rate slider on top of
+     v0.16.0). Tag and push.
+  B. Solver-on-AsyncComputeTaskPool with progress toast + cancel.
+     A previous attempt was rolled back when an agent left 3
+     failing tests; redoing it needs smaller pieces. Eliminates the
+     worst-case 6 s UI stall — highest gameplay impact left.
+  C. Per-deal "won previously" HUD indicator using the rolling
+     replay history's seeds.
+  D. Replay sharing — copyable URL via the existing web viewer.
   E. Take the deferred desktop-packaging item (needs artwork +
      signing certs from the user).
 
