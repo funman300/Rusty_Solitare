@@ -8,6 +8,67 @@ project follows [Semantic Versioning](https://semver.org/).
 
 _Nothing yet._
 
+## [0.16.0] — 2026-05-06
+
+A modal-feel polish round. Every overlay screen now scrolls when its
+content overflows the 800×600 minimum window, every clickable button
+shows a hand cursor on hover, keyboard focus lands on the primary
+button on the same frame the modal opens, and read-only modals
+dismiss when the player clicks the scrim outside the card.
+
+### Added
+
+- **Pointer cursor on hover** for every interactive `Button` entity
+  (modal buttons, HUD action bar, mode-launcher cards, settings
+  toggles, Stats selectors). `update_cursor_icon` gains a fourth
+  branch sitting between Grabbing (active drag) and Grab
+  (draggable card hover): when no drag is active and any
+  `Interaction::Hovered`/`Pressed` button is detected, the window
+  cursor swaps to `SystemCursorIcon::Pointer`. A pure
+  `pick_cursor_icon` helper makes the priority logic
+  unit-testable.
+- **Click-outside-to-dismiss** for the six read-only modals: Stats,
+  Achievements, Help, Profile, Leaderboard, Home. New
+  `ScrimDismissible` marker on `ModalScrim` opts a modal in;
+  `dismiss_modal_on_scrim_click` runs in `Update`, despawns the
+  topmost dismissible scrim on a left-mouse press whose cursor
+  lands on the scrim and outside every `ModalCard`. Bevy's
+  hierarchy despawn cascades to the card and children.
+  Settings, Onboarding, Pause, Forfeit confirm, and Confirm New
+  Game intentionally don't opt in — they carry unsaved or
+  destructive state.
+
+### Fixed
+
+- **Modal content scrolls when it overflows** (Achievements, Help,
+  Stats, Profile, Leaderboard). Each modal's body Node now
+  carries `Overflow::scroll_y()` plus a `max_height` constraint
+  (`Val::Vh(70.0)` for most, `Val::Vh(50.0)` for the
+  leaderboard's variable-length ranking section) and a marker
+  component (`AchievementsScrollable`, `HelpScrollable`,
+  `StatsScrollable`, `ProfileScrollable`,
+  `LeaderboardScrollable`). A sibling `scroll_*_panel` system
+  per modal routes `MouseWheel` events into the body's
+  `ScrollPosition`. Mirrors the existing `SettingsPanelScrollable`
+  pattern. Home modal intentionally not scrolled — its five
+  mode cards + Cancel are sized to fit at 800×600 by design.
+- **Modal focus arrives on the same frame the modal opens.**
+  Previously `attach_focusable_to_modal_buttons` and
+  `auto_focus_on_modal_open` ran in `Update` alongside arbitrary
+  click-handlers that spawn modals; with no ordering edge,
+  Bevy's deferred `Commands` queued the new entities but the
+  attach system couldn't see them on the same tick. Both systems
+  moved to `PostUpdate` so the schedule boundary itself supplies
+  the sync point — `FocusedButton` is always populated before
+  `app.update()` returns. The very next Tab/Enter press lands on
+  a populated resource instead of wasting itself moving focus
+  from None to the primary.
+
+### Stats
+
+- 1196 passing tests (was 1178 at v0.15.0 close).
+- Zero clippy warnings under `--workspace --all-targets -- -D warnings`.
+
 ## [0.15.0] — 2026-05-02
 
 In-engine replay playback, the Klondike solver + "Winnable deals
@@ -465,7 +526,8 @@ with no PNG artwork yet.
   CREDITS.md, persistent window geometry, mode-launcher Home repurpose,
   client-side sync round-trip integration tests.
 
-[Unreleased]: https://github.com/funman300/Rusty_Solitaire/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/funman300/Rusty_Solitaire/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/funman300/Rusty_Solitaire/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/funman300/Rusty_Solitaire/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/funman300/Rusty_Solitaire/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/funman300/Rusty_Solitaire/compare/v0.12.0...v0.13.0
