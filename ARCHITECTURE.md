@@ -47,11 +47,10 @@ Solitaire Quest is a cross-platform Klondike Solitaire game written in Rust, tar
 ### Design Principles
 
 - **Offline first.** The local file is always the source of truth. Sync is additive, never destructive.
-- **Pure core.** All game logic lives in a dependency-free Rust crate with no Bevy, no network, and no I/O. This keeps it fully unit-testable and portable.
-- **No panics in game logic.** Every state transition returns `Result<_, MoveError>`. Panics are only acceptable in startup/configuration code.
 - **One language, one repo.** The game client, sync client, shared types, and sync server are all Rust crates in a single Cargo workspace.
 - **Plugin-based Bevy architecture.** Each major feature is a Bevy `Plugin`. Systems are small and single-purpose. Cross-system communication uses Bevy `Event`s.
-- **UI-first interaction.** Every player-triggered action — new game, undo, draw, pause, open stats / settings / help / profile / leaderboard, etc. — must be reachable from a visible UI control. Keyboard shortcuts exist only as optional accelerators for power users; they are never the sole entry point. A player using only mouse or touch must be able to perform every action. New gameplay features ship with the UI control alongside the system that backs it.
+
+Pure-core, no-panics-in-game-logic, and UI-first-interaction constraints are enforced by CLAUDE.md §2.1, §2.3, and §3.3 respectively — those are the canonical statements; this file describes the design that motivates them.
 
 ---
 
