@@ -8,6 +8,37 @@ project follows [Semantic Versioning](https://semver.org/).
 
 _Nothing yet._
 
+## [0.17.0] — 2026-05-06
+
+A short follow-up round on top of v0.16.0: the H-key hint is no
+longer a heuristic guess but the actual best first move suggested by
+the v0.15.0 solver, and the in-engine replay player now has a
+player-tunable playback rate.
+
+### Added
+
+- **Replay-rate slider** in Settings → Gameplay. Tunes
+  `replay_move_interval_secs` from 0.10 s to 1.00 s in 0.05 s steps;
+  default 0.45 s. `tick_replay_playback` reads the value from
+  `SettingsResource` per frame so the slider takes effect on the
+  next playback tick — no restart required.
+
+### Changed
+
+- **Solver-driven hints.** Pressing **H** used to surface a
+  heuristic-best move (foundation moves preferred, then
+  tableau-to-tableau by depth-of-flip-revealed). It now asks the
+  v0.15.0 solver for the actual provably-best first move via the
+  new `solitaire_core::solver::try_solve_with_first_move` /
+  `try_solve_from_state` APIs. When the solver returns inconclusive
+  (rare deals where the bound runs out before a result), the old
+  heuristic remains the fallback. Median 2 ms per H press.
+
+### Stats
+
+- 1208 passing tests (was 1196 at v0.16.0 close).
+- Zero clippy warnings under `--workspace --all-targets -- -D warnings`.
+
 ## [0.16.0] — 2026-05-06
 
 A modal-feel polish round. Every overlay screen now scrolls when its

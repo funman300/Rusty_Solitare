@@ -1,14 +1,14 @@
 # Solitaire Quest — Session Handoff
 
-**Last updated:** 2026-05-06 (mid-session post-v0.16.0) — Solver-driven hints + replay-rate slider landed on top of v0.16.0. An async-solver attempt was rolled back when an agent left 3 failing tests during interruption. Test-to-work ratio noted as a quality signal — recent agents had been mandating ≥3 tests per feature including trivial Default/serde-derive coverage; future agent briefs scale that back to behaviour-level tests only.
+**Last updated:** 2026-05-06 (post-v0.17.0) — v0.17.0 cut on top of v0.16.0 bundling the solver-driven hints (`87275bf`) and the replay-rate slider (`53e3b81`). An async-solver attempt earlier in the session was rolled back when an agent left 3 failing tests during interruption — flagged as carryover. Test-to-work ratio noted as a quality signal: future agent briefs scale back to behaviour-level tests only, not stdlib/serde-derive coverage.
 
 ## Status at pause
 
-- **HEAD on origin:** v0.16.0's tag commit; this session adds two follow-up commits on top.
+- **HEAD on origin:** v0.17.0's tag commit.
 - **Working tree:** clean apart from untracked `CARD_PLAN.md` (intentional).
 - **Build:** `cargo clippy --workspace --all-targets -- -D warnings` clean.
 - **Tests:** **1208 passed / 0 failed** across the workspace.
-- **Tags on origin:** `v0.9.0` through `v0.16.0`. v0.17.0 not yet cut.
+- **Tags on origin:** `v0.9.0` through `v0.17.0`.
 
 ## Where we are
 
@@ -28,6 +28,13 @@ The post-v0.15.0 next-round candidates are still mostly open — solver-driven h
 
 `github.com/funman300/Rusty_Solitaire` is the canonical repo. Always push there.
 
+## v0.17.0 (shipped 2026-05-06)
+
+| Area | Commit | What landed |
+|---|---|---|
+| Solver-driven hints | `87275bf` | The H-key hint asks the solver for the actual best first move via `try_solve_with_first_move` / `try_solve_from_state`. Heuristic stays as fallback. Median 2 ms per H press. |
+| Replay-rate slider | `53e3b81` | Settings → Gameplay slider tunes `replay_move_interval_secs` 0.10–1.00 s in 0.05 s steps; default 0.45 s. Read per frame from `SettingsResource`. |
+
 ## v0.16.0 (shipped 2026-05-06)
 
 | Area | Commit | What landed |
@@ -38,19 +45,11 @@ The post-v0.15.0 next-round candidates are still mostly open — solver-driven h
 | Scrim dismiss core | `a54201e` | New `ScrimDismissible` marker on `ModalScrim` opts a modal into click-outside-to-close. `dismiss_modal_on_scrim_click` system in `ui_modal` despawns the topmost dismissible scrim on a left-mouse press whose cursor lands on the scrim and outside every `ModalCard`. Stats / Achievements / Help opted in. |
 | Scrim dismiss tail | `cbf2483` | One-line opt-in (capture scrim + insert marker) for Profile / Leaderboard / Home, completing all six read-only modals. |
 
-## Post-v0.16.0 (this session, unreleased)
-
-| Area | Commit | What landed |
-|---|---|---|
-| Solver-driven hints | `87275bf` | The H-key hint now asks the v0.15.0 solver for the actual best first move via the new `try_solve_with_first_move` / `try_solve_from_state` APIs. Heuristic stays as the fallback for inconclusive deals. Median 2 ms per H press. |
-| Replay-rate slider | `53e3b81` | Settings → Gameplay slider tunes `replay_move_interval_secs` 0.10–1.00 s in 0.05 s steps; default 0.45 s. `tick_replay_playback` reads from `SettingsResource` per frame so the slider takes effect on the next playback tick. |
-
 ## Open punch list
 
 ### Release prep
 
-1. **Cut v0.17.0** when ready — solver hints + replay-rate slider is a small but coherent slice on top of v0.16.0.
-2. **Desktop packaging** per `ARCHITECTURE.md §17`. Arch PKGBUILD exists in `/home/manage/solitaire-quest-pkgbuild/` (separate repo). Pending: app icon, macOS `.icns` + notarisation cert, Windows `.ico` + Authenticode cert, AppImage recipe.
+1. **Desktop packaging** per `ARCHITECTURE.md §17`. Arch PKGBUILD exists in `/home/manage/solitaire-quest-pkgbuild/` (separate repo). Pending: app icon, macOS `.icns` + notarisation cert, Windows `.ico` + Authenticode cert, AppImage recipe.
 
 ### Process note (raised this session)
 
@@ -72,9 +71,8 @@ Branch: master. Direction is OPEN — v0.16.0 just shipped covering
 modal scroll fixes, pointer cursor, same-frame focus, and scrim-click
 dismiss across all six read-only modals.
 
-State: HEAD post-v0.16.0 with two follow-up commits (87275bf
-solver-driven hints, 53e3b81 replay-rate slider). v0.17.0 not yet
-cut. Working tree clean apart from untracked CARD_PLAN.md
+State: HEAD at v0.17.0 (solver hints + replay-rate slider on top
+of v0.16.0). Working tree clean apart from untracked CARD_PLAN.md
 (intentional).
 Build: cargo clippy --workspace --all-targets -- -D warnings clean.
 Tests: 1208 passed / 0 failed.
@@ -89,16 +87,14 @@ READ FIRST (in order, before doing anything):
                            may be missing on a fresh machine)
 
 DECISION TO ASK THE PLAYER FIRST:
-  A. Cut v0.17.0 (solver hints + replay-rate slider on top of
-     v0.16.0). Tag and push.
-  B. Solver-on-AsyncComputeTaskPool with progress toast + cancel.
+  A. Solver-on-AsyncComputeTaskPool with progress toast + cancel.
      A previous attempt was rolled back when an agent left 3
      failing tests; redoing it needs smaller pieces. Eliminates the
      worst-case 6 s UI stall — highest gameplay impact left.
-  C. Per-deal "won previously" HUD indicator using the rolling
+  B. Per-deal "won previously" HUD indicator using the rolling
      replay history's seeds.
-  D. Replay sharing — copyable URL via the existing web viewer.
-  E. Take the deferred desktop-packaging item (needs artwork +
+  C. Replay sharing — copyable URL via the existing web viewer.
+  D. Take the deferred desktop-packaging item (needs artwork +
      signing certs from the user).
 
 WORKFLOW NOTES:
@@ -111,5 +107,5 @@ WORKFLOW NOTES:
   - Every commit must pass build / clippy / test before pushing.
   - Push to GitHub (origin) — that is the canonical remote.
 
-OPEN AT THE START: ask which of A–E. Don't pick unilaterally.
+OPEN AT THE START: ask which of A–D. Don't pick unilaterally.
 ```
