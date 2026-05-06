@@ -1173,9 +1173,17 @@ fn auto_save_game_state(
     path: Option<Res<GameStatePath>>,
     mut timer: ResMut<AutoSaveTimer>,
     paused: Option<Res<crate::pause_plugin::PausedResource>>,
+    pending: Res<PendingRestoredGame>,
 ) {
-    // Don't save if paused, game is won, or no moves have been made yet.
-    if paused.is_some_and(|p| p.0) || game.0.is_won || game.0.move_count == 0 {
+    // Don't save if paused, game is won, no moves have been made yet,
+    // or there's a pending restore the player hasn't answered — saving
+    // the fresh-deal placeholder we seeded GameStateResource with at
+    // startup would clobber the real saved game on disk.
+    if paused.is_some_and(|p| p.0)
+        || game.0.is_won
+        || game.0.move_count == 0
+        || pending.0.is_some()
+    {
         return;
     }
     timer.0 += time.delta_secs();
@@ -1192,17 +1200,25 @@ fn auto_save_game_state(
 /// player can resume where they left off. Won games are not saved (the
 /// `save_game_state_to` helper skips them). Blocking on exit is acceptable
 /// because the game loop is already shutting down.
+///
+/// Special case: when `PendingRestoredGame` still holds a saved game the
+/// player never answered the restore prompt for, write THAT to disk
+/// instead of the live `GameStateResource`. Otherwise we'd clobber a
+/// real saved game with the fresh-deal placeholder we seeded
+/// `GameStateResource` with at startup.
 fn save_game_state_on_exit(
     mut exit_events: MessageReader<AppExit>,
     game: Res<GameStateResource>,
     path: Res<GameStatePath>,
+    pending: Res<PendingRestoredGame>,
 ) {
     if exit_events.is_empty() {
         return;
     }
     exit_events.clear();
     let Some(p) = path.0.as_deref() else { return };
-    if let Err(e) = save_game_state_to(p, &game.0) {
+    let to_save = pending.0.as_ref().unwrap_or(&game.0);
+    if let Err(e) = save_game_state_to(p, to_save) {
         warn!("game_state: failed to save on exit: {e}");
     }
 }
