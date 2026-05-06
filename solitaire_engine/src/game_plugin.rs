@@ -590,9 +590,15 @@ fn handle_restore_prompt(
     if screens.is_empty() {
         return;
     }
-    let key_continue = keys
-        .as_ref()
-        .is_some_and(|k| k.just_pressed(KeyCode::Enter) || k.just_pressed(KeyCode::KeyC));
+    // Esc maps to Continue rather than New Game so a stray dismiss
+    // press preserves the saved game — the data-preserving default is
+    // the safer fallback when a player hits Esc reflexively to "close
+    // this dialog" without reading it.
+    let key_continue = keys.as_ref().is_some_and(|k| {
+        k.just_pressed(KeyCode::Enter)
+            || k.just_pressed(KeyCode::KeyC)
+            || k.just_pressed(KeyCode::Escape)
+    });
     let key_new = keys.as_ref().is_some_and(|k| k.just_pressed(KeyCode::KeyN));
     let click_continue = continue_buttons
         .iter()

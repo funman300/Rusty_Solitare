@@ -333,10 +333,16 @@ fn handle_home_card_click(
 
 fn handle_home_cancel_button(
     mut commands: Commands,
+    keys: Option<Res<ButtonInput<KeyCode>>>,
     cancel_buttons: Query<&Interaction, (With<HomeCancelButton>, Changed<Interaction>)>,
     screens: Query<Entity, With<HomeScreen>>,
 ) {
-    if !cancel_buttons.iter().any(|i| *i == Interaction::Pressed) {
+    if screens.is_empty() {
+        return;
+    }
+    let click = cancel_buttons.iter().any(|i| *i == Interaction::Pressed);
+    let esc = keys.is_some_and(|k| k.just_pressed(KeyCode::Escape));
+    if !click && !esc {
         return;
     }
     for entity in &screens {
