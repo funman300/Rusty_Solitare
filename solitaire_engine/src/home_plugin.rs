@@ -143,9 +143,13 @@ impl HomeMode {
             // Black up-pointing triangle — Geometric Shapes; reads as
             // a mountain / a step up in difficulty.
             HomeMode::Challenge => "\u{25B2}",
-            // Black right-pointing triangle — Geometric Shapes; the
-            // standard "play / fast-forward" mark for a timed run.
-            HomeMode::TimeAttack => "\u{25B6}",
+            // Rightwards arrow — Arrows block (U+2190-21FF), a core
+            // range every dev-oriented monospace font (FiraMono
+            // included) ships. Reads as "go / fast-forward" for the
+            // timed mode. Earlier ▶ (U+25B6) did not render; FiraMono
+            // ships ▲ (up triangle) but evidently not the sideways
+            // siblings.
+            HomeMode::TimeAttack => "\u{2192}",
         }
     }
 
