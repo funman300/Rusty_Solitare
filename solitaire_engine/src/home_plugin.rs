@@ -39,7 +39,7 @@ use crate::ui_modal::{
 use crate::ui_theme::{
     ACCENT_PRIMARY, BG_ELEVATED, BG_ELEVATED_HI, BORDER_STRONG, BORDER_SUBTLE, RADIUS_MD,
     STATE_INFO, TEXT_DISABLED, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY, TYPE_BODY_LG,
-    TYPE_CAPTION, VAL_SPACE_1, VAL_SPACE_2, VAL_SPACE_3, Z_MODAL_PANEL,
+    TYPE_CAPTION, TYPE_DISPLAY, VAL_SPACE_1, VAL_SPACE_2, VAL_SPACE_3, Z_MODAL_PANEL,
 };
 
 // ---------------------------------------------------------------------------
@@ -109,6 +109,27 @@ impl HomeMode {
             HomeMode::Zen => "No timer, no score. Just the cards.",
             HomeMode::Challenge => "Hand-picked hard deals. No undo. Win to advance.",
             HomeMode::TimeAttack => "How many can you finish in ten minutes?",
+        }
+    }
+
+    /// Unicode glyph rendered as the picture-tile centrepiece. Stand-in
+    /// for real per-mode artwork — chosen for one-glyph-tells-the-mode
+    /// readability rather than visual fidelity. Swap to `Image` nodes
+    /// when art lands; the rest of the tile layout doesn't change.
+    fn glyph(self) -> &'static str {
+        match self {
+            // Black club is the densest card-suit glyph at small sizes.
+            HomeMode::Classic => "\u{2663}",
+            // Calendar emoji — matches the date callout below.
+            HomeMode::Daily => "\u{1F4C5}",
+            // Lotus flower stands in for the lotus-position emoji
+            // because the latter renders inconsistently across
+            // platforms; the flower is a single codepoint.
+            HomeMode::Zen => "\u{1F338}",
+            // High-voltage / lightning bolt for the hardest mode.
+            HomeMode::Challenge => "\u{26A1}",
+            // Stopwatch matches the timer concept of Time Attack.
+            HomeMode::TimeAttack => "\u{23F1}",
         }
     }
 
@@ -668,15 +689,31 @@ fn spawn_home_screen(commands: &mut Commands, ctx: HomeContext<'_>) {
         spawn_home_header_chips(card, &ctx);
         spawn_draw_mode_row(card, &ctx);
 
-        for mode in [
-            HomeMode::Classic,
-            HomeMode::Daily,
-            HomeMode::Zen,
-            HomeMode::Challenge,
-            HomeMode::TimeAttack,
-        ] {
-            spawn_mode_card(card, mode, &ctx);
-        }
+        // Mode tiles in a wrapping 2-column grid. Each tile takes 48%
+        // of the row so column_gap fits comfortably; the 5 modes wrap
+        // to a third row of one tile, which we leave left-aligned —
+        // the asymmetry matches MSSC's "Daily Challenges / Today's
+        // Event" half-cell on the right of their grid and keeps the
+        // visual rhythm.
+        card.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            row_gap: VAL_SPACE_3,
+            column_gap: VAL_SPACE_3,
+            width: Val::Percent(100.0),
+            ..default()
+        })
+        .with_children(|grid| {
+            for mode in [
+                HomeMode::Classic,
+                HomeMode::Daily,
+                HomeMode::Zen,
+                HomeMode::Challenge,
+                HomeMode::TimeAttack,
+            ] {
+                spawn_mode_card(grid, mode, &ctx);
+            }
+        });
 
         spawn_modal_actions(card, |actions| {
             spawn_modal_button(
@@ -964,8 +1001,15 @@ fn spawn_mode_card(
         ..default()
     };
     let font_chip = TextFont {
-        font: font_handle,
+        font: font_handle.clone(),
         font_size: TYPE_CAPTION,
+        ..default()
+    };
+    // Glyph rendered at display size — Unicode emoji standing in for
+    // the per-mode artwork. Centred at the top of the tile.
+    let font_glyph = TextFont {
+        font: font_handle,
+        font_size: TYPE_DISPLAY,
         ..default()
     };
 
@@ -975,6 +1019,7 @@ fn spawn_mode_card(
     let title_color = if unlocked { TEXT_PRIMARY } else { TEXT_DISABLED };
     let desc_color = if unlocked { TEXT_SECONDARY } else { TEXT_DISABLED };
     let border_color = if unlocked { BORDER_SUBTLE } else { BORDER_STRONG };
+    let glyph_color = if unlocked { ACCENT_PRIMARY } else { TEXT_DISABLED };
 
     parent
         .spawn((
@@ -985,9 +1030,13 @@ fn spawn_mode_card(
             Button,
             Node {
                 flex_direction: FlexDirection::Column,
-                row_gap: VAL_SPACE_1,
+                row_gap: VAL_SPACE_2,
                 padding: UiRect::all(VAL_SPACE_3),
-                width: Val::Percent(100.0),
+                // 48% per tile + the row's column_gap = a clean 2-up
+                // grid that wraps to a single tile on the third row.
+                width: Val::Percent(48.0),
+                min_height: Val::Px(180.0),
+                align_items: AlignItems::Center,
                 border: UiRect::all(Val::Px(1.0)),
                 border_radius: BorderRadius::all(Val::Px(RADIUS_MD)),
                 ..default()
@@ -996,12 +1045,20 @@ fn spawn_mode_card(
             BorderColor::all(border_color),
         ))
         .with_children(|c| {
+            // Centerpiece glyph — placeholder for real per-mode art.
+            c.spawn((
+                Text::new(mode.glyph().to_string()),
+                font_glyph.clone(),
+                TextColor(glyph_color),
+            ));
+
             // Title row — title text on the left, hotkey chip on the right.
             c.spawn(Node {
                 flex_direction: FlexDirection::Row,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::SpaceBetween,
                 column_gap: VAL_SPACE_3,
+                width: Val::Percent(100.0),
                 ..default()
             })
             .with_children(|row| {
