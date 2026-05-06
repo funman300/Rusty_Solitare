@@ -73,6 +73,32 @@ pub struct GameStatePath(pub Option<PathBuf>);
 #[derive(Resource, Debug, Clone)]
 pub struct ReplayPath(pub Option<PathBuf>);
 
+/// Holds the saved-on-disk in-progress game between plugin build and
+/// the player's answer to the "Continue or start a new game?" prompt.
+///
+/// Some(game) at startup means a previously-saved game existed and had
+/// real moves on it. The restore-prompt modal swaps it into
+/// `GameStateResource` if the player picks Continue, or drops it (and
+/// lets `handle_new_game` clean up the disk file) on New Game. None for
+/// first-launch installs and for save files that contain a fresh deal
+/// with no moves yet — there's nothing meaningful to "continue" there.
+#[derive(Resource, Debug, Default)]
+pub struct PendingRestoredGame(pub Option<GameState>);
+
+/// Marker on the "Welcome back — Continue or start a new game?" modal
+/// scrim. Despawning the scrim cascades to the card and children, so a
+/// single `commands.entity(scrim).despawn()` tears the modal down.
+#[derive(Component, Debug)]
+pub struct RestorePromptScreen;
+
+/// Marker on the modal's primary "Continue" button.
+#[derive(Component, Debug)]
+pub struct RestoreContinueButton;
+
+/// Marker on the modal's secondary "New game" button.
+#[derive(Component, Debug)]
+pub struct RestoreNewGameButton;
+
 /// In-memory accumulator for [`ReplayMove`] entries during the current
 /// game. Cleared on every new-game start; frozen into a [`Replay`] and
 /// flushed to disk by [`record_replay_on_win`] when the player wins.
@@ -110,11 +136,32 @@ impl GamePlugin {
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         let path = game_state_file_path();
-        // Restore any saved in-progress game, falling back to a fresh deal.
-        let initial_state = path
-            .as_deref()
-            .and_then(load_game_state_from)
-            .unwrap_or_else(|| GameState::new(seed_from_system_time(), DrawMode::DrawOne));
+        // Try to load any saved in-progress game. We don't want to
+        // silently restore a half-played game on launch — the player
+        // should get to decide between continuing and starting fresh.
+        // So: if there IS a saved game with progress and it isn't
+        // already won, hold it in `PendingRestoredGame` and let the
+        // restore-prompt modal swap it into `GameStateResource` if
+        // the player picks Continue. Otherwise put it directly into
+        // `GameStateResource` (existing behaviour for un-played /
+        // won deals which there's nothing to ask about).
+        let saved = path.as_deref().and_then(load_game_state_from);
+        let prompt_worthy = saved
+            .as_ref()
+            .is_some_and(|g| g.move_count > 0 && !g.is_won);
+        let (initial_state, pending_restore) = if prompt_worthy {
+            (
+                GameState::new(seed_from_system_time(), DrawMode::DrawOne),
+                saved,
+            )
+        } else {
+            (
+                saved.unwrap_or_else(|| {
+                    GameState::new(seed_from_system_time(), DrawMode::DrawOne)
+                }),
+                None,
+            )
+        };
 
         // One-shot migration from the legacy single-slot
         // `latest_replay.json` to the rolling history at `replays.json`.
@@ -137,6 +184,7 @@ impl Plugin for GamePlugin {
         app.insert_resource(GameStateResource(initial_state))
             .insert_resource(GameStatePath(path))
             .insert_resource(ReplayPath(history_path))
+            .insert_resource(PendingRestoredGame(pending_restore))
             .init_resource::<RecordingReplay>()
             .init_resource::<PendingNewGameSeed>()
             .init_resource::<DragState>()
@@ -173,6 +221,11 @@ impl Plugin for GamePlugin {
             .add_systems(Update, handle_confirm_button_input.after(GameMutation))
             .add_systems(Update, handle_game_over_input.after(GameMutation))
             .add_systems(Update, handle_game_over_button_input.after(GameMutation))
+            // Restore prompt: spawn the modal once the splash is gone,
+            // route Continue / New Game intents back into the existing
+            // GameMutation flow.
+            .add_systems(Update, spawn_restore_prompt_if_pending)
+            .add_systems(Update, handle_restore_prompt.before(GameMutation))
             .init_resource::<AutoSaveTimer>()
             .add_systems(Update, tick_elapsed_time)
             .add_systems(Update, auto_save_game_state)
@@ -462,6 +515,111 @@ pub struct ConfirmNoButton;
 /// and "No (N)" — those were not real Button entities, so the player
 /// had no hover / press feedback and the modal felt like a debug panel
 /// (the user's smoke-test "#2 complaint").
+/// Update-schedule system: once the splash overlay is gone and there's
+/// a pending restored game waiting for the player's answer, spawn the
+/// "Welcome back — Continue or start a new game?" modal. Idempotent —
+/// the existing `RestorePromptScreen` query gates against duplicate
+/// spawns if Update fires before the player clicks.
+fn spawn_restore_prompt_if_pending(
+    mut commands: Commands,
+    pending: Res<PendingRestoredGame>,
+    splash: Query<(), With<crate::splash_plugin::SplashRoot>>,
+    existing: Query<(), With<RestorePromptScreen>>,
+    font_res: Option<Res<FontResource>>,
+) {
+    if pending.0.is_none() || !splash.is_empty() || !existing.is_empty() {
+        return;
+    }
+    spawn_modal(
+        &mut commands,
+        RestorePromptScreen,
+        ui_theme::Z_MODAL_PANEL,
+        |card| {
+            spawn_modal_header(card, "Welcome back", font_res.as_deref());
+            spawn_modal_body_text(
+                card,
+                "You have an in-progress game. Continue where you left off, or start a new one?",
+                ui_theme::TEXT_SECONDARY,
+                font_res.as_deref(),
+            );
+            spawn_modal_actions(card, |actions| {
+                spawn_modal_button(
+                    actions,
+                    RestoreNewGameButton,
+                    "New game",
+                    Some("N"),
+                    ButtonVariant::Secondary,
+                    font_res.as_deref(),
+                );
+                spawn_modal_button(
+                    actions,
+                    RestoreContinueButton,
+                    "Continue",
+                    Some("Enter"),
+                    ButtonVariant::Primary,
+                    font_res.as_deref(),
+                );
+            });
+        },
+    );
+}
+
+/// Click handlers + keyboard shortcuts for the restore prompt.
+///
+/// Continue (Enter / C) — swaps the saved game into `GameStateResource`
+/// and writes a `StateChangedEvent` so card sprites resync to the
+/// restored layout.
+/// New game (N) — drops the saved game and writes
+/// `NewGameRequestEvent { confirmed: true }`. The existing
+/// `handle_new_game` flow takes over: deletes `game_state.json`, deals
+/// a fresh game, fires `StateChangedEvent`. `confirmed: true` skips
+/// the abandon-current-game confirm dialog (the player has already
+/// confirmed by clicking New game here).
+#[allow(clippy::too_many_arguments)]
+fn handle_restore_prompt(
+    mut commands: Commands,
+    keys: Option<Res<ButtonInput<KeyCode>>>,
+    screens: Query<Entity, With<RestorePromptScreen>>,
+    continue_buttons: Query<&Interaction, (With<RestoreContinueButton>, Changed<Interaction>)>,
+    new_game_buttons: Query<&Interaction, (With<RestoreNewGameButton>, Changed<Interaction>)>,
+    mut pending: ResMut<PendingRestoredGame>,
+    mut game: ResMut<GameStateResource>,
+    mut changed: MessageWriter<StateChangedEvent>,
+    mut new_game: MessageWriter<NewGameRequestEvent>,
+) {
+    if screens.is_empty() {
+        return;
+    }
+    let key_continue = keys
+        .as_ref()
+        .is_some_and(|k| k.just_pressed(KeyCode::Enter) || k.just_pressed(KeyCode::KeyC));
+    let key_new = keys.as_ref().is_some_and(|k| k.just_pressed(KeyCode::KeyN));
+    let click_continue = continue_buttons
+        .iter()
+        .any(|i| *i == Interaction::Pressed);
+    let click_new = new_game_buttons.iter().any(|i| *i == Interaction::Pressed);
+
+    if key_continue || click_continue {
+        if let Some(restored) = pending.0.take() {
+            game.0 = restored;
+            changed.write(StateChangedEvent);
+        }
+        for entity in &screens {
+            commands.entity(entity).despawn();
+        }
+    } else if key_new || click_new {
+        pending.0 = None;
+        for entity in &screens {
+            commands.entity(entity).despawn();
+        }
+        new_game.write(NewGameRequestEvent {
+            seed: None,
+            mode: None,
+            confirmed: true,
+        });
+    }
+}
+
 fn spawn_confirm_dialog(
     commands: &mut Commands,
     original_request: NewGameRequestEvent,
