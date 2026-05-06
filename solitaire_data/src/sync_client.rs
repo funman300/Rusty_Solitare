@@ -358,13 +358,12 @@ impl SyncProvider for SolitaireServerClient {
         extract_leaderboard_body(resp).await
     }
 
-    /// Upload a winning replay to `POST /api/replays`. Mirrors the
-    /// `push` auth flow: 401 triggers a token refresh and one retry.
-    /// Non-success statuses are surfaced as the relevant `SyncError`
-    /// variant so the engine's push-on-win system can downgrade
-    /// network/auth failures into a quiet log without aborting the
-    /// game flow.
-    async fn push_replay(&self, replay: &Replay) -> Result<(), SyncError> {
+    /// Upload a winning replay to `POST /api/replays`. On success the
+    /// server returns `{ "id": "<uuid>" }`; this method composes that
+    /// id with the configured base URL into the player-shareable
+    /// `<base>/replays/<id>` link and returns it. Mirrors the `push`
+    /// auth flow: 401 triggers a token refresh and one retry.
+    async fn push_replay(&self, replay: &Replay) -> Result<String, SyncError> {
         let token = self.access_token()?;
         let url = format!("{}/api/replays", self.base_url);
 
@@ -388,22 +387,38 @@ impl SyncProvider for SolitaireServerClient {
                 .send()
                 .await
                 .map_err(|e| SyncError::Network(e.to_string()))?;
-            return check_replay_status(resp.status());
+            return self.share_url_from_response(resp).await;
         }
 
-        check_replay_status(resp.status())
+        self.share_url_from_response(resp).await
     }
 }
 
-fn check_replay_status(status: reqwest::StatusCode) -> Result<(), SyncError> {
-    if status.is_success() {
-        Ok(())
-    } else if status == reqwest::StatusCode::UNAUTHORIZED
-        || status == reqwest::StatusCode::FORBIDDEN
-    {
-        Err(SyncError::Auth(format!("server returned {status}")))
-    } else {
-        Err(SyncError::Network(format!("server returned {status}")))
+impl SolitaireServerClient {
+    /// Pulled out of `push_replay` so both the first attempt and the
+    /// post-401-retry attempt go through the same parse path.
+    async fn share_url_from_response(
+        &self,
+        resp: reqwest::Response,
+    ) -> Result<String, SyncError> {
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(if status == reqwest::StatusCode::UNAUTHORIZED
+                || status == reqwest::StatusCode::FORBIDDEN
+            {
+                SyncError::Auth(format!("server returned {status}"))
+            } else {
+                SyncError::Network(format!("server returned {status}"))
+            });
+        }
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| SyncError::Serialization(e.to_string()))?;
+        let id = body["id"].as_str().ok_or_else(|| {
+            SyncError::Serialization("upload response missing `id`".into())
+        })?;
+        Ok(format!("{}/replays/{}", self.base_url, id))
     }
 }
 

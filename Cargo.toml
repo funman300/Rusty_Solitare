@@ -30,6 +30,7 @@ dirs        = "6"
 keyring     = "4"
 keyring-core = "1"
 reqwest     = { version = "0.13", features = ["json", "rustls", "rustls-native-certs"], default-features = false }
+arboard     = { version = "3", default-features = false }
 
 solitaire_core   = { path = "solitaire_core" }
 solitaire_sync   = { path = "solitaire_sync" }

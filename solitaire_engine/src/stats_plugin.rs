@@ -74,6 +74,26 @@ pub struct StatsCell;
 #[derive(Resource, Debug, Default, Clone)]
 pub struct ReplayHistoryResource(pub ReplayHistory);
 
+/// Most recent shareable replay URL written by `sync_plugin` after the
+/// `SyncProvider::push_replay` task completes successfully. `None`
+/// until the player wins a game on a server-backed sync backend;
+/// repopulated on each subsequent win.
+///
+/// The Stats overlay's "Copy share link" button reads from here and
+/// writes the URL to the OS clipboard via `arboard`. Not persisted to
+/// disk — the URL is recoverable by re-uploading the same replay
+/// (still in `replays.json`), so the session-bound lifetime is fine
+/// for a v1 share affordance.
+#[derive(Resource, Debug, Default, Clone)]
+pub struct LastSharedReplayUrl(pub Option<String>);
+
+/// Marker on the "Copy share link" button inside the Stats modal.
+/// Click writes [`LastSharedReplayUrl`] to the OS clipboard via
+/// `arboard` and surfaces a confirmation toast. Hidden / disabled
+/// when no shareable URL is available.
+#[derive(Component, Debug)]
+pub struct CopyShareLinkButton;
+
 /// Currently-selected index into [`ReplayHistoryResource::0`].`replays`.
 ///
 /// `0` is the most recent win and is the default on every modal open.
@@ -175,6 +195,7 @@ impl Plugin for StatsPlugin {
             .insert_resource(ReplayHistoryResource(initial_history))
             .init_resource::<SelectedReplayIndex>()
             .insert_resource(LatestReplayPath(replay_path))
+            .init_resource::<LastSharedReplayUrl>()
             .add_message::<GameWonEvent>()
             .add_message::<NewGameRequestEvent>()
             .add_message::<ForfeitEvent>()
@@ -210,6 +231,7 @@ impl Plugin for StatsPlugin {
                 refresh_replay_history_on_win.after(GameMutation),
             )
             .add_systems(Update, handle_watch_replay_button)
+            .add_systems(Update, handle_copy_share_link_button)
             .add_systems(
                 Update,
                 (handle_replay_selector_buttons, repaint_replay_selector_caption).chain(),
@@ -277,6 +299,48 @@ fn refresh_replay_history_on_win(
 /// resets the live game to the recorded deal and ticks through the
 /// move list via [`crate::replay_playback`]; the
 /// [`crate::replay_overlay`] banner surfaces while playback runs.
+/// Copies [`LastSharedReplayUrl`] to the OS clipboard via `arboard`
+/// and surfaces a confirmation toast. When no URL is in hand (no win
+/// yet on a server-backed sync backend, local-only mode, or upload
+/// failed) the button still acknowledges the click but explains why
+/// the clipboard wasn't written. `arboard::Clipboard::new()` failures
+/// are logged + surfaced as a generic "couldn't reach the clipboard"
+/// toast rather than swallowed — they're rare but worth diagnosing.
+fn handle_copy_share_link_button(
+    buttons: Query<&Interaction, (With<CopyShareLinkButton>, Changed<Interaction>)>,
+    last_url: Res<LastSharedReplayUrl>,
+    mut toast: MessageWriter<InfoToastEvent>,
+) {
+    if !buttons.iter().any(|i| *i == Interaction::Pressed) {
+        return;
+    }
+    let Some(url) = last_url.0.as_ref() else {
+        toast.write(InfoToastEvent(
+            "No share link yet \u{2014} win a game on a server-backed sync to upload one.".to_string(),
+        ));
+        return;
+    };
+    match arboard::Clipboard::new() {
+        Ok(mut cb) => match cb.set_text(url.clone()) {
+            Ok(()) => {
+                toast.write(InfoToastEvent(format!("Copied: {url}")));
+            }
+            Err(e) => {
+                warn!("clipboard write failed: {e}");
+                toast.write(InfoToastEvent(
+                    "Couldn't write to clipboard \u{2014} share link wasn't copied.".to_string(),
+                ));
+            }
+        },
+        Err(e) => {
+            warn!("clipboard init failed: {e}");
+            toast.write(InfoToastEvent(
+                "Couldn't reach the clipboard \u{2014} share link wasn't copied.".to_string(),
+            ));
+        }
+    }
+}
+
 fn handle_watch_replay_button(
     mut commands: Commands,
     buttons: Query<&Interaction, (With<WatchReplayButton>, Changed<Interaction>)>,
@@ -807,6 +871,19 @@ fn spawn_stats_screen(
                 actions,
                 WatchReplayButton,
                 "Watch replay",
+                None,
+                ButtonVariant::Secondary,
+                font_res,
+            );
+            // Copy share link only renders when a sharable URL is in
+            // hand. The button is intentionally absent (rather than
+            // disabled) when no upload has happened yet — keeps the
+            // action bar free of dead controls in the local-only and
+            // first-launch cases.
+            spawn_modal_button(
+                actions,
+                CopyShareLinkButton,
+                "Copy share link",
                 None,
                 ButtonVariant::Secondary,
                 font_res,

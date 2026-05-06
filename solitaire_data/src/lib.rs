@@ -56,13 +56,13 @@ pub trait SyncProvider: Send + Sync {
     async fn delete_account(&self) -> Result<(), SyncError> {
         Ok(())
     }
-    /// Upload a winning replay to the backend so it's available for web
-    /// playback at `<server>/replays/<id>`. Default returns
-    /// `UnsupportedPlatform` so backends without a server (e.g.
-    /// `LocalOnlyProvider`) are silently no-op'd by the engine's
-    /// push-on-win system, matching the same pattern `pull` / `push`
-    /// follow.
-    async fn push_replay(&self, _replay: &crate::replay::Replay) -> Result<(), SyncError> {
+    /// Upload a winning replay to the backend. On success, returns the
+    /// shareable web URL the player can copy to their clipboard
+    /// (`<server>/replays/<id>`). Default returns `UnsupportedPlatform`
+    /// so backends without a server (e.g. `LocalOnlyProvider`) are
+    /// silently no-op'd by the engine's push-on-win system, matching
+    /// the same pattern `pull` / `push` follow.
+    async fn push_replay(&self, _replay: &crate::replay::Replay) -> Result<String, SyncError> {
         Err(SyncError::UnsupportedPlatform)
     }
 }
@@ -101,7 +101,7 @@ impl SyncProvider for Box<dyn SyncProvider + Send + Sync> {
     async fn delete_account(&self) -> Result<(), SyncError> {
         (**self).delete_account().await
     }
-    async fn push_replay(&self, replay: &crate::replay::Replay) -> Result<(), SyncError> {
+    async fn push_replay(&self, replay: &crate::replay::Replay) -> Result<String, SyncError> {
         (**self).push_replay(replay).await
     }
 }

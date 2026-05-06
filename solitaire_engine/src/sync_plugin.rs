@@ -29,7 +29,7 @@ use crate::events::{GameWonEvent, ManualSyncRequestEvent, SyncCompleteEvent};
 use crate::game_plugin::RecordingReplay;
 use crate::progress_plugin::{ProgressResource, ProgressStoragePath};
 use crate::resources::{GameStateResource, SyncStatus, SyncStatusResource};
-use crate::stats_plugin::{StatsResource, StatsStoragePath};
+use crate::stats_plugin::{LastSharedReplayUrl, StatsResource, StatsStoragePath};
 
 // ---------------------------------------------------------------------------
 // Public resources
@@ -56,6 +56,13 @@ pub struct PullTaskResult(pub Option<Result<SyncPayload, SyncError>>);
 /// each frame without blocking the main thread.
 #[derive(Resource, Default)]
 struct PullTask(Option<Task<Result<SyncPayload, SyncError>>>);
+
+/// Holds the in-flight winning-replay upload task so the polling
+/// system can harvest the resulting share URL on the main thread
+/// without blocking. `None` outside an active upload; `Some(task)`
+/// from `GameWonEvent` until the response lands.
+#[derive(Resource, Default)]
+struct PendingReplayUpload(Option<Task<Result<String, SyncError>>>);
 
 // ---------------------------------------------------------------------------
 // Plugin struct
@@ -94,12 +101,18 @@ impl Plugin for SyncPlugin {
             .init_resource::<SyncStatusResource>()
             .init_resource::<PullTaskResult>()
             .init_resource::<PullTask>()
+            .init_resource::<PendingReplayUpload>()
             .add_message::<ManualSyncRequestEvent>()
             .add_message::<SyncCompleteEvent>()
             .add_systems(Startup, start_pull)
             .add_systems(
                 Update,
-                (poll_pull_result, handle_manual_sync_request, push_replay_on_win),
+                (
+                    poll_pull_result,
+                    handle_manual_sync_request,
+                    push_replay_on_win,
+                    poll_replay_upload_result,
+                ),
             )
             .add_systems(Last, push_on_exit);
     }
@@ -282,6 +295,7 @@ fn push_replay_on_win(
     provider: Res<SyncProviderResource>,
     game: Res<GameStateResource>,
     recording: Res<RecordingReplay>,
+    mut pending: ResMut<PendingReplayUpload>,
 ) {
     for ev in wins.read() {
         // Empty-recording guard mirrors `record_replay_on_win` —
@@ -300,15 +314,39 @@ fn push_replay_on_win(
             recording.moves.clone(),
         );
         let provider = provider.0.clone();
-        AsyncComputeTaskPool::get()
-            .spawn(async move {
-                match provider.push_replay(&replay).await {
-                    Ok(()) => {}
-                    Err(SyncError::UnsupportedPlatform) => {}
-                    Err(e) => warn!("replay upload failed: {e}"),
-                }
-            })
-            .detach();
+        let task = AsyncComputeTaskPool::get()
+            .spawn(async move { provider.push_replay(&replay).await });
+        // If a previous upload is still in flight, drop it — the most
+        // recent win is the one whose share link the player will care
+        // about. Bevy's `Task` Drop cancels cooperatively.
+        pending.0 = Some(task);
+    }
+}
+
+/// Update-schedule system: harvests the upload task's result on the
+/// main thread once it resolves. On success writes the share URL to
+/// [`LastSharedReplayUrl`] so the Stats overlay's Copy button has
+/// something to send to the clipboard. On `UnsupportedPlatform` (the
+/// `LocalOnlyProvider` no-op path) clears the URL silently. Real
+/// network / auth errors log a warn and clear the URL.
+fn poll_replay_upload_result(
+    mut pending: ResMut<PendingReplayUpload>,
+    mut last_url: ResMut<LastSharedReplayUrl>,
+) {
+    let Some(task) = pending.0.as_mut() else {
+        return;
+    };
+    let Some(result) = future::block_on(future::poll_once(task)) else {
+        return;
+    };
+    pending.0 = None;
+    match result {
+        Ok(url) => last_url.0 = Some(url),
+        Err(SyncError::UnsupportedPlatform) => last_url.0 = None,
+        Err(e) => {
+            warn!("replay upload failed: {e}");
+            last_url.0 = None;
+        }
     }
 }
 
