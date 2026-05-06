@@ -36,8 +36,9 @@ use crate::settings_plugin::{SettingsChangedEvent, SettingsResource, SettingsSto
 use crate::stats_plugin::StatsResource;
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_body_text, spawn_modal_button,
-    spawn_modal_header, ButtonVariant,
+    spawn_modal_header, ButtonVariant, ModalScrim,
 };
+use bevy::ecs::system::SystemParam;
 use crate::ui_theme::{
     self, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY_LG, TYPE_CAPTION, VAL_SPACE_3,
 };
@@ -126,15 +127,24 @@ impl Plugin for PausePlugin {
     }
 }
 
+/// Bundles the modal-related queries `toggle_pause` reads each tick.
+/// Pulled into a [`SystemParam`] so the system stays under Bevy's 16-
+/// parameter cap after the cross-modal Esc guard query was added.
+#[derive(SystemParam)]
+struct PauseModalQueries<'w, 's> {
+    pause_screens: Query<'w, 's, Entity, With<PauseScreen>>,
+    forfeit_screens: Query<'w, 's, Entity, With<ForfeitConfirmScreen>>,
+    game_over_screens: Query<'w, 's, Entity, With<GameOverScreen>>,
+    other_modal_scrims: Query<'w, 's, Entity, (With<ModalScrim>, Without<PauseScreen>)>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn toggle_pause(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     mut requests: MessageReader<PauseRequestEvent>,
     mut paused: ResMut<PausedResource>,
-    screens: Query<Entity, With<PauseScreen>>,
-    forfeit_screens: Query<Entity, With<ForfeitConfirmScreen>>,
-    game_over_screens: Query<Entity, With<GameOverScreen>>,
+    modal_queries: PauseModalQueries<'_, '_>,
     game: Option<Res<GameStateResource>>,
     path: Option<Res<GameStatePath>>,
     progress: Option<Res<ProgressResource>>,
@@ -145,6 +155,13 @@ fn toggle_pause(
     mut changed: MessageWriter<StateChangedEvent>,
     selection: Option<Res<SelectionState>>,
 ) {
+    let PauseModalQueries {
+        pause_screens: screens,
+        forfeit_screens,
+        game_over_screens,
+        other_modal_scrims,
+    } = modal_queries;
+
     // Either Esc or a click on the HUD "Pause" button (which fires
     // PauseRequestEvent) opens or closes the overlay. Drain the queue so a
     // burst of clicks doesn't queue future toggles.
@@ -155,6 +172,16 @@ fn toggle_pause(
     // Forfeit confirm modal eats Esc — let `handle_forfeit_keyboard`
     // close it instead of toggling pause.
     if !forfeit_screens.is_empty() {
+        return;
+    }
+    // Any other modal (Confirm New Game, Restore, Home, Onboarding,
+    // Settings, etc.) owns its own dismissal — pause must not stack
+    // on top of it. Without this guard a single Esc both closes the
+    // open modal AND spawns the pause overlay underneath, leaving the
+    // player on a screen they didn't ask for. The HUD-button path
+    // (`button_clicked`) is gated too; clicking Pause while another
+    // modal is up is almost always an accident.
+    if !other_modal_scrims.is_empty() {
         return;
     }
     // If a card is currently selected, let SelectionPlugin handle this Escape
