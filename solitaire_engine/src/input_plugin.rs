@@ -1310,32 +1310,37 @@ fn handle_double_click(
         // Priority 2: if the player clicked the base of a multi-card face-up
         // stack (card_ids.len() > 1), try moving the whole stack to another
         // tableau column.
-        if card_ids.len() > 1 {
-            let Some(bottom_card) = game.0.piles.get(&pile)
-                .and_then(|p| p.cards.get(stack_index)) else { return };
-            if let Some((dest, count)) = best_tableau_destination_for_stack(
+        if card_ids.len() > 1
+            && let Some(bottom_card) = game.0.piles.get(&pile)
+                .and_then(|p| p.cards.get(stack_index))
+            && let Some((dest, count)) = best_tableau_destination_for_stack(
                 bottom_card,
                 &pile,
                 &game.0,
                 card_ids.len(),
-            ) {
-                moves.write(MoveRequestEvent {
-                    from: pile,
-                    to: dest,
-                    count,
-                });
-            } else {
-                // No legal destination for the stack — play the invalid-move
-                // sound and shake the source pile cards as feedback.
-                // `MoveRejectedEvent` with `from == to` routes the shake to
-                // the source pile (which `start_shake_anim` reads from `ev.to`).
-                rejected.write(MoveRejectedEvent {
-                    from: pile.clone(),
-                    to: pile,
-                    count: card_ids.len(),
-                });
-            }
+            )
+        {
+            moves.write(MoveRequestEvent {
+                from: pile,
+                to: dest,
+                count,
+            });
+            return;
         }
+
+        // Both priorities failed — play the invalid-move sound and shake
+        // the source pile as feedback. `MoveRejectedEvent` with
+        // `from == to` routes the shake to the source pile (which
+        // `start_shake_anim` reads from `ev.to`). Pre-fix, this branch
+        // only fired for multi-card stacks, so a double-click on a
+        // single card with no legal destination did nothing — no
+        // sound, no shake. Now both single-card and stack misses get
+        // the same feedback.
+        rejected.write(MoveRejectedEvent {
+            from: pile.clone(),
+            to: pile,
+            count: card_ids.len(),
+        });
     } else {
         // Single click — record the time.
         last_click.insert(top_card_id, now);
