@@ -25,7 +25,7 @@ use bevy::prelude::{App, Plugin, Resource, Startup};
 use serde::Deserialize;
 
 use super::ThemeMeta;
-use crate::assets::{user_theme_dir, DEFAULT_THEME_MANIFEST_URL};
+use crate::assets::{user_theme_dir, DEFAULT_THEME_MANIFEST_URL, RUSTY_PIXEL_THEME_MANIFEST_URL};
 
 /// One entry in the [`ThemeRegistry`] — the data the picker UI needs
 /// to render a row and load the theme on selection.
@@ -98,10 +98,24 @@ fn build_registry_on_startup(mut registry: bevy::ecs::system::ResMut<ThemeRegist
 /// Pure helper: builds a registry given an explicit user-themes
 /// directory. Tests pass a temp dir; production uses
 /// [`user_theme_dir`].
+///
+/// Order: bundled built-ins first (default, then rusty-pixel), then
+/// user themes in `read_dir` order. User themes whose `id` collides
+/// with a bundled built-in are silently dropped — built-ins win the
+/// collision because they're guaranteed to be a complete, valid set;
+/// the user's overriding copy may be partial or stale and silently
+/// preferring a complete-but-different theme is less surprising than
+/// crashing on a missing face.
 pub fn build_registry(user_dir: &Path) -> ThemeRegistry {
     let mut entries = Vec::new();
     entries.push(default_entry());
-    entries.extend(discover_user_themes(user_dir));
+    entries.push(rusty_pixel_entry());
+    let bundled_ids: std::collections::HashSet<String> =
+        entries.iter().map(|e| e.id.clone()).collect();
+    let user = discover_user_themes(user_dir)
+        .into_iter()
+        .filter(|t| !bundled_ids.contains(&t.id));
+    entries.extend(user);
     ThemeRegistry { entries }
 }
 
@@ -119,6 +133,26 @@ fn default_entry() -> ThemeEntry {
             version: "1.0".to_string(),
             card_aspect: (2, 3),
             pixel_art: false,
+        },
+    }
+}
+
+/// The bundled rusty-pixel theme entry — pixel-art faces by Claude
+/// Design, embedded under `embedded://solitaire_engine/assets/themes/rusty-pixel/`.
+/// Inserted alongside the default so the picker offers both
+/// out-of-the-box on a fresh install with no user themes directory.
+fn rusty_pixel_entry() -> ThemeEntry {
+    ThemeEntry {
+        id: "rusty-pixel".to_string(),
+        display_name: "Rusty Pixel".to_string(),
+        manifest_url: RUSTY_PIXEL_THEME_MANIFEST_URL.to_string(),
+        meta: ThemeMeta {
+            id: "rusty-pixel".to_string(),
+            name: "Rusty Pixel".to_string(),
+            author: "Claude Design".to_string(),
+            version: "0.1.0".to_string(),
+            card_aspect: (2, 3),
+            pixel_art: true,
         },
     }
 }
@@ -240,20 +274,22 @@ mod tests {
     }
 
     #[test]
-    fn empty_user_dir_yields_only_the_default_entry() {
+    fn empty_user_dir_yields_only_the_bundled_built_ins() {
         let tmp = tempfile::tempdir().unwrap();
         let registry = build_registry(tmp.path());
-        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.len(), 2, "default + rusty-pixel always present");
         assert_eq!(registry.entries[0].id, "default");
+        assert_eq!(registry.entries[1].id, "rusty-pixel");
     }
 
     #[test]
-    fn nonexistent_user_dir_still_yields_default() {
+    fn nonexistent_user_dir_still_yields_bundled_built_ins() {
         let registry = build_registry(Path::new(
             "/definitely/not/a/real/path/should/not/panic",
         ));
-        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.len(), 2);
         assert_eq!(registry.entries[0].id, "default");
+        assert_eq!(registry.entries[1].id, "rusty-pixel");
     }
 
     #[test]
@@ -264,10 +300,38 @@ mod tests {
         write_manifest(&theme_dir, "midnight", "Midnight");
 
         let registry = build_registry(tmp.path());
-        assert_eq!(registry.len(), 2);
+        assert_eq!(registry.len(), 3, "default + rusty-pixel + midnight");
         let entry = registry.find("midnight").expect("midnight registered");
         assert_eq!(entry.display_name, "Midnight");
         assert_eq!(entry.manifest_url, "themes://midnight/theme.ron");
+    }
+
+    #[test]
+    fn user_theme_id_collision_with_bundled_is_dropped() {
+        // A user-supplied directory whose `id` matches a bundled
+        // built-in (rusty-pixel) must not produce a duplicate
+        // registry entry. The bundled version wins because it's
+        // guaranteed complete; the user's overriding copy may be
+        // partial, stale, or otherwise broken.
+        let tmp = tempfile::tempdir().unwrap();
+        let theme_dir = tmp.path().join("rusty-pixel");
+        fs::create_dir_all(&theme_dir).unwrap();
+        write_manifest(&theme_dir, "rusty-pixel", "User Override");
+
+        let registry = build_registry(tmp.path());
+        assert_eq!(
+            registry.len(), 2,
+            "user override of bundled id must not appear as a duplicate",
+        );
+        let entry = registry.find("rusty-pixel").expect("rusty-pixel registered");
+        assert_eq!(
+            entry.display_name, "Rusty Pixel",
+            "bundled entry's display_name wins over the user override",
+        );
+        assert_eq!(
+            entry.manifest_url, RUSTY_PIXEL_THEME_MANIFEST_URL,
+            "bundled embed:// URL wins over the user themes:// URL",
+        );
     }
 
     #[test]
@@ -310,8 +374,9 @@ mod tests {
         write_manifest(&theme_dir, "../etc/passwd", "Evil");
 
         let registry = build_registry(tmp.path());
-        assert_eq!(registry.len(), 1, "escape attempt must not register");
+        assert_eq!(registry.len(), 2, "escape attempt must not register; built-ins remain");
         assert_eq!(registry.entries[0].id, "default");
+        assert_eq!(registry.entries[1].id, "rusty-pixel");
     }
 
     #[test]
@@ -322,7 +387,11 @@ mod tests {
         fs::write(lonely.join("readme.md"), "wrong filename").unwrap();
 
         let registry = build_registry(tmp.path());
-        assert_eq!(registry.len(), 1);
+        assert_eq!(
+            registry.len(),
+            2,
+            "no user themes register; only the bundled built-ins remain",
+        );
     }
 
     #[test]
@@ -351,8 +420,9 @@ mod tests {
 
         refresh_registry(&mut registry, tmp.path());
 
-        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.len(), 2, "stale entry replaced; built-ins remain");
         assert_eq!(registry.entries[0].id, "default");
+        assert_eq!(registry.entries[1].id, "rusty-pixel");
         assert!(registry.find("stale").is_none());
     }
 

@@ -17,7 +17,8 @@ use bevy::prelude::*;
 use solitaire_core::card::{Rank, Suit};
 
 use crate::assets::{
-    default_theme_svg_bytes, rasterize_svg, user_theme_dir, DEFAULT_THEME_MANIFEST_URL,
+    default_theme_svg_bytes, rasterize_svg, rusty_pixel_theme_png_bytes, user_theme_dir,
+    DEFAULT_THEME_MANIFEST_URL, RUSTY_PIXEL_THEME_MANIFEST_URL,
 };
 use crate::card_plugin::CardImageSet;
 use crate::events::StateChangedEvent;
@@ -128,14 +129,30 @@ fn load_initial_theme(
     settings: Option<Res<crate::settings_plugin::SettingsResource>>,
     mut commands: Commands,
 ) {
-    let url = match settings.as_deref() {
-        Some(s) if s.0.selected_theme_id != "default" => {
-            format!("themes://{}/theme.ron", s.0.selected_theme_id)
-        }
-        _ => DEFAULT_THEME_MANIFEST_URL.to_string(),
-    };
+    let id = settings
+        .as_deref()
+        .map(|s| s.0.selected_theme_id.as_str())
+        .unwrap_or("default");
+    let url = manifest_url_for(id);
     let handle: Handle<CardTheme> = asset_server.load(url);
     commands.insert_resource(ActiveTheme(handle));
+}
+
+/// Resolves a theme id to its manifest asset URL.
+///
+/// Bundled built-ins (default, rusty-pixel) route to `embedded://`
+/// so the binary's compile-time-baked manifest + face files load
+/// without touching disk. Anything else routes to `themes://`,
+/// which `register_theme_asset_sources` points at the user themes
+/// directory. Callers (load_initial_theme,
+/// react_to_settings_theme_change) consult this helper instead of
+/// hard-coding the URL shape per id.
+fn manifest_url_for(theme_id: &str) -> String {
+    match theme_id {
+        "default" => DEFAULT_THEME_MANIFEST_URL.to_string(),
+        "rusty-pixel" => RUSTY_PIXEL_THEME_MANIFEST_URL.to_string(),
+        _ => format!("themes://{theme_id}/theme.ron"),
+    }
 }
 
 /// Watches [`crate::settings_plugin::SettingsChangedEvent`] and
@@ -163,11 +180,7 @@ fn react_to_settings_theme_change(
         return;
     }
 
-    let url = if new_id == "default" {
-        DEFAULT_THEME_MANIFEST_URL.to_string()
-    } else {
-        format!("themes://{new_id}/theme.ron")
-    };
+    let url = manifest_url_for(new_id);
     let handle: Handle<CardTheme> = asset_server.load(url);
     commands.insert_resource(ActiveTheme(handle));
 }
@@ -362,10 +375,19 @@ enum ThemePreviewBytes {
 ///   `<basename>.svg` then `<basename>.png`. Either branch returns
 ///   `None` on I/O failure (file missing, permission denied, etc.).
 fn read_theme_preview_bytes(theme_id: &str, basename: &str) -> Option<ThemePreviewBytes> {
+    // Bundled built-ins consult their embed tables before any
+    // filesystem I/O so the thumbnail works on a fresh install where
+    // the user themes directory doesn't exist yet.
     if theme_id == "default" {
         let filename = format!("{basename}.svg");
         return default_theme_svg_bytes(&filename)
             .map(|b| ThemePreviewBytes::Svg(b.to_vec()));
+    }
+    if theme_id == "rusty-pixel" {
+        let filename = format!("{basename}.png");
+        if let Some(bytes) = rusty_pixel_theme_png_bytes(&filename) {
+            return Some(ThemePreviewBytes::Png(bytes.to_vec()));
+        }
     }
     let dir = user_theme_dir().join(theme_id);
     if let Ok(bytes) = std::fs::read(dir.join(format!("{basename}.svg"))) {

@@ -155,6 +155,100 @@ const DEFAULT_THEME_SVGS: &[(&str, &[u8])] = &[
     embed_default_svg!("spades_king.svg"),
 ];
 
+/// Stable embedded asset URL of the bundled rusty-pixel theme manifest.
+///
+/// `theme/plugin.rs::manifest_url_for` uses this when the player
+/// selects "Rusty Pixel" so the manifest loads from the binary's
+/// embedded asset registry rather than `themes://` (which would
+/// require a user-supplied copy on disk).
+pub const RUSTY_PIXEL_THEME_MANIFEST_URL: &str =
+    "embedded://solitaire_engine/assets/themes/rusty-pixel/theme.ron";
+
+/// Path the embedded rusty-pixel theme manifest registers under,
+/// relative to the `embedded://` source root. Kept in lockstep with
+/// [`RUSTY_PIXEL_THEME_MANIFEST_URL`] by the unit test
+/// `rusty_pixel_theme_url_constant_matches_embedded_path`.
+const RUSTY_PIXEL_THEME_MANIFEST_PATH: &str =
+    "solitaire_engine/assets/themes/rusty-pixel/theme.ron";
+
+/// Bytes of the bundled rusty-pixel theme manifest. Mirrors the
+/// default-theme embed pattern — `include_bytes!` resolves at compile
+/// time so the binary ships the manifest even on machines whose
+/// `solitaire_engine/assets/` directory is absent at runtime.
+const RUSTY_PIXEL_THEME_MANIFEST_BYTES: &[u8] =
+    include_bytes!("../../assets/themes/rusty-pixel/theme.ron");
+
+/// Generates a `(stable_path, bytes)` entry for one rusty-pixel
+/// theme PNG. Mirrors [`embed_default_svg!`] for the second bundled
+/// theme — the path matches what `theme.ron` references.
+macro_rules! embed_rusty_pixel_png {
+    ($name:literal) => {
+        (
+            concat!("solitaire_engine/assets/themes/rusty-pixel/", $name),
+            include_bytes!(concat!("../../assets/themes/rusty-pixel/", $name)) as &[u8],
+        )
+    };
+}
+
+/// Every rusty-pixel theme PNG bundled into the binary. 53 entries:
+/// 52 face cards + 1 back. The macro pulls each PNG via
+/// `include_bytes!` so adding a new file is a one-line append.
+const RUSTY_PIXEL_THEME_PNGS: &[(&str, &[u8])] = &[
+    embed_rusty_pixel_png!("back.png"),
+    embed_rusty_pixel_png!("clubs_ace.png"),
+    embed_rusty_pixel_png!("clubs_2.png"),
+    embed_rusty_pixel_png!("clubs_3.png"),
+    embed_rusty_pixel_png!("clubs_4.png"),
+    embed_rusty_pixel_png!("clubs_5.png"),
+    embed_rusty_pixel_png!("clubs_6.png"),
+    embed_rusty_pixel_png!("clubs_7.png"),
+    embed_rusty_pixel_png!("clubs_8.png"),
+    embed_rusty_pixel_png!("clubs_9.png"),
+    embed_rusty_pixel_png!("clubs_10.png"),
+    embed_rusty_pixel_png!("clubs_jack.png"),
+    embed_rusty_pixel_png!("clubs_queen.png"),
+    embed_rusty_pixel_png!("clubs_king.png"),
+    embed_rusty_pixel_png!("diamonds_ace.png"),
+    embed_rusty_pixel_png!("diamonds_2.png"),
+    embed_rusty_pixel_png!("diamonds_3.png"),
+    embed_rusty_pixel_png!("diamonds_4.png"),
+    embed_rusty_pixel_png!("diamonds_5.png"),
+    embed_rusty_pixel_png!("diamonds_6.png"),
+    embed_rusty_pixel_png!("diamonds_7.png"),
+    embed_rusty_pixel_png!("diamonds_8.png"),
+    embed_rusty_pixel_png!("diamonds_9.png"),
+    embed_rusty_pixel_png!("diamonds_10.png"),
+    embed_rusty_pixel_png!("diamonds_jack.png"),
+    embed_rusty_pixel_png!("diamonds_queen.png"),
+    embed_rusty_pixel_png!("diamonds_king.png"),
+    embed_rusty_pixel_png!("hearts_ace.png"),
+    embed_rusty_pixel_png!("hearts_2.png"),
+    embed_rusty_pixel_png!("hearts_3.png"),
+    embed_rusty_pixel_png!("hearts_4.png"),
+    embed_rusty_pixel_png!("hearts_5.png"),
+    embed_rusty_pixel_png!("hearts_6.png"),
+    embed_rusty_pixel_png!("hearts_7.png"),
+    embed_rusty_pixel_png!("hearts_8.png"),
+    embed_rusty_pixel_png!("hearts_9.png"),
+    embed_rusty_pixel_png!("hearts_10.png"),
+    embed_rusty_pixel_png!("hearts_jack.png"),
+    embed_rusty_pixel_png!("hearts_queen.png"),
+    embed_rusty_pixel_png!("hearts_king.png"),
+    embed_rusty_pixel_png!("spades_ace.png"),
+    embed_rusty_pixel_png!("spades_2.png"),
+    embed_rusty_pixel_png!("spades_3.png"),
+    embed_rusty_pixel_png!("spades_4.png"),
+    embed_rusty_pixel_png!("spades_5.png"),
+    embed_rusty_pixel_png!("spades_6.png"),
+    embed_rusty_pixel_png!("spades_7.png"),
+    embed_rusty_pixel_png!("spades_8.png"),
+    embed_rusty_pixel_png!("spades_9.png"),
+    embed_rusty_pixel_png!("spades_10.png"),
+    embed_rusty_pixel_png!("spades_jack.png"),
+    embed_rusty_pixel_png!("spades_queen.png"),
+    embed_rusty_pixel_png!("spades_king.png"),
+];
+
 /// Registers asset sources that must be in place *before*
 /// `AssetPlugin` is built.
 ///
@@ -191,6 +285,7 @@ pub struct AssetSourcesPlugin;
 impl Plugin for AssetSourcesPlugin {
     fn build(&self, app: &mut App) {
         populate_embedded_default_theme(app);
+        populate_embedded_rusty_pixel_theme(app);
     }
 }
 
@@ -246,6 +341,43 @@ pub fn populate_embedded_default_theme(app: &mut App) {
     // Then every face + back SVG. The manifest references each by the
     // same relative path used here.
     for (path, bytes) in DEFAULT_THEME_SVGS {
+        registry.insert_asset(
+            std::path::PathBuf::from(*path),
+            std::path::Path::new(*path),
+            *bytes,
+        );
+    }
+}
+
+/// Returns the embedded PNG bytes for a single rusty-pixel theme file
+/// (e.g. `"back.png"` or `"spades_ace.png"`), or `None` when the
+/// filename is not bundled. Mirrors [`default_theme_svg_bytes`] for
+/// the second bundled theme so the picker thumbnail cache can read
+/// preview-sized art without going through the async asset graph.
+pub fn rusty_pixel_theme_png_bytes(filename: &str) -> Option<&'static [u8]> {
+    let suffix = format!("/{filename}");
+    RUSTY_PIXEL_THEME_PNGS
+        .iter()
+        .find(|(path, _)| path.ends_with(&suffix))
+        .map(|(_, bytes)| *bytes)
+}
+
+/// Pushes the bundled rusty-pixel theme manifest + every face/back
+/// PNG into the [`EmbeddedAssetRegistry`]. Pairs with
+/// [`populate_embedded_default_theme`] — both are called from
+/// [`AssetSourcesPlugin::build`] after `AssetPlugin` has set up the
+/// embedded source.
+pub fn populate_embedded_rusty_pixel_theme(app: &mut App) {
+    let registry = app
+        .world_mut()
+        .get_resource_or_insert_with(EmbeddedAssetRegistry::default);
+
+    registry.insert_asset(
+        std::path::PathBuf::from(RUSTY_PIXEL_THEME_MANIFEST_PATH),
+        std::path::Path::new(RUSTY_PIXEL_THEME_MANIFEST_PATH),
+        RUSTY_PIXEL_THEME_MANIFEST_BYTES,
+    );
+    for (path, bytes) in RUSTY_PIXEL_THEME_PNGS {
         registry.insert_asset(
             std::path::PathBuf::from(*path),
             std::path::Path::new(*path),
