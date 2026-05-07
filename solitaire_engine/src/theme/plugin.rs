@@ -187,6 +187,7 @@ fn sync_card_image_set_with_active_theme(
     themes: Res<Assets<CardTheme>>,
     mut card_image_set: Option<ResMut<CardImageSet>>,
     mut state_events: MessageWriter<StateChangedEvent>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let Some(active) = active else { return };
     let active_id = active.0.id();
@@ -207,11 +208,40 @@ fn sync_card_image_set_with_active_theme(
     let Some(theme) = themes.get(&active.0) else {
         return;
     };
+    if theme.meta.pixel_art {
+        apply_nearest_sampler_to_theme_images(theme, &mut images);
+    }
     let Some(card_image_set) = card_image_set.as_deref_mut() else {
         return;
     };
     apply_theme_to_card_image_set(theme, card_image_set);
     state_events.write(StateChangedEvent);
+}
+
+/// Overrides the texture sampler on every face + back `Image` in
+/// `theme` to nearest-neighbor (point) sampling, so non-integer
+/// downscales preserve crisp pixel-grid edges instead of bilinear
+/// blur.
+///
+/// Called only for themes whose manifest sets `meta.pixel_art = true`.
+/// SVG-rasterised themes leave the field at its `false` default and
+/// keep Bevy's smooth-downscale sampler — pixel-art and SVG paths use
+/// different filters from the same loader pipeline because they
+/// optimise for different artwork tradeoffs.
+fn apply_nearest_sampler_to_theme_images(
+    theme: &CardTheme,
+    images: &mut Assets<Image>,
+) {
+    use bevy::image::{ImageSampler, ImageSamplerDescriptor};
+    let nearest = ImageSampler::Descriptor(ImageSamplerDescriptor::nearest());
+    for handle in theme.faces.values() {
+        if let Some(image) = images.get_mut(handle) {
+            image.sampler = nearest.clone();
+        }
+    }
+    if let Some(image) = images.get_mut(&theme.back) {
+        image.sampler = nearest;
+    }
 }
 
 /// Pure helper that copies the theme's image handles into the
@@ -459,6 +489,7 @@ mod tests {
                 author: "test".into(),
                 version: "0".into(),
                 card_aspect: (2, 3),
+                pixel_art: false,
             },
             faces: HashMap::new(),
             back: Handle::default(),
@@ -723,6 +754,7 @@ mod tests {
                     author: "x".into(),
                     version: "x".into(),
                     card_aspect: (2, 3),
+                    pixel_art: false,
                 },
             }],
         });

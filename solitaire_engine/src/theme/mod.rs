@@ -164,6 +164,18 @@ pub struct ThemeMeta {
     /// the artwork's intended proportions when the player resizes the
     /// window. Standard playing cards are 2:3.
     pub card_aspect: (u32, u32),
+    /// Whether this theme's art should render with nearest-neighbor
+    /// (point) sampling instead of Bevy's default bilinear filtering.
+    ///
+    /// Set `true` for pixel-art themes (each face is a small grid of
+    /// hand-placed pixels) so non-integer scales preserve crisp edges.
+    /// Leave `false` for SVG-rasterised or photographic art where
+    /// bilinear smooths downscale aliasing.
+    ///
+    /// `#[serde(default)]` keeps older manifests (which pre-date this
+    /// field) loading cleanly with the smooth-sampling default.
+    #[serde(default)]
+    pub pixel_art: bool,
 }
 
 /// Errors surfaced by [`ThemeMeta::validate`].
@@ -271,6 +283,7 @@ mod tests {
             author: "Solitaire Quest".into(),
             version: "1.0.0".into(),
             card_aspect: (2, 3),
+            pixel_art: false,
         };
         assert_eq!(meta.validate(), Ok(()));
     }
@@ -283,6 +296,7 @@ mod tests {
             author: "x".into(),
             version: "x".into(),
             card_aspect: (2, 3),
+            pixel_art: false,
         };
         assert_eq!(meta.validate(), Err(ThemeMetaError::EmptyId));
     }
@@ -295,6 +309,7 @@ mod tests {
             author: "x".into(),
             version: "x".into(),
             card_aspect: (2, 3),
+            pixel_art: false,
         };
         assert!(matches!(
             meta.validate(),
@@ -310,6 +325,7 @@ mod tests {
             author: "x".into(),
             version: "x".into(),
             card_aspect: (0, 3),
+            pixel_art: false,
         };
         assert_eq!(meta.validate(), Err(ThemeMetaError::ZeroNumerator));
         meta.card_aspect = (2, 0);
