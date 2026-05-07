@@ -644,10 +644,23 @@ fn end_drag(
     }
 
     // If the drag was never committed (user tapped without moving far enough),
-    // treat it as a click: just cancel the pending drag and resync card positions.
+    // treat it as a click: cancel the pending drag and exit. We deliberately
+    // do NOT fire `StateChangedEvent` here — `start_drag` only mutates the
+    // `DragState` resource on press, never card transforms, so an uncommitted
+    // drag has no visual side effect to undo.
+    //
+    // Firing one would race a CardAnim that's already in flight on the same
+    // card. Specifically: on a successful double-click, `handle_double_click`
+    // fires `MoveRequestEvent`, `start_drag` picks the card up the same
+    // frame (uncommitted), and `handle_move` queues a `StateChangedEvent` →
+    // `sync_cards_on_change` starts a slide animation. When the player
+    // releases the button mid-slide, `end_drag` would fire a second
+    // `StateChangedEvent`, `sync_cards_on_change` would see the card mid-
+    // animation (`cur != target`), and replace the in-flight CardAnim with
+    // a fresh one — restarting the slide and reading on screen as the move
+    // animation playing twice.
     if !drag.committed {
         drag.clear();
-        changed.write(StateChangedEvent);
         return;
     }
     let Some(layout) = layout else {
