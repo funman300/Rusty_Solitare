@@ -6,8 +6,20 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Closes the v0.18.0 punch list's items B and D and clears the
-`auto_save_writes_after_30_seconds` test flake.
+_Nothing yet._
+
+## [0.19.0] — 2026-05-06
+
+Closes the v0.18.0 punch list (items B and D — async hint and
+persistent replay share URLs), expands desktop platform fit
+(Wayland session support + monitor-aware default window size for
+HiDPI / 4K displays), polishes the win-celebration and
+double-click animation paths, and clears two test-flake
+contributors. A short-lived "Rusty Pixel" pixel-art card theme
+was prototyped and reverted in the same window — the engine
+plumbing it touched (`pixel_art` field on `ThemeMeta`, PNG
+manifest face support, second `embedded://` theme channel) was
+fully reverted and is not part of this release.
 
 ### Changed
 
@@ -37,27 +49,86 @@ Closes the v0.18.0 punch list's items B and D and clears the
   selector's currently-displayed replay drives the clipboard
   contents — each historical win keeps its own URL.
   `LastSharedReplayUrl` removed (its role is now subsumed by the
-  share_url field on the replay record).
+  `share_url` field on the replay record).
+
+### Added
+
+- **Wayland session support** (`b57db01`). The workspace
+  `Cargo.toml` Bevy feature list now enables `wayland` alongside
+  `x11`. winit prefers Wayland when `WAYLAND_DISPLAY` is set on the
+  session, falling back to X11 when it isn't. Pre-fix, a Wayland
+  desktop environment fell through to XWayland, rendering the
+  game inside an X11 frame stitched into the Wayland compositor.
+  Post-fix, the game opens as a native Wayland surface. Costs a
+  few hundred KB of binary for the libwayland-client bindings;
+  cross-distro friendly because winit dlopen-probes the libraries
+  rather than hard-linking them.
+- **Monitor-relative default window size** (`b57db01`). On launches
+  with no saved geometry, the new
+  `apply_smart_default_window_size` Update system queries
+  `Monitor` (with the `PrimaryMonitor` marker) and resizes the
+  primary window to ~70 % of the monitor's *logical* size on the
+  first frame. Before, every fresh launch opened at 1280×800
+  regardless of monitor; on a 4K monitor that's a comparatively
+  tiny window in one corner. Logical size already accounts for
+  the OS's HiDPI scale factor, so a Retina display reporting
+  scale_factor 2.0 yields the same physical inches as a 1080p
+  display reporting 1.0. Skipped entirely when saved geometry was
+  applied — the player's chosen size always wins.
 
 ### Fixed
 
-- **`auto_save_writes_after_30_seconds` test flake.** The test's
-  single-frame `app.update()` was sensitive to first-frame
-  `Time::delta_secs()` variance under heavy parallel cargo-test
-  load, and to production-disk `~/.local/share/solitaire_quest/game_state.json`
-  state leaking into the test world via `GamePlugin::build`'s load
-  path. `test_app` now resets `PendingRestoredGame(None)` after
-  plugin build (preventing the dev machine's saved-game state from
-  tripping the auto-save guard) and the test re-arms the timer in a
-  small bounded loop until the file appears (robust against
+- **Duplicate "You Win" toast on game-won** (`55c235b`). The
+  post-win UI was firing two celebration surfaces: a 4-second
+  toast banner ("You Win! Score: X Time: Y") on top of the
+  `win_summary_plugin`'s "You Won!" modal. In screenshots the
+  toast banner was partially clipped behind the modal card,
+  peeking out on either side. The toast predated the modal and is
+  strictly subsumed by it; removed. The cards-fly-off cascade
+  animation (`MotionCurve::Expressive` per-card rotation drift)
+  is unchanged — that's the visual celebration, distinct from
+  the textual celebration the modal owns. `WIN_TOAST_SECS` const
+  removed.
+- **Double-click on a single card with no destination now plays
+  the reject animation** (`d7ffb16`). `handle_double_click` only
+  fired `MoveRejectedEvent` for multi-card stacks with no
+  destination; a double-click on a single card whose top didn't
+  fit any foundation or tableau slot produced zero feedback —
+  no `card_invalid.wav`, no source-pile shake. Both priorities'
+  failure paths now converge on a single rejection at the end of
+  the double-click branch, so single-card and stack misses get
+  the same feedback shape as drag-and-drop rejections.
+- **Double-click move animation no longer plays twice**
+  (`6037596`). On a successful double-click, the slide-to-
+  destination animation rendered twice — once from the move's
+  `StateChangedEvent` landing, then again from the release's
+  `end_drag` firing a redundant `StateChangedEvent` mid-slide.
+  `sync_cards_on_change` saw the card mid-CardAnim (`cur ≠
+  target`) and replaced the in-flight tween with a fresh one
+  starting at the mid-position, visibly restarting the slide. The
+  defensive `StateChangedEvent` write in `end_drag`'s
+  uncommitted-drag branch is removed; `start_drag` only mutates
+  `DragState` (never card transforms), so an uncommitted drag
+  has no visual side effect to undo. The committed-drag branch
+  keeps its `StateChangedEvent` since real drag snap-backs do
+  need a resync.
+- **`auto_save_writes_after_30_seconds` test flake** (`91b7605`).
+  The test's single-frame `app.update()` was sensitive to
+  first-frame `Time::delta_secs()` variance under heavy parallel
+  cargo-test load, and to production-disk
+  `~/.local/share/solitaire_quest/game_state.json` state leaking
+  into the test world via `GamePlugin::build`'s load path.
+  `test_app` now resets `PendingRestoredGame(None)` after plugin
+  build (preventing the dev machine's saved-game state from
+  tripping the auto-save guard) and the test re-arms the timer in
+  a small bounded loop until the file appears (robust against
   first-frame Time variance). No production-code change.
 
 ### Stats
 
-- 1170 passing tests (was 1166 at v0.18.0 close — 1 in
-  `solitaire_data` for share_url backwards-compat, 4 in
-  `solitaire_engine` for async hint coverage and the persistent
-  share URL persistence path).
+- 1170 passing tests (was 1166 at v0.18.0 close — net +4 from
+  the persistent share URL backwards-compat test, the three
+  async-hint tests, minus the dropped synchronous hint tests).
 - Zero clippy warnings under `--workspace --all-targets -- -D warnings`.
 
 ## [0.18.0] — 2026-05-06
