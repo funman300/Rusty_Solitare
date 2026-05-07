@@ -181,6 +181,20 @@ pub struct Settings {
     /// solver retry loop — see `solitaire_engine::handle_new_game`.
     #[serde(default)]
     pub winnable_deals_only: bool,
+    /// When `true`, suppresses the launch-time
+    /// `apply_smart_default_window_size` system: the window opens at
+    /// the literal `(1280, 800)` default instead of resizing to ~70 %
+    /// of the primary monitor's logical size on the first frame. For
+    /// players who specifically prefer the 1280×800 baseline on every
+    /// fresh launch (i.e. installs without saved geometry).
+    ///
+    /// Older `settings.json` files written before this field existed
+    /// deserialize cleanly to `false` via `#[serde(default)]`, which
+    /// preserves the smart-default behaviour shipped in v0.19.0.
+    /// Saved-geometry launches are unaffected by this flag — the
+    /// player's last window size always wins.
+    #[serde(default)]
+    pub disable_smart_default_size: bool,
     /// Per-move duration during replay playback, in seconds. Range
     /// `[REPLAY_MOVE_INTERVAL_MIN_SECS, REPLAY_MOVE_INTERVAL_MAX_SECS]`;
     /// default mirrors `solitaire_engine::replay_playback::REPLAY_MOVE_INTERVAL_SECS`
@@ -306,6 +320,7 @@ impl Default for Settings {
             tooltip_delay_secs: default_tooltip_delay(),
             time_bonus_multiplier: default_time_bonus_multiplier(),
             winnable_deals_only: false,
+            disable_smart_default_size: false,
             replay_move_interval_secs: default_replay_move_interval_secs(),
         }
     }

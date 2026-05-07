@@ -153,7 +153,12 @@ fn main() {
     // monitor opens the same 1280×800 window that a 1080p monitor
     // does — visually tiny relative to screen. Skipped entirely when
     // saved geometry was applied; the player's preference always wins.
-    if !had_saved_geometry {
+    //
+    // Players who specifically want the literal 1280×800 baseline on
+    // every fresh launch can flip `disable_smart_default_size` in
+    // Settings to opt out. The flag is checked once at startup; a
+    // mid-session change applies on the next launch.
+    if !had_saved_geometry && !settings.disable_smart_default_size {
         app.add_systems(Update, apply_smart_default_window_size);
     }
 

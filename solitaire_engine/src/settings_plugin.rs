@@ -144,6 +144,13 @@ struct ReplayMoveIntervalText;
 #[derive(Component, Debug)]
 struct WinnableDealsOnlyText;
 
+/// Marks the `Text` node showing the current "Smart window size"
+/// state ("ON" / "OFF") in the Gameplay section. The flag is stored
+/// negatively in `Settings::disable_smart_default_size`, so the
+/// label inverts: "ON" = smart sizing enabled (the default).
+#[derive(Component, Debug)]
+struct SmartDefaultSizeText;
+
 /// Marks the scrollable inner card so the mouse-wheel system can target it.
 #[derive(Component, Debug)]
 struct SettingsPanelScrollable;
@@ -199,6 +206,13 @@ enum SettingsButton {
     /// [`solitaire_core::solver::try_solve`] until one is provably
     /// winnable (or the retry cap is hit). Off by default.
     ToggleWinnableDealsOnly,
+    /// Toggle the inverse of [`Settings::disable_smart_default_size`].
+    /// When the visible label reads "ON", the launch-time window
+    /// sizer scales the window to ~70 % of the primary monitor on a
+    /// fresh install; "OFF" pins the literal 1280×800 baseline. The
+    /// flag only affects launches without saved geometry — the
+    /// player's last window size always wins.
+    ToggleSmartDefaultSize,
     SyncNow,
     Done,
     /// Select a specific card-back by index from the picker row.
@@ -236,6 +250,8 @@ impl SettingsButton {
             // sits between TimeBonusUp (48) and the Cosmetic section.
             SettingsButton::ReplayMoveIntervalDown => 49,
             SettingsButton::ReplayMoveIntervalUp => 49,
+            // Smart-default-size toggle — sits at the end of Gameplay.
+            SettingsButton::ToggleSmartDefaultSize => 50,
             // Cosmetic section
             SettingsButton::ToggleTheme => 55,
             SettingsButton::ToggleColorBlind => 60,
@@ -330,6 +346,7 @@ impl Plugin for SettingsPlugin {
                     update_time_bonus_multiplier_text,
                     update_replay_move_interval_text,
                     update_winnable_deals_only_text,
+                    update_smart_default_size_text,
                     attach_focusable_to_settings_buttons,
                     scroll_focus_into_view,
                 ),
@@ -600,6 +617,21 @@ fn update_winnable_deals_only_text(
     }
 }
 
+/// Refreshes the live "Smart window size" toggle value whenever
+/// `SettingsResource` changes. The flag is stored negatively as
+/// `disable_smart_default_size`, so the label inverts.
+fn update_smart_default_size_text(
+    settings: Res<SettingsResource>,
+    mut text_nodes: Query<&mut Text, With<SmartDefaultSizeText>>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+    for mut text in &mut text_nodes {
+        **text = smart_default_size_label(!settings.0.disable_smart_default_size);
+    }
+}
+
 /// Refreshes the live tooltip-delay value in the Gameplay section
 /// whenever `SettingsResource` changes (slider buttons, hand-edited
 /// settings.json reload, etc.).
@@ -854,6 +886,17 @@ fn handle_settings_buttons(
                 // The Text node is refreshed by `update_winnable_deals_only_text`
                 // on the next frame via `settings.is_changed()`.
             }
+            SettingsButton::ToggleSmartDefaultSize => {
+                settings.0.disable_smart_default_size =
+                    !settings.0.disable_smart_default_size;
+                persist(&path, &settings.0);
+                changed.write(SettingsChangedEvent(settings.0.clone()));
+                // The Text node is refreshed by
+                // `update_smart_default_size_text` next frame. The
+                // sizer system is gated only at startup, so flipping
+                // this mid-session takes effect on the next launch —
+                // documented on the field in `solitaire_data::Settings`.
+            }
             SettingsButton::SelectCardBack(idx) => {
                 settings.0.selected_card_back = *idx;
                 persist(&path, &settings.0);
@@ -912,6 +955,14 @@ fn color_blind_label(enabled: bool) -> String {
 /// [`color_blind_label`] — "ON" / "OFF" — so the layout is uniform
 /// with the rest of the Gameplay-section toggles.
 fn winnable_deals_only_label(enabled: bool) -> String {
+    if enabled { "ON".into() } else { "OFF".into() }
+}
+
+/// Display string for the "Smart window size" toggle. The argument
+/// is the *enabled* state (i.e. the inverse of the underlying
+/// `disable_smart_default_size` field) so reading the label gives
+/// the player intuitive ON/OFF semantics.
+fn smart_default_size_label(enabled: bool) -> String {
     if enabled { "ON".into() } else { "OFF".into() }
 }
 
@@ -1301,6 +1352,17 @@ fn spawn_settings_panel(
             replay_move_interval_row(
                 body,
                 settings.replay_move_interval_secs,
+                font_res,
+            );
+            toggle_row(
+                body,
+                "Smart window size",
+                SmartDefaultSizeText,
+                smart_default_size_label(!settings.disable_smart_default_size),
+                SettingsButton::ToggleSmartDefaultSize,
+                "When ON, fresh launches resize the window to ~70 % of the \
+                 monitor. OFF pins the 1280\u{00D7}800 baseline. Saved \
+                 window size always wins.",
                 font_res,
             );
 
