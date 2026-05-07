@@ -502,10 +502,28 @@ mod tests {
     #[test]
     fn pull_failure_sets_error_status() {
         let mut app = headless_app_with(FailingProvider);
-        // Pump frames until the task resolves (it's synchronous under
-        // AsyncComputeTaskPool in test mode, so a few updates suffice).
-        for _ in 0..5 {
+        // Wall-clock-bounded loop instead of a fixed 5-update budget.
+        // Under heavy parallel cargo-test load the AsyncComputeTaskPool
+        // can be starved long enough that 5 updates aren't sufficient
+        // for the failing pull to surface. Pumping until either the
+        // status flips to `Error` or a 5-second deadline elapses
+        // mirrors the auto-save flake fix and turns this test from
+        // "pass on a fast machine" into "pass on any machine that
+        // makes meaningful progress".
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
             app.update();
+            if matches!(
+                app.world().resource::<SyncStatusResource>().0,
+                SyncStatus::Error(_)
+            ) {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::yield_now();
         }
         let status = &app.world().resource::<SyncStatusResource>().0;
         assert!(
