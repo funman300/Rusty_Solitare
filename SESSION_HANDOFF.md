@@ -1,108 +1,176 @@
 # Solitaire Quest — Session Handoff
 
-**Last updated:** 2026-05-06 (post-v0.17.0) — v0.17.0 cut on top of v0.16.0 bundling the solver-driven hints (`87275bf`) and the replay-rate slider (`53e3b81`). An async-solver attempt earlier in the session was rolled back when an agent left 3 failing tests during interruption — flagged as carryover. Test-to-work ratio noted as a quality signal: future agent briefs scale back to behaviour-level tests only, not stdlib/serde-derive coverage.
+**Last updated:** 2026-05-06 (post-v0.18.0 draft) — 24 commits since
+the v0.17.0 tag bundle the launch-experience round (Restore prompt +
+auto-show Home / mode picker), the MSSC-style Home picker rework
+(header chips, draw-mode chips, picture-tile mode cards, Today's
+Event callout, glyph fixes), the last solver hot path moving onto
+`AsyncComputeTaskPool`, "Won before" HUD chip, "Copy share link"
+Stats button, the `N` keybinding finally routing through the real
+Confirm/Cancel modal, Esc-on-modal layering fixes, and the
+unified-3.0 Claude rule set (CLAUDE.md / CLAUDE_SPEC.md /
+CLAUDE_WORKFLOW.md / CLAUDE_PROMPT_PACK.md). Test-discipline prune
+removed 43 low-value tests in the same window.
 
 ## Status at pause
 
-- **HEAD on origin:** v0.17.0's tag commit.
-- **Working tree:** clean apart from untracked `CARD_PLAN.md` (intentional).
-- **Build:** `cargo clippy --workspace --all-targets -- -D warnings` clean.
-- **Tests:** **1208 passed / 0 failed** across the workspace.
+- **HEAD on origin:** `v0.17.0-24-gc497c31` (24 ahead of v0.17.0,
+  not yet tagged).
+- **Working tree:** clean.
+- **Build:** `cargo clippy --workspace --all-targets -- -D warnings`
+  clean (verified this session).
+- **Tests:** **1166 passing / 0 failing** across the workspace
+  (verified this session). The first run flaked once on
+  `solitaire_engine::game_plugin::tests::auto_save_writes_after_30_seconds`
+  — a one-frame `app.update()` test that depends on `time.delta_secs()`
+  on an otherwise-fresh `App`. Reproduced clean on the second run;
+  passes in isolation. Worth tightening if it flakes again, but
+  not blocking the v0.18.0 cut.
 - **Tags on origin:** `v0.9.0` through `v0.17.0`.
+- **CHANGELOG:** v0.18.0 entry drafted in `[Unreleased]`'s slot —
+  ready for tag once build + tests are reverified.
 
 ## Where we are
 
-v0.16.0 is the smallest meaningful release in a while — a focused round on how modals feel rather than what they contain. The originating bug was "I can't scroll on the Achievements list"; the sweep that followed found four other modals with the same problem plus three smaller modal-feel gaps (no pointer cursor on buttons, focus arriving a frame late, no click-outside-to-dismiss).
+v0.17.0's punch list had four candidates (A–D); two of the three
+non-packaging items shipped in this round:
 
-Every overlay screen now: scrolls if its content can overflow at 800×600, shows a hand cursor when you hover any button, has its primary auto-focused the moment the modal appears so the very first Tab/Enter is meaningful, and (for read-only screens) dismisses when you click outside the card.
+- **B — "Won previously" HUD indicator:** shipped in `bdac754`.
+- **C — Replay sharing:** shipped in `540869c` ("Copy share link"
+  Stats button + clipboard via `arboard`, in-memory `LastSharedReplayUrl`).
 
-The post-v0.15.0 next-round candidates are still mostly open — solver-driven hints, replay-rate slider, solver progress overlay, async solver, "won previously" indicator, replay sharing. Direction is open.
+Item **A** (solver-on-`AsyncComputeTaskPool`) shipped *partially* in
+`d489e7a` — the winnable-only seed-selection path is now async with
+cancel-on-replace. The hint path (`H` key,
+`try_solve_with_first_move` / `try_solve_from_state`) is still
+synchronous. The proven `PendingNewGameSeed` template is the
+template for the hint port.
+
+Item **D** (desktop packaging) is unchanged — still gated on
+artwork + signing certs from the player.
+
+The launch experience is also substantially different from v0.17.0:
+on first launch with a saved game the player now sees the Restore
+prompt; on every launch (after splash + restore resolution) they see
+the auto-show Home / mode picker.
 
 ### Design direction (unchanged)
 
-- **Tone:** Balatro — chunky readable type, theatrical hierarchy, satisfying micro-interactions.
-- **Palette:** Midnight Purple base + Balatro yellow primary + warm magenta secondary.
-- See `~/.claude/projects/-home-manage-Rusty-Solitare/memory/project_ux_overhaul_2026-04.md` (machine-local).
+- **Tone:** Balatro — chunky readable type, theatrical hierarchy,
+  satisfying micro-interactions.
+- **Palette:** Midnight Purple base + Balatro yellow primary + warm
+  magenta secondary.
+- See `~/.claude/projects/-home-manage-Rusty-Solitare/memory/project_ux_overhaul_2026-04.md`
+  (machine-local).
 
 ### Canonical remote
 
-`github.com/funman300/Rusty_Solitaire` is the canonical repo. Always push there.
+`github.com/funman300/Rusty_Solitaire` is the canonical repo.
+Always push there.
 
-## v0.17.0 (shipped 2026-05-06)
-
-| Area | Commit | What landed |
-|---|---|---|
-| Solver-driven hints | `87275bf` | The H-key hint asks the solver for the actual best first move via `try_solve_with_first_move` / `try_solve_from_state`. Heuristic stays as fallback. Median 2 ms per H press. |
-| Replay-rate slider | `53e3b81` | Settings → Gameplay slider tunes `replay_move_interval_secs` 0.10–1.00 s in 0.05 s steps; default 0.45 s. Read per frame from `SettingsResource`. |
-
-## v0.16.0 (shipped 2026-05-06)
+## v0.18.0 (drafted 2026-05-06, not yet tagged)
 
 | Area | Commit | What landed |
 |---|---|---|
-| Modal scroll | `7a3032b` | Achievements / Help / Stats / Profile / Leaderboard bodies now carry `Overflow::scroll_y()` + a `max_height` constraint + a per-plugin `*Scrollable` marker. Sibling `scroll_*_panel` systems route `MouseWheel` into the body's `ScrollPosition`. Mirrors the existing `SettingsPanelScrollable` pattern. Home modal not scrolled — five mode cards + Cancel are sized to fit by design. |
-| Pointer cursor | `cd54ce1` | `update_cursor_icon` gains a fourth branch: `SystemCursorIcon::Pointer` whenever any `Interaction::Hovered`/`Pressed` button is detected and no card drag is active. Branch order Grabbing → Pointer → Grab → Default. Pure `pick_cursor_icon(is_dragging, any_button_hovered, any_card_hovered)` helper unit-tests the priority. |
-| Same-frame focus | `48e4121` | `attach_focusable_to_modal_buttons` and `auto_focus_on_modal_open` moved from `Update` to `PostUpdate`. The schedule boundary supplies the sync point so a click-handler in `Update` that spawns a modal has its `Commands` materialised before attach runs. `FocusedButton` is populated before `app.update()` returns; the very first Tab/Enter after open lands on a populated resource. |
-| Scrim dismiss core | `a54201e` | New `ScrimDismissible` marker on `ModalScrim` opts a modal into click-outside-to-close. `dismiss_modal_on_scrim_click` system in `ui_modal` despawns the topmost dismissible scrim on a left-mouse press whose cursor lands on the scrim and outside every `ModalCard`. Stats / Achievements / Help opted in. |
-| Scrim dismiss tail | `cbf2483` | One-line opt-in (capture scrim + insert marker) for Profile / Leaderboard / Home, completing all six read-only modals. |
+| Restore prompt | `3c7a0eb` + `f863d85` | Welcome-back modal on launch when an in-progress save exists; save preserved across exits while the prompt is unanswered. |
+| Async winnable-only seeds | `d489e7a` | `PendingNewGameSeed` resource + `poll_pending_new_game_seed` running `.before(GameMutation)`. Fixes the worst-case 6 s UI stall on a New Game click. Cancel-on-replace contract covered by tests. |
+| Won-before HUD chip | `bdac754` | Reads `ReplayHistoryResource`; lights `✓ Won before` on tier-2 row when current `(seed, draw_mode, mode)` is in history. |
+| Copy share link | `540869c` | `arboard` clipboard + new Stats button + `SyncProvider::push_replay` returning the share URL. In-memory only; per-session sharing. |
+| MSSC Home picker | `ae40a1d`, `b73d246`, `9fe650f`, `40d6e0a`, `c30b04e`, `d065d49` | Header stats strip (clickable → Profile), draw-mode chips, per-mode score/streak chips, Today's Event callout on Daily, picture-tile 2-up grid with FiraMono-covered glyphs (♣ ◆ ○ ▲ →). |
+| Auto-show Home | `dd63261`, `b7c3a49`, `c497c31` | Auto-shows after splash; gated on Restore prompt; freezes timers (elapsed + Time Attack) while up. |
+| `N` opens real modal | `93660c2` | Removes the "Press N again" double-tap; routes through `ConfirmNewGameScreen`. `Shift+N` retains the bypass. |
+| Win Summary keyboard | `17e0737` | Enter dismisses + starts a fresh deal. |
+| Esc-on-modal fixes | `08b006f`, `d48b948`, `9aa0dd2` | Esc no longer opens Pause underneath the modal it just closed; Home maps Esc to Cancel; Restore maps Esc to Continue; topmost-modal-wins when Profile stacks on Home. |
+| Layout fixes | `a4bc063`, `cc63532` | Settings rows full-width with label-spacer-cluster; popover rows excluded from action-bar auto-fade. |
+| Empty-state copy | `56e2e6f` | Leaderboard / Achievements onboarding hints; volume hotkeys emit toast feedback. |
+| Test prune | `a49a340` | −43 low-value tests; future briefs request behaviour contracts only. |
+| Docs unified-3.0 | `f2f30c8` | Adopts CLAUDE.md / CLAUDE_SPEC.md / CLAUDE_WORKFLOW.md / CLAUDE_PROMPT_PACK.md; trims duplicated rule passages. |
 
 ## Open punch list
 
-### Release prep
+### Carried forward from v0.17.0
 
-1. **Desktop packaging** per `ARCHITECTURE.md §17`. Arch PKGBUILD exists in `/home/manage/solitaire-quest-pkgbuild/` (separate repo). Pending: app icon, macOS `.icns` + notarisation cert, Windows `.ico` + Authenticode cert, AppImage recipe.
+- **Solver-on-`AsyncComputeTaskPool` for the H-key hint** —
+  remaining synchronous solver hot path. The seed-selection port
+  in `d489e7a` is the template: `PendingHintTask` resource, polling
+  system running `.before(GameMutation)`, cancel-on-replace, fall
+  back to the heuristic on inconclusive. Diff should stay scoped
+  to `input_plugin.rs` plus a small `pending_hint.rs`.
+- **Desktop packaging** per `ARCHITECTURE.md §17`. Arch PKGBUILD
+  exists in `/home/manage/solitaire-quest-pkgbuild/` (separate
+  repo). Pending: app icon, macOS `.icns` + notarisation cert,
+  Windows `.ico` + Authenticode cert, AppImage recipe.
 
-### Process note (raised this session)
+### New this round
 
-Recent agent briefs reflexively asked for ≥3 tests per feature, which produced low-value coverage on trivial settings fields (default-value tests, serde-derive round-trips, clamp tests that just exercise stdlib `clamp`). Future agent briefs should ask only for tests that pin **behaviour contracts or regressions on real bugs** — not coverage of language/library mechanics.
+- **Persistent share link.** `LastSharedReplayUrl` is in-memory only
+  — the player must share within the session of the win. If
+  cross-session sharing turns into a real ask, persist alongside
+  the rolling replay history.
+- **Per-mode artwork.** Picture tiles use Unicode glyphs as
+  placeholders chosen from FiraMono's actual coverage. When real
+  artwork lands, swap each tile's `Text` node for an `Image` node
+  — tile layout, focus order, click handling, and chip rendering
+  are unchanged.
 
-### Carryover candidates — still open
+### Process notes (from this round)
 
-- **Solver-on-AsyncComputeTaskPool** — current solver runs synchronously on the main thread. Worst-case 50 attempts × 120 ms = 6 s of UI stall on pathological seeds. **An attempt this session was rolled back** when an agent was interrupted leaving 3 failing tests; redoing this needs more careful scoping (smaller pieces, real cancel-and-test flow, NOT a parallel agent split). Worth taking next.
-- **Per-deal "won previously" indicator** — the rolling replay history's seeds make this easy: when a new game starts on a seed the player has already won, surface a tiny indicator on the HUD.
-- **Replay sharing** — `replays.json` is per-machine. Allow a player to copy a replay's URL (already wired via `solitaire_server`) and post it elsewhere. The web-viewer already exists.
+- **Test inflation pattern (resolved this round):** older agent
+  briefs reflexively asked for ≥3 tests per feature, producing 43
+  low-value coverage entries on stdlib/serde-derive mechanics. Going
+  forward, ask for tests that pin behaviour contracts or
+  regressions on real bugs only. See
+  `feedback_test_discipline.md` in auto-memory.
+- **Solver async refactor sequencing (worked this round):** rather
+  than porting the whole solver-on-main-thread surface in one PR
+  (the rollback case from before v0.17.0), the
+  `PendingNewGameSeed` work shipped one well-bounded path with two
+  tests covering the happy path and cancel-on-replace. The hint
+  port should follow the same shape.
 
 ## Resume prompt
 
 ```
 You are a senior Rust + Bevy developer working on Solitaire Quest.
-Working directory: <Rusty_Solitaire clone path on this machine — local
-directory may still be named Rusty_Solitare from earlier; that's fine>.
-Branch: master. Direction is OPEN — v0.16.0 just shipped covering
-modal scroll fixes, pointer cursor, same-frame focus, and scrim-click
-dismiss across all six read-only modals.
+Working directory: <Rusty_Solitaire clone path on this machine>.
+Branch: master. Direction is OPEN — v0.18.0 has been drafted but
+not tagged: 24 commits past v0.17.0 cover the launch-experience
+round, MSSC Home picker, async winnable-only seeds, Won-before
+HUD, Copy share link, N-key flow rework, Esc-layering fixes, and
+the unified-3.0 Claude rule set.
 
-State: HEAD at v0.17.0 (solver hints + replay-rate slider on top
-of v0.16.0). Working tree clean apart from untracked CARD_PLAN.md
-(intentional).
-Build: cargo clippy --workspace --all-targets -- -D warnings clean.
-Tests: 1208 passed / 0 failed.
+State: HEAD at v0.17.0-24-gc497c31. Working tree clean.
+CHANGELOG.md has the v0.18.0 entry slotted under [Unreleased].
 
 READ FIRST (in order, before doing anything):
-  1. SESSION_HANDOFF.md  — v0.16.0 changelog + open punch list
-  2. CHANGELOG.md        — release-by-release record
-  3. CLAUDE.md           — hard rules (UI-first, no panics, etc.)
-  4. ARCHITECTURE.md     — crate responsibilities + data flow
-  5. ~/.claude/projects/<this-project>/memory/MEMORY.md
-                         — saved feedback / project context (machine-local;
-                           may be missing on a fresh machine)
+  1. SESSION_HANDOFF.md  — this file
+  2. CHANGELOG.md        — v0.18.0 draft entry
+  3. CLAUDE.md           — unified-3.0 rule set
+  4. CLAUDE_SPEC.md      — formal architecture spec
+  5. ARCHITECTURE.md     — crate responsibilities + data flow
+  6. ~/.claude/projects/<this-project>/memory/MEMORY.md
+                         — saved feedback / project context
+                           (machine-local; may be missing on a
+                           fresh machine)
 
 DECISION TO ASK THE PLAYER FIRST:
-  A. Solver-on-AsyncComputeTaskPool with progress toast + cancel.
-     A previous attempt was rolled back when an agent left 3
-     failing tests; redoing it needs smaller pieces. Eliminates the
-     worst-case 6 s UI stall — highest gameplay impact left.
-  B. Per-deal "won previously" HUD indicator using the rolling
-     replay history's seeds.
-  C. Replay sharing — copyable URL via the existing web viewer.
-  D. Take the deferred desktop-packaging item (needs artwork +
-     signing certs from the user).
+  A. Tag v0.18.0 — promote `[Unreleased]` to `[0.18.0]` (already
+     done in this session's draft), reverify build + clippy +
+     tests, tag, push. Mechanical close-out.
+  B. Solver-on-AsyncComputeTaskPool for the H-key hint, using the
+     `d489e7a` seed-selection port as template. Last synchronous
+     solver hot path. Smallest delta on the open punch list.
+  C. Desktop packaging — needs artwork + signing certs from the
+     player; can't be driven by the agent alone.
+  D. Persistent share link — store the URL alongside replay
+     history so cross-session sharing works.
 
 WORKFLOW NOTES:
   - Commits use:
       git -c user.name=funman300 -c user.email=root@vscode.infinity \
           commit -m "..."
-  - When attributing playtester feedback in commits/docs, use "Quat"
-    not "Rhys" (saved feedback memory).
+  - When attributing playtester feedback in commits/docs, use
+    "Quat" not "Rhys" (saved feedback memory).
   - Sub-agents stage + verify only; orchestrator commits.
   - Every commit must pass build / clippy / test before pushing.
   - Push to GitHub (origin) — that is the canonical remote.

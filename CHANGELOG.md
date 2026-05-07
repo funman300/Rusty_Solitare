@@ -8,6 +8,198 @@ project follows [Semantic Versioning](https://semver.org/).
 
 _Nothing yet._
 
+## [0.18.0] — 2026-05-06
+
+The launch-experience round. The engine used to drop the player on a
+silent default Classic deal whether they had unfinished work or not;
+v0.18.0 replaces that with two stacked decision points — a Restore
+prompt for in-progress saves, then an MSSC-style Home / mode picker
+that surfaces Daily / Zen / Challenge / Time Attack as picture tiles
+with live stats. The same round closes the last solver-on-main-thread
+hot path (winnable-only seed selection moves to
+`AsyncComputeTaskPool`), wires "Copy share link" into Stats, lights a
+"Won before" HUD chip on re-deals of beaten seeds, and tidies the
+unified-3.0 rule set across CLAUDE.md / CLAUDE_SPEC.md /
+CLAUDE_WORKFLOW.md / CLAUDE_PROMPT_PACK.md.
+
+### Added
+
+- **Restore prompt on launch** (`3c7a0eb`). When `game_state.json`
+  holds an in-progress game (`move_count > 0`, not won), the engine
+  now seeds `GameStateResource` with a fresh deal and holds the saved
+  game in a new `PendingRestoredGame` resource. After the splash
+  clears, a "Welcome back" modal offers **Continue** (Enter / C /
+  click) or **New game** (N / click). Fresh-deal saves
+  (`move_count == 0`) skip the prompt and load directly.
+- **Save preservation while the prompt is unanswered** (`f863d85`).
+  Both `save_game_state_on_exit` and `auto_save_game_state` consult
+  `PendingRestoredGame` first: if it still holds a pending saved
+  game, that's what gets persisted (or the auto-save is skipped),
+  so exiting before answering the prompt no longer overwrites the
+  meaningful save with the placeholder fresh deal.
+- **Home / mode picker auto-shows on launch** (`dd63261`). The mode
+  picker was only reachable via **M** during gameplay; players who
+  hadn't discovered the hotkey never saw the Daily / Zen / Challenge
+  / Time Attack entry points after the splash cleared. `HomePlugin`
+  gains an `auto_show_on_launch` flag (default true) and a
+  one-shot `LaunchHomeShown` gate. Skips when the Restore prompt is
+  on screen so Welcome-back still takes precedence.
+- **MSSC-style Home picker — header / chips / score chips / draw
+  mode** (`ae40a1d`). Player-stats header strip (Level / XP /
+  Lifetime Score, compact-formatted as `1.2M` / `12.3K` / `1,234`)
+  acts as a clickable shortcut to Profile. Draw-mode chip row above
+  the mode cards lets the player flip Draw 1 / Draw 3 from the
+  picker itself; persists `settings.json` and respawns the modal so
+  the active state repaints cleanly. Per-mode best-score / streak
+  chips on each card; hidden on a 0 best so a fresh profile doesn't
+  read "Best 0" everywhere.
+- **Today's Event callout on the Daily card** (`b73d246`). "Today,
+  May 6" date line plus the server-fetched goal (when SyncPlugin is
+  wired). Once today's daily is recorded as completed, the date
+  flips to `Today, May 6 • Done` in `ACCENT_PRIMARY` so the picker
+  reads as a reward state rather than a TODO.
+- **Picture-tile mode cards** (`9fe650f` + glyph-picking follow-ups
+  `40d6e0a`, `c30b04e`, `d065d49`). Mode cards become a wrapping
+  2-up grid (`FlexWrap::Wrap`, tiles 48 % wide, `min_height: 180px`)
+  with a centred Unicode-glyph centrepiece per tile. Final glyph set
+  picked from FiraMono-Medium's actual coverage: ♣ Classic, ◆ Daily,
+  ○ Zen, ▲ Challenge, → TimeAttack. `ACCENT_PRIMARY` when the mode is
+  unlocked, `TEXT_DISABLED` when locked. Centrepiece is a `Text` node
+  for now — when real per-mode artwork lands, swap to `Image` without
+  touching tile layout, focus order, or chip rendering.
+- **Solver-vetted seed selection on `AsyncComputeTaskPool`**
+  (`d489e7a`). Closes the worst-case 6 s UI stall on a New Game
+  click with "Winnable deals only" enabled. New `PendingNewGameSeed`
+  resource holds the in-flight `Task<u64>` plus the original
+  request's `mode` / `confirmed` flags. `poll_pending_new_game_seed`
+  runs `.before(GameMutation)` and replays a synthetic
+  `NewGameRequestEvent` once the task resolves — the player sees no
+  extra-frame visual lag. Cancel-on-replace: a fresh
+  `NewGameRequestEvent` while a task is in flight drops the old
+  task, letting Bevy's `Task` Drop cancel cooperatively at the next
+  await point.
+- **"Won before" HUD indicator** (`bdac754`). When the current
+  deal's `(seed, draw_mode, mode)` triple matches an entry in the
+  rolling `ReplayHistory`, the HUD's tier-2 context row shows
+  **✓ Won before** in `STATE_SUCCESS`. Cleared on win (the on-screen
+  victory cue is enough) and on first-time deals. New
+  `HudWonPreviously` marker driven by a separate
+  `update_won_previously` system; gracefully no-ops in headless
+  tests that don't load `StatsPlugin`.
+- **"Copy share link" Stats button** (`540869c`). End-to-end replay
+  sharing on a server-backed sync backend:
+  `sync_plugin::push_replay_on_win` spawns the upload on
+  `AsyncComputeTaskPool` and stores the handle in
+  `PendingReplayUpload` (drops any in-flight predecessor — the most
+  recent win is what the player wants the link for);
+  `poll_replay_upload_result` writes `<server>/replays/<id>` to
+  `LastSharedReplayUrl` on success; the Stats overlay's action bar
+  gains a button that writes the URL to the OS clipboard via
+  `arboard` and surfaces a "Copied: \<url\>" toast. URL is in-memory
+  only — sharing must happen within the session of the win.
+- **Empty-state copy + onboarding hints** (`56e2e6f`). Leaderboard
+  empty state: two-tier "Be the first on the leaderboard." headline
+  + body invite. Achievements panel: first-launch hint above the
+  grid until the first unlock. Volume hotkeys (`[` / `]`) now emit
+  an `InfoToastEvent` with the new percentage so off-panel
+  adjustments give visible feedback (previously silent).
+- **Enter dismisses the Win Summary and starts a fresh deal**
+  (`17e0737`). The post-win modal's "Play Again" was click-only;
+  keyboard-only players had to reach for the mouse to leave the
+  celebration screen. The button label gains a trailing return-key
+  glyph so the keyboard path is discoverable on first sight.
+- **`N` opens the real Confirm/Cancel modal** (`93660c2`). The old
+  "Press N again" double-tap pattern was a UI-first violation (only
+  continuation was another keystroke). `N` now fires
+  `NewGameRequestEvent::default()` directly; `handle_new_game`'s
+  active-game check spawns the existing `ConfirmNewGameScreen`. The
+  HUD button already routed through the same modal — keyboard and
+  mouse paths are unified. `Shift+N` keeps the keyboard power-user
+  bypass (`confirmed: true`).
+
+### Changed
+
+- **Settings row layout** (`a4bc063`). All five
+  slider/toggle row helpers (volume × 2, tooltip delay, time-bonus
+  multiplier, replay-move interval, generic toggle) restructured to
+  a label-spacer-cluster layout (`width: 100%`, label gets
+  `flex-grow: 1`, controls cluster sits flush right). Stable across
+  varying value-text widths ("0.80" → "1.00", "Instant" vs "1.5 s")
+  and narrow windows.
+- **Docs adopt the unified-3.0 rule set** (`f2f30c8`). `CLAUDE.md`
+  grows from a 114-line pointer doc to a 571-line rulebook (hard
+  global constraints §2, engine rules §3, asset rules §4, code
+  standards §5, build + verification §6, git workflow §7, the ASK
+  BEFORE list §8, Context Injection System §14). New companions:
+  `CLAUDE_SPEC.md` (formal architecture spec — crate dependency
+  graph, data ownership, state-machine invariants, sync merge /
+  server contracts, validation checklist),
+  `CLAUDE_WORKFLOW.md` (two-agent Builder/Guardian pipeline with
+  hard-fail patterns), `CLAUDE_PROMPT_PACK.md` (task-type
+  templates). Three duplicate rule passages removed across
+  `CLAUDE_SPEC.md` and `ARCHITECTURE.md`.
+- **Test discipline pruning** (`a49a340`). Removed 43 low-value
+  tests across `solitaire_data` and `solitaire_core` (default-value
+  tests, serde-derive round-trips on plain structs, single-field
+  clamp tests, near-duplicates, constant-equals-itself tests). None
+  pinned a behaviour contract or a regression on a real bug. Future
+  agent briefs request tests for behaviour contracts or real-bug
+  regressions, not a count of N.
+
+### Fixed
+
+- **Esc on a modal no longer opens Pause underneath** (`08b006f`).
+  A single Esc press on Confirm New Game / Restore / Home /
+  Onboarding / Settings used to both close the modal and spawn the
+  Pause overlay on top in the same frame. `toggle_pause` now skips
+  when any non-Pause `ModalScrim` is in the world; the HUD-button
+  path is gated too. The four modal queries are bundled into a
+  `PauseModalQueries` `SystemParam` to stay under Bevy's
+  16-parameter cap.
+- **Esc dismisses Home / accepts the Restore-prompt default**
+  (`d48b948`). Both screens previously ignored Esc, leaving the
+  player no keyboard-only escape after the previous fix. Home: Esc
+  behaves like Cancel (despawns the modal, keeps the underlying
+  default deal). Restore: Esc maps to Continue (preserves the saved
+  game, matching how the primary action already advertises Enter).
+- **Esc dismisses the topmost modal when Profile stacks on Home**
+  (`9aa0dd2`). Clicking the Home header chip opens Profile on top
+  of Home; Esc used to close Home (because
+  `handle_home_cancel_button` fired with no awareness of layered
+  modals) and leave Profile orphaned over the game.
+  `profile_plugin` now splits P/button (toggle) from Esc
+  (close-only); `handle_home_cancel_button` skips its Esc branch
+  when any other `ModalScrim` exists.
+- **Restore-prompt resolution suppresses Home auto-show**
+  (`b7c3a49`). Resolving the Welcome-back prompt cleared
+  `PendingRestoredGame` and despawned the modal, but the
+  launch-time Home auto-show then fired the next frame and stacked
+  itself over the player's chosen path. `LaunchHomeShown` becomes
+  `pub` so `handle_restore_prompt` flips it to `true` after either
+  resolution; **M** still re-opens the picker on demand.
+- **Game timers freeze while the Home picker is up** (`c497c31`).
+  The HUD's elapsed-time counter ticked from the moment the default
+  Classic deal landed at startup, even though the auto-show Home
+  picker was still up — the player saw "0:11" before they had
+  chosen a mode. `tick_elapsed_time` and `advance_time_attack` now
+  also gate on the absence of `HomeScreen`, mirroring their
+  existing `PausedResource` check.
+- **Popover rows stay visible regardless of action-bar fade**
+  (`cc63532`). Opening Modes / Menu showed a solid dark-purple
+  block in the top-right with no readable content — the action-bar
+  auto-fade was matching the popover rows by their shared
+  `ActionButton` marker and dropping their alpha to the
+  cursor-position-based fade value (typically 0). New `PopoverRow`
+  marker on rows in `spawn_modes_popover` / `spawn_menu_popover`;
+  `apply_action_fade` excludes them via `Without<PopoverRow>`.
+
+### Stats
+
+- 1166 passing tests (was 1208 at v0.17.0 close — 43 net removals
+  from the test-discipline prune plus 1 net-new test from the
+  async-seed work, no behaviour regressions).
+- Zero clippy warnings under `--workspace --all-targets -- -D warnings`.
+
 ## [0.17.0] — 2026-05-06
 
 A short follow-up round on top of v0.16.0: the H-key hint is no
