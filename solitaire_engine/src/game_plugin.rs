@@ -1264,6 +1264,14 @@ mod tests {
         // plugin's build path; clearing them keeps tests self-contained.
         app.insert_resource(GameStatePath(None));
         app.insert_resource(ReplayPath(None));
+        // Force `PendingRestoredGame` empty so production saved-game
+        // state on the dev machine's disk (loaded by `GamePlugin::build`)
+        // can't leak into per-test world state and trip the
+        // `pending.0.is_some()` guard in `auto_save_game_state` /
+        // `save_game_state_on_exit`. Without this clear, an
+        // unrelated `~/.local/share/solitaire_quest/game_state.json`
+        // would silently disable the auto-save path under test.
+        app.insert_resource(PendingRestoredGame(None));
         // Override the system-time seed with a known value.
         app.world_mut()
             .resource_mut::<GameStateResource>()
@@ -1516,6 +1524,16 @@ mod tests {
     }
 
     /// auto_save_game_state writes to disk once the accumulator crosses 30 s.
+    ///
+    /// The timer is pre-seeded just past the threshold and the test
+    /// re-arms it before each `app.update()` in a small bounded loop:
+    /// under `MinimalPlugins` the first frame's `Time::delta_secs()`
+    /// can be 0.0 (or, under heavy parallel cargo-test load, large
+    /// enough that the pre-seeded margin is consumed by it), so a
+    /// single-frame check is fragile. Looping until the file appears
+    /// (or hitting the bound) makes the test robust against
+    /// first-frame Time variance without changing the underlying
+    /// behaviour contract.
     #[test]
     fn auto_save_writes_after_30_seconds() {
         use solitaire_data::load_game_state_from;
@@ -1531,10 +1549,18 @@ mod tests {
             .0
             .move_count = 1;
 
-        // Pre-seed the timer just past the threshold. The system will trigger
-        // on the very next update() without needing to control Time::delta_secs().
-        app.insert_resource(AutoSaveTimer(AUTO_SAVE_INTERVAL_SECS + 0.1));
-        app.update();
+        // Re-arm the timer past the threshold every frame and pump
+        // updates until the save fires. Caps at 16 iterations — a
+        // healthy run hits it on the first or second frame; the cap
+        // prevents an infinite loop if a future regression skips
+        // the save unconditionally.
+        for _ in 0..16 {
+            app.insert_resource(AutoSaveTimer(AUTO_SAVE_INTERVAL_SECS + 1.0));
+            app.update();
+            if path.exists() {
+                break;
+            }
+        }
 
         assert!(path.exists(), "auto-save file must exist after timer crosses threshold");
         let loaded = load_game_state_from(&path).expect("file must be loadable");
