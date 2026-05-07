@@ -118,7 +118,6 @@ fn default_entry() -> ThemeEntry {
             author: "Solitaire Quest".to_string(),
             version: "1.0".to_string(),
             card_aspect: (2, 3),
-            pixel_art: false,
         },
     }
 }
@@ -345,7 +344,6 @@ mod tests {
                 author: "x".into(),
                 version: "x".into(),
                 card_aspect: (2, 3),
-                pixel_art: false,
             },
         });
 

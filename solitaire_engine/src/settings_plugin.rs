@@ -2458,7 +2458,6 @@ mod tests {
                     author: "x".into(),
                     version: "x".into(),
                     card_aspect: (2, 3),
-                    pixel_art: false,
                 },
             }],
         });

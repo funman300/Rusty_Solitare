@@ -2681,7 +2681,6 @@ mod tests {
                 author: "test".into(),
                 version: "0".into(),
                 card_aspect: (2, 3),
-                pixel_art: false,
             },
             faces: HashMap::<CardKey, Handle<bevy::image::Image>>::new(),
             back: theme_back.clone(),

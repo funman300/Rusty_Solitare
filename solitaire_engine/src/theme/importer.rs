@@ -478,7 +478,6 @@ mod tests {
             author: "Tester".into(),
             version: "1.0.0".into(),
             card_aspect: (2, 3),
-            pixel_art: false,
         }
     }
 
