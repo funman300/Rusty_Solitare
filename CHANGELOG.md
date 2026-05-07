@@ -6,7 +6,59 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet._
+Closes the v0.18.0 punch list's items B and D and clears the
+`auto_save_writes_after_30_seconds` test flake.
+
+### Changed
+
+- **H-key hint runs on `AsyncComputeTaskPool`** (`3e11e9e`). The
+  synchronous `try_solve_from_state` call on every H press is gone;
+  `handle_keyboard_hint` now spawns a task whose result the new
+  `pending_hint::poll_pending_hint_task` system surfaces one frame
+  later. New `PendingHintTask` resource carries the in-flight handle
+  plus `move_count_at_spawn` for staleness detection;
+  `drop_pending_hint_on_state_change` cancels the task whenever the
+  game state shifts; `PendingHintTask::spawn` implements
+  cancel-on-replace so two quick H presses keep at most one task in
+  flight. Mirrors the v0.18.0 `PendingNewGameSeed` template.
+  `emit_hint_visuals` and `find_heuristic_hint` are extracted as
+  `pub` helpers so the polling system can call them.
+- **Persistent replay share URLs** (`42d90b1`). v0.18.0's
+  `LastSharedReplayUrl` was an in-memory resource wiped on quit —
+  the player had to share within the session of the win.
+  `solitaire_data::Replay` now carries a `share_url: Option<String>`
+  field with `#[serde(default)]` (no `REPLAY_SCHEMA_VERSION` bump
+  needed; older `replays.json` files load unchanged with `share_url
+  == None` on every entry). `poll_replay_upload_result` writes the
+  resolved URL into `replays[0].share_url` and persists the updated
+  history via `save_replay_history_to`. The Stats overlay's
+  "Copy share link" button reads from
+  `history.0.replays[selected.0].share_url`, so the Prev/Next
+  selector's currently-displayed replay drives the clipboard
+  contents — each historical win keeps its own URL.
+  `LastSharedReplayUrl` removed (its role is now subsumed by the
+  share_url field on the replay record).
+
+### Fixed
+
+- **`auto_save_writes_after_30_seconds` test flake.** The test's
+  single-frame `app.update()` was sensitive to first-frame
+  `Time::delta_secs()` variance under heavy parallel cargo-test
+  load, and to production-disk `~/.local/share/solitaire_quest/game_state.json`
+  state leaking into the test world via `GamePlugin::build`'s load
+  path. `test_app` now resets `PendingRestoredGame(None)` after
+  plugin build (preventing the dev machine's saved-game state from
+  tripping the auto-save guard) and the test re-arms the timer in a
+  small bounded loop until the file appears (robust against
+  first-frame Time variance). No production-code change.
+
+### Stats
+
+- 1170 passing tests (was 1166 at v0.18.0 close — 1 in
+  `solitaire_data` for share_url backwards-compat, 4 in
+  `solitaire_engine` for async hint coverage and the persistent
+  share URL persistence path).
+- Zero clippy warnings under `--workspace --all-targets -- -D warnings`.
 
 ## [0.18.0] — 2026-05-06
 
