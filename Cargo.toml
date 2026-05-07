@@ -54,11 +54,16 @@ bevy = { version = "0.18", default-features = false, features = [
     "bevy_window",
     "custom_cursor",
     "reflect_auto_register",
-    # default_platform (desktop subset; no android/wayland/webgl/gilrs/sysinfo)
+    # default_platform (desktop subset; no android/webgl/gilrs/sysinfo)
     "std",
     "bevy_winit",
     "default_font",
     "multi_threaded",
+    # winit prefers Wayland when WAYLAND_DISPLAY is set on the
+    # session and falls through to X11 otherwise. Without `wayland`,
+    # winit-on-Wayland-session falls back to XWayland which renders
+    # the game in an X11 frame inside the Wayland compositor.
+    "wayland",
     "x11",
     # common_api
     "bevy_color",
