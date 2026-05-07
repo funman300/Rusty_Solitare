@@ -61,7 +61,6 @@ fn anim_speed_to_secs(speed: &AnimSpeed) -> f32 {
     scaled_duration(MOTION_SLIDE_SECS, *speed)
 }
 
-const WIN_TOAST_SECS: f32 = 4.0;
 const ACHIEVEMENT_TOAST_SECS: f32 = 3.0;
 const LEVELUP_TOAST_SECS: f32 = 3.0;
 const DAILY_TOAST_SECS: f32 = 3.0;
@@ -266,9 +265,15 @@ fn handle_win_cascade(
     layout: Option<Res<LayoutResource>>,
     settings: Option<Res<SettingsResource>>,
 ) {
-    let Some(ev) = events.read().next() else {
+    // Drain the event reader; the cascade visual is the only thing
+    // this system contributes — the post-win "You Won!" modal
+    // (`win_summary_plugin`) consumes the same `GameWonEvent` and
+    // carries score / time / achievements / XP itself, so a duplicate
+    // toast saying "You Win! Score X Time Y" rendered behind the modal
+    // in earlier builds. Removed.
+    if events.read().next().is_none() {
         return;
-    };
+    }
 
     let margin = layout.as_ref().map_or(800.0, |l| l.0.card_size.x * 8.0);
 
@@ -283,11 +288,6 @@ fn handle_win_cascade(
         Vec3::new(margin, 0.0, 300.0),
         Vec3::new(-margin, 0.0, 300.0),
     ];
-
-    let m = ev.time_seconds / 60;
-    let s = ev.time_seconds % 60;
-    let win_msg = format!("You Win!  Score: {}  Time: {m}:{s:02}", ev.score);
-    spawn_toast(&mut commands, win_msg, WIN_TOAST_SECS);
 
     let step = settings
         .as_ref()
