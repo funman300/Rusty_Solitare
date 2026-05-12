@@ -1,6 +1,6 @@
 # Solitaire Quest — Session Handoff
 
-**Last updated:** 2026-05-12 — Sync rate limiting + mirror_achievement removal + theme import scan shipped (`6e6f3ef`). HEAD locally: `6e6f3ef`. Push pending.
+**Last updated:** 2026-05-12 — WASM build script + push-retry test shipped (`198df75`). HEAD locally: `198df75`. Push pending.
 
 Phase 8 closes the self-hosted-server connection arc end-to-end: login/register
 modal, re-auth on token expiry, account deletion flow, server deployment
@@ -12,8 +12,8 @@ and full server integration tests.
 
 ## Current state
 
-- **HEAD locally:** `6e6f3ef` (feat: sync rate limiting).
-- **HEAD on origin:** `b129664` (pushed — 4 commits ahead).
+- **HEAD locally:** `198df75` (test: push retry + build_test_pool).
+- **HEAD on origin:** `08f74d1` (pushed — 3 commits ahead).
 - **Working tree:** `SESSION_HANDOFF.md` modified, uncommitted.
 - **Build:** `cargo clippy --workspace --all-targets -- -D warnings` clean.
 - **Tests:** **1300+ passing / 0 failing** across the workspace.
@@ -83,16 +83,18 @@ Also shipped (pre-Phase 8 but post-v0.22.0, already in CHANGELOG):
 - [x] **`mirror_achievement` removed.** Done (`549a817`): method was a no-op
   default never overridden and never called; achievements already sync via
   `SyncPayload` push. Deleted from trait and blanket impl.
-- **WASM build script.** `web/pkg/` contains compiled WASM committed to git.
-  Need a `build_wasm.sh` or Makefile target documenting the `wasm-pack build`
-  invocation to regenerate it.
+- [x] **WASM build script.** Done (`40d0712`): `build_wasm.sh` at repo root
+  documents `wasm-pack build --target web`, cleans up pkg metadata files,
+  includes dependency guard + install instructions.
 - **Server password reset.** No admin endpoint or CLI tool for resetting a
   user's password. Self-hosters have no recovery path short of direct SQLite
   edits.
 
 ### 6. Testing gaps
-- **Server 401 → refresh → retry path** — the `pull`/`push` retry logic in
-  `SolitaireServerClient` has no integration test.
+- [x] **Server 401 → refresh → retry path.** Done (`198df75`): both
+  `jwt_refresh_on_401_succeeds` (pull) and
+  `push_retries_after_401_on_expired_access_token` (push) in
+  `solitaire_data/tests/sync_round_trip.rs`.
 - **WASM winning-replay step-through** — current tests cover 2 stock clicks;
   a test stepping through a full winning sequence would catch
   `GameState`/`ReplayMove` compatibility regressions.
