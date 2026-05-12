@@ -231,6 +231,12 @@ pub struct Settings {
     /// cleanly to `None` via `#[serde(default)]`.
     #[serde(default)]
     pub last_difficulty: Option<DifficultyLevel>,
+    /// Custom public name displayed on the leaderboard. When `None`, the
+    /// player's server `username` is used instead. Trimmed to 32 characters
+    /// before submission. Older `settings.json` files written before this
+    /// field existed deserialize cleanly to `None` via `#[serde(default)]`.
+    #[serde(default)]
+    pub leaderboard_display_name: Option<String>,
 }
 
 fn default_draw_mode() -> DrawMode {
@@ -350,6 +356,7 @@ impl Default for Settings {
             disable_smart_default_size: false,
             replay_move_interval_secs: default_replay_move_interval_secs(),
             last_difficulty: None,
+            leaderboard_display_name: None,
         }
     }
 }

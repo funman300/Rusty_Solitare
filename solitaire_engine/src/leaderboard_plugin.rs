@@ -9,23 +9,24 @@
 //! When the provider does not support leaderboards (e.g. `LocalOnlyProvider`)
 //! the panel shows "Not available" immediately.
 
-use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
+use bevy::input::{ButtonState, keyboard::KeyboardInput, mouse::{MouseScrollUnit, MouseWheel}};
 use bevy::prelude::*;
 use bevy::tasks::{futures_lite::future, AsyncComputeTaskPool, Task};
-use solitaire_data::settings::SyncBackend;
+use solitaire_data::{save_settings_to, settings::SyncBackend};
 use solitaire_sync::LeaderboardEntry;
 
 use crate::events::{InfoToastEvent, ToggleLeaderboardRequestEvent};
 use crate::font_plugin::FontResource;
-use crate::settings_plugin::SettingsResource;
+use crate::settings_plugin::{SettingsResource, SettingsStoragePath};
 use crate::sync_plugin::SyncProviderResource;
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
     ScrimDismissible,
 };
 use crate::ui_theme::{
-    ACCENT_PRIMARY, BORDER_SUBTLE, STATE_INFO, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY,
-    TYPE_BODY_LG, TYPE_CAPTION, VAL_SPACE_2, VAL_SPACE_4, Z_MODAL_PANEL,
+    ACCENT_PRIMARY, BG_ELEVATED, BORDER_SUBTLE, RADIUS_SM, STATE_INFO,
+    TEXT_DISABLED, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY, TYPE_BODY_LG, TYPE_CAPTION,
+    VAL_SPACE_2, VAL_SPACE_3, VAL_SPACE_4, Z_MODAL_PANEL, Z_PAUSE_DIALOG,
 };
 
 // ---------------------------------------------------------------------------
@@ -96,6 +97,30 @@ struct OptInTask(Option<Task<Result<(), String>>>);
 #[derive(Resource, Default)]
 struct OptOutTask(Option<Task<Result<(), String>>>);
 
+/// Marker on the "Set Name" button inside the leaderboard panel.
+#[derive(Component, Debug)]
+struct SetDisplayNameButton;
+
+/// Marker on the display-name editor modal root.
+#[derive(Component, Debug)]
+struct DisplayNameModal;
+
+/// Text currently typed in the display-name modal's input field.
+#[derive(Resource, Default)]
+struct DisplayNameBuffer(String);
+
+/// Marker on the text node inside the display-name input field.
+#[derive(Component, Debug)]
+struct DisplayNameTextField;
+
+/// Marker on the "Save" button in the display-name modal.
+#[derive(Component, Debug)]
+struct DisplayNameConfirmButton;
+
+/// Marker on the "Cancel" button in the display-name modal.
+#[derive(Component, Debug)]
+struct DisplayNameCancelButton;
+
 // ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
@@ -111,12 +136,13 @@ impl Plugin for LeaderboardPlugin {
             .init_resource::<ClosedThisFrame>()
             .init_resource::<OptInTask>()
             .init_resource::<OptOutTask>()
+            .init_resource::<DisplayNameBuffer>()
             .add_message::<ToggleLeaderboardRequestEvent>()
-            // `MouseWheel` is emitted by Bevy's input plugin under
-            // `DefaultPlugins`; register it explicitly so the
-            // leaderboard-scroll system also runs cleanly under
-            // `MinimalPlugins` in tests.
+            // `MouseWheel` and `KeyboardInput` are emitted by Bevy's input
+            // plugin under `DefaultPlugins`; register them explicitly so all
+            // leaderboard systems run cleanly under `MinimalPlugins` in tests.
             .add_message::<MouseWheel>()
+            .add_message::<KeyboardInput>()
             .add_systems(
                 Update,
                 (
@@ -129,6 +155,10 @@ impl Plugin for LeaderboardPlugin {
                     poll_opt_in_task,
                     handle_opt_out_button,
                     poll_opt_out_task,
+                    handle_set_display_name_button,
+                    handle_display_name_text_input,
+                    handle_display_name_confirm,
+                    handle_display_name_cancel,
                 )
                     .chain(),
             )
@@ -156,6 +186,7 @@ fn toggle_leaderboard_screen(
     screens: Query<Entity, With<LeaderboardScreen>>,
     data: Res<LeaderboardResource>,
     provider: Option<Res<SyncProviderResource>>,
+    settings: Option<Res<SettingsResource>>,
     font_res: Option<Res<FontResource>>,
     mut task_res: ResMut<LeaderboardFetchTask>,
     mut closed_flag: ResMut<ClosedThisFrame>,
@@ -174,7 +205,8 @@ fn toggle_leaderboard_screen(
     let remote_available = provider
         .as_ref()
         .is_some_and(|p| p.0.backend_name() != "local");
-    spawn_leaderboard_screen(&mut commands, &data, remote_available, font_res.as_deref());
+    let dn = settings.as_ref().and_then(|s| s.0.leaderboard_display_name.as_deref());
+    spawn_leaderboard_screen(&mut commands, &data, remote_available, dn, font_res.as_deref());
 
     // Start a background fetch if not already in flight.
     if task_res.0.is_none()
@@ -201,12 +233,14 @@ fn poll_leaderboard_fetch(
 /// When a fetch completes, cache the data and update any open panel.
 /// Skips the panel rebuild if the user closed the panel in this same frame
 /// (commands are deferred, so the query would still see the despawned entity).
+#[allow(clippy::too_many_arguments)]
 fn update_leaderboard_panel(
     mut commands: Commands,
     mut result_res: ResMut<LeaderboardFetchResult>,
     mut data: ResMut<LeaderboardResource>,
     screens: Query<Entity, With<LeaderboardScreen>>,
     provider: Option<Res<SyncProviderResource>>,
+    settings: Option<Res<SettingsResource>>,
     font_res: Option<Res<FontResource>>,
     closed_flag: Res<ClosedThisFrame>,
 ) {
@@ -235,9 +269,10 @@ fn update_leaderboard_panel(
     let remote_available = provider
         .as_ref()
         .is_some_and(|p| p.0.backend_name() != "local");
+    let dn = settings.as_ref().and_then(|s| s.0.leaderboard_display_name.as_deref());
     for entity in &screens {
         commands.entity(entity).despawn();
-        spawn_leaderboard_screen(&mut commands, &data, remote_available, font_res.as_deref());
+        spawn_leaderboard_screen(&mut commands, &data, remote_available, dn, font_res.as_deref());
     }
 }
 
@@ -305,11 +340,17 @@ fn handle_opt_in_button(
         let display_name = settings
             .as_ref()
             .and_then(|s| {
-                if let SyncBackend::SolitaireServer { username, .. } = &s.0.sync_backend {
-                    Some(username.clone())
-                } else {
-                    None
-                }
+                // Prefer an explicit display name; fall back to server username.
+                s.0.leaderboard_display_name
+                    .as_deref()
+                    .or_else(|| {
+                        if let SyncBackend::SolitaireServer { username, .. } = &s.0.sync_backend {
+                            Some(username.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .map(str::to_string)
             })
             .unwrap_or_else(|| "Player".to_string());
 
@@ -391,6 +432,7 @@ fn spawn_leaderboard_screen(
     commands: &mut Commands,
     data: &LeaderboardResource,
     remote_available: bool,
+    effective_display_name: Option<&str>,
     font_res: Option<&FontResource>,
 ) {
     let scrim = spawn_modal(commands, LeaderboardScreen, Z_MODAL_PANEL, |card| {
@@ -425,6 +467,33 @@ fn spawn_leaderboard_screen(
                 font_caption.clone(),
                 TextColor(TEXT_SECONDARY),
             ));
+
+            // Public name row: shows the effective display name + "Set Name" button.
+            card.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: VAL_SPACE_3,
+                ..default()
+            })
+            .with_children(|row| {
+                let label = match effective_display_name {
+                    Some(n) => format!("Public name: {n}"),
+                    None => "Public name: (same as username)".to_string(),
+                };
+                row.spawn((
+                    Text::new(label),
+                    font_caption.clone(),
+                    TextColor(TEXT_SECONDARY),
+                ));
+                spawn_modal_button(
+                    row,
+                    SetDisplayNameButton,
+                    "Set Name",
+                    None,
+                    ButtonVariant::Tertiary,
+                    font_res,
+                );
+            });
 
             // Opt In / Opt Out row uses the same modal-button helpers as
             // the rest of the UI for consistent hover / press feedback.
@@ -604,6 +673,194 @@ fn data_cell(
             ..default()
         },
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Display-name editor
+// ---------------------------------------------------------------------------
+
+/// Opens the display-name editor modal when the "Set Name" button is pressed.
+fn handle_set_display_name_button(
+    button_q: Query<&Interaction, (Changed<Interaction>, With<SetDisplayNameButton>)>,
+    existing: Query<(), With<DisplayNameModal>>,
+    mut commands: Commands,
+    settings: Option<Res<SettingsResource>>,
+    font_res: Option<Res<FontResource>>,
+    mut buf: ResMut<DisplayNameBuffer>,
+) {
+    if !button_q.iter().any(|i| *i == Interaction::Pressed) {
+        return;
+    }
+    if !existing.is_empty() {
+        return; // already open
+    }
+    buf.0 = settings
+        .as_ref()
+        .and_then(|s| s.0.leaderboard_display_name.clone())
+        .unwrap_or_default();
+    spawn_display_name_modal(&mut commands, &buf.0, font_res.as_deref());
+}
+
+/// Routes keyboard input into the display-name buffer while the editor is open.
+fn handle_display_name_text_input(
+    screen: Query<(), With<DisplayNameModal>>,
+    mut key_events: MessageReader<KeyboardInput>,
+    mut buf: ResMut<DisplayNameBuffer>,
+    mut text_q: Query<&mut Text, With<DisplayNameTextField>>,
+) {
+    if screen.is_empty() {
+        key_events.clear();
+        return;
+    }
+    for ev in key_events.read() {
+        if ev.state != ButtonState::Pressed {
+            continue;
+        }
+        if ev.key_code == KeyCode::Backspace {
+            buf.0.pop();
+        } else if let Some(ch) = ev.text.as_deref().and_then(printable_char_dn)
+            && buf.0.len() < 32
+        {
+            buf.0.push(ch);
+        }
+    }
+    for mut text in &mut text_q {
+        text.0 = if buf.0.is_empty() {
+            " ".to_string()
+        } else {
+            buf.0.clone()
+        };
+    }
+}
+
+/// Saves the typed display name to `SettingsResource` and closes the modal.
+fn handle_display_name_confirm(
+    button_q: Query<&Interaction, (Changed<Interaction>, With<DisplayNameConfirmButton>)>,
+    screens: Query<Entity, With<DisplayNameModal>>,
+    mut commands: Commands,
+    buf: Res<DisplayNameBuffer>,
+    settings: Option<ResMut<SettingsResource>>,
+    settings_path: Option<Res<SettingsStoragePath>>,
+) {
+    if !button_q.iter().any(|i| *i == Interaction::Pressed) {
+        return;
+    }
+    if let Some(mut settings) = settings {
+        let trimmed = buf.0.trim().to_string();
+        settings.0.leaderboard_display_name = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        };
+        if let Some(path) = settings_path.as_ref().and_then(|p| p.0.as_ref())
+            && let Err(e) = save_settings_to(path, &settings.0)
+        {
+            warn!("failed to save settings: {e}");
+        }
+    }
+    for entity in &screens {
+        commands.entity(entity).despawn();
+    }
+}
+
+/// Discards any typed text and closes the display-name editor modal.
+fn handle_display_name_cancel(
+    button_q: Query<&Interaction, (Changed<Interaction>, With<DisplayNameCancelButton>)>,
+    screens: Query<Entity, With<DisplayNameModal>>,
+    mut commands: Commands,
+) {
+    if !button_q.iter().any(|i| *i == Interaction::Pressed) {
+        return;
+    }
+    for entity in &screens {
+        commands.entity(entity).despawn();
+    }
+}
+
+fn spawn_display_name_modal(
+    commands: &mut Commands,
+    current_name: &str,
+    font_res: Option<&FontResource>,
+) {
+    let make_font = |size: f32| TextFont {
+        font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: size,
+        ..default()
+    };
+
+    spawn_modal(commands, DisplayNameModal, Z_PAUSE_DIALOG, |card| {
+        spawn_modal_header(card, "Public Display Name", font_res);
+
+        card.spawn((
+            Text::new(
+                "Shown on the leaderboard when you opt in. Leave blank to use your username.",
+            ),
+            make_font(TYPE_CAPTION),
+            TextColor(TEXT_SECONDARY),
+        ));
+
+        // Input field container.
+        card.spawn((
+            Node {
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(RADIUS_SM)),
+                padding: UiRect::axes(VAL_SPACE_3, Val::Px(6.0)),
+                min_height: Val::Px(32.0),
+                min_width: Val::Px(260.0),
+                ..default()
+            },
+            BackgroundColor(BG_ELEVATED),
+            BorderColor::all(ACCENT_PRIMARY),
+        ))
+        .with_children(|border| {
+            let initial = if current_name.is_empty() {
+                " ".to_string()
+            } else {
+                current_name.to_string()
+            };
+            border.spawn((
+                DisplayNameTextField,
+                Text::new(initial),
+                make_font(TYPE_BODY),
+                TextColor(if current_name.is_empty() {
+                    TEXT_DISABLED
+                } else {
+                    TEXT_PRIMARY
+                }),
+            ));
+        });
+
+        card.spawn((
+            Text::new("Max 32 characters."),
+            make_font(TYPE_CAPTION),
+            TextColor(TEXT_SECONDARY),
+        ));
+
+        spawn_modal_actions(card, |actions| {
+            spawn_modal_button(
+                actions,
+                DisplayNameCancelButton,
+                "Cancel",
+                None,
+                ButtonVariant::Tertiary,
+                font_res,
+            );
+            spawn_modal_button(
+                actions,
+                DisplayNameConfirmButton,
+                "Save",
+                None,
+                ButtonVariant::Primary,
+                font_res,
+            );
+        });
+    });
+}
+
+/// Accepts printable ASCII characters (0x20–0x7e) for the display-name field.
+fn printable_char_dn(text: &str) -> Option<char> {
+    let ch = text.chars().next()?;
+    (' '..='~').contains(&ch).then_some(ch)
 }
 
 fn format_secs(secs: u64) -> String {
