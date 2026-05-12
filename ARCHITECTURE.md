@@ -1,9 +1,9 @@
 # Solitaire Quest — Architecture Document
 
-> **Version:** 1.1  
+> **Version:** 1.3  
 > **Language:** Rust (Edition 2024)  
 > **Engine:** Bevy (latest stable)  
-> **Last Updated:** 2026-04-29
+> **Last Updated:** 2026-05-12
 
 ---
 
@@ -86,6 +86,7 @@ solitaire_quest/
 ├── solitaire_data/             # Persistence, sync client, settings
 ├── solitaire_engine/           # Bevy ECS systems, components, plugins
 ├── solitaire_server/           # Self-hosted sync server (Axum + SQLite)
+├── solitaire_wasm/             # WebAssembly bindings — browser-side replay player
 └── solitaire_app/              # Main binary entry point
 ```
 
@@ -159,6 +160,20 @@ Owns:
 - Rate limiting
 - Daily challenge seed generation
 - Leaderboard management
+
+### `solitaire_wasm`
+**Dependencies:** `solitaire_core`, `serde`, `serde_json`, `chrono`, `wasm-bindgen`, `serde-wasm-bindgen`.
+
+WebAssembly bindings for browser-side replay playback. Compiled to `cdylib` via `wasm-pack build`; the output lives in `solitaire_server/web/pkg/` and is served statically by the server.
+
+Intentionally **does not** depend on `solitaire_data` (which pulls in `dirs`, `keyring`, `reqwest`, and other non-WASM crates). Instead it defines a minimal `Replay` mirror with the same serde shape as `solitaire_data::Replay` — the JSON wire format is the compatibility contract.
+
+Owns:
+- `ReplayPlayer` — WASM-exported state machine; steps through a replay's `Vec<ReplayMove>` against a live `GameState`
+- `StateSnapshot` — JS-facing pile snapshot returned by each `step()` call
+- `ReplayMove` / `Replay` mirrors — same serde shape as `solitaire_data` v2 equivalents
+
+Because `ReplayPlayer` uses the same `solitaire_core::GameState` as the desktop client, the two implementations cannot drift: the same seed + move list produces identical pile state at every step on both platforms.
 
 ### `solitaire_app`
 **Dependencies:** `bevy`, `solitaire_engine`.
@@ -261,6 +276,8 @@ The "Shortcut" column lists optional keyboard accelerators. Every action in this
 | `HomePlugin` | M | Main-menu overlay with keyboard shortcut reference |
 | `ProfilePlugin` | P | Player profile overlay: level, XP, achievements, sync status |
 | `SettingsPlugin` | O | Settings panel: audio, draw mode, theme, sync, cosmetics |
+| `ThemePlugin` | — | Owns `ActiveTheme` resource; registers the `CardTheme` SVG asset loader; rasterises themes once per (theme, target size) at load time and caches the resulting `Image`; handles the embedded default theme and user themes from `user_theme_dir()` |
+| `SyncSetupPlugin` | — | Sync setup modal (URL / username / password fields, "Log In" / "Register" buttons); account deletion confirm modal; re-auth trigger when `SyncError::Auth` is returned by a pull |
 | `LeaderboardPlugin` | L | Leaderboard overlay |
 | `HelpPlugin` | H | Help / controls overlay |
 | `PausePlugin` | Esc | Pause and resume |
@@ -365,10 +382,22 @@ All sync backends implement a single trait in `solitaire_data`. The `SyncPlugin`
 ```rust
 #[async_trait]
 pub trait SyncProvider: Send + Sync {
+    // Required — must be implemented by every backend:
     async fn pull(&self) -> Result<SyncPayload, SyncError>;
     async fn push(&self, payload: &SyncPayload) -> Result<SyncResponse, SyncError>;
     fn backend_name(&self) -> &'static str;
     fn is_authenticated(&self) -> bool;
+
+    // Optional — all have default no-op / empty implementations:
+    async fn mirror_achievement(&self, _id: &str) -> Result<(), SyncError>;
+    async fn fetch_leaderboard(&self) -> Result<Vec<LeaderboardEntry>, SyncError>;
+    async fn fetch_daily_challenge(&self) -> Result<Option<ChallengeGoal>, SyncError>;
+    async fn opt_in_leaderboard(&self, _display_name: &str) -> Result<(), SyncError>;
+    async fn opt_out_leaderboard(&self) -> Result<(), SyncError>;
+    async fn delete_account(&self) -> Result<(), SyncError>;
+    // Returns the shareable web URL on success; defaults to Err(UnsupportedPlatform)
+    // so LocalOnlyProvider silently no-ops the push-on-win path.
+    async fn push_replay(&self, _replay: &Replay) -> Result<String, SyncError>;
 }
 ```
 
@@ -454,6 +483,24 @@ CREATE TABLE leaderboard (
     recorded_at     TEXT NOT NULL,
     PRIMARY KEY (user_id)
 );
+
+-- migrations/002_replays.sql
+
+CREATE TABLE IF NOT EXISTS replays (
+    id              TEXT PRIMARY KEY,                      -- UUID v4 minted server-side
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    seed            INTEGER NOT NULL,
+    draw_mode       TEXT NOT NULL,                          -- "DrawOne" | "DrawThree"
+    mode            TEXT NOT NULL,                          -- "Classic" | "Zen" | "Challenge" | "TimeAttack"
+    time_seconds    INTEGER NOT NULL,
+    final_score     INTEGER NOT NULL,
+    recorded_at     TEXT NOT NULL,                          -- replay-side date (YYYY-MM-DD)
+    received_at     TEXT NOT NULL,                          -- server insert timestamp (ISO 8601)
+    replay_json     TEXT NOT NULL                           -- full Replay serialisation
+);
+
+CREATE INDEX IF NOT EXISTS replays_received_at_idx ON replays(received_at DESC);
+CREATE INDEX IF NOT EXISTS replays_user_id_idx     ON replays(user_id);
 ```
 
 ### Request Lifecycle
@@ -579,12 +626,25 @@ pub struct AchievementRecord {
 
 pub struct Settings {
     pub draw_mode: DrawMode,
-    pub sfx_volume: f32,           // 0.0–1.0
+    pub sfx_volume: f32,                       // 0.0–1.0
     pub music_volume: f32,
     pub animation_speed: AnimSpeed,
     pub theme: Theme,
-    pub sync_backend: SyncBackend, // Local | SolitaireServer
+    pub sync_backend: SyncBackend,             // Local | SolitaireServer
+    pub selected_card_back: usize,             // index into PlayerProgress::unlocked_card_backs
+    pub selected_background: usize,            // index into PlayerProgress::unlocked_backgrounds
     pub first_run_complete: bool,
+    pub color_blind_mode: bool,                // blue tint on red suits
+    pub high_contrast_mode: bool,              // boosted luminance for low-vision users
+    pub reduce_motion_mode: bool,              // WCAG reduce-motion — snaps instead of slides
+    pub window_geometry: Option<WindowGeometry>, // persisted size + position; None on first run
+}
+
+pub struct WindowGeometry {
+    pub width:  u32,   // logical pixels
+    pub height: u32,
+    pub x:      i32,   // physical pixels, top-left corner
+    pub y:      i32,
 }
 ```
 
@@ -616,6 +676,21 @@ All endpoints are under the base URL configured by the user (e.g., `https://soli
 | GET | `/api/daily-challenge` | None | — | `ChallengeGoal` |
 | GET | `/api/leaderboard` | Bearer JWT | — | `Vec<LeaderboardEntry>` |
 | POST | `/api/leaderboard/opt-in` | Bearer JWT | — | `{ok: true}` |
+
+### Replays
+
+| Method | Path | Auth | Body | Response |
+|---|---|---|---|---|
+| POST | `/api/replays` | Bearer JWT | Replay JSON | `{id, share_url}` |
+| GET | `/api/replays/recent` | None | — (`?limit=N`) | `Vec<ReplaySummary>` |
+| GET | `/api/replays/:id` | None | — | Full Replay JSON |
+
+### Web Replay Player
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/replays/:id` | None | Serves `web/index.html`; JS fetches `/api/replays/:id` and steps through via the `solitaire_wasm` WASM module |
+| GET | `/web/*` | None | Static assets served via `ServeDir` from `solitaire_server/web/` (includes `web/pkg/` with wasm-bindgen output) |
 
 ### Account Management
 

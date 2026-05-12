@@ -1,338 +1,162 @@
 # Solitaire Quest — Session Handoff
 
-**Last updated:** 2026-05-08 — **v0.21.8 tagged at `c50eaf8`**;
-nine post-cut commits on master. Push pending.
+**Last updated:** 2026-05-12 — ARCHITECTURE.md updated to v1.3 (all 8 Phase 8 gaps closed);
+`SESSION_HANDOFF.md` updated. Push pending.
 
-v0.21.8 closes the last optional polish items in the B-2
-replay screen-takeover arc: **notch-label centering** (middle
-three scrub-bar labels now centred on their notch ticks via the
-CSS `translateX(-50%)` pattern for Bevy 0.18 UI) and **WIN
-MOVE HC legibility** (lime stays lime under HC mode via the
-extended `HighContrastBackground::with_hc` constructor and a
-new `STATE_SUCCESS_HC` brighter-lime constant). The replay
-overlay arc is now fully closed with no known open items.
+Phase 8 closes the self-hosted-server connection arc end-to-end: login/register
+modal, re-auth on token expiry, account deletion flow, server deployment
+artifacts (Dockerfile + docker-compose), replay upload on win, web replay
+player (WASM + HTML/CSS/JS served by the server), leaderboard opt-in/out,
+and full server integration tests.
 
-Full v0.21.8 detail lives in `CHANGELOG.md` § [0.21.8]. This
-file from here on focuses on what's *open* post-cut and how to
-resume.
+---
 
-## Status at pause
+## Current state
 
-- **HEAD locally:** `f281425` (Android Keystore JNI).
-  Docs ride on top; push pending.
-- **HEAD on origin:** `395a322` (double-tap commit — last pushed).
-- **Working tree:** clean (docs uncommitted). No WIP outstanding.
-- **`artwork/` directory:** still untracked. Intentional.
-- **Build:** `cargo clippy --workspace --all-targets -- -D warnings`
-  clean.
-- **Tests:** **1292 passing / 0 failing** across the workspace.
-- **Tags on origin:** `v0.9.0` through `v0.21.8`.
-- **Android:** APK verified booting on Pixel_7 AVD (Android 14,
-  x86_64). All desktop-only systems (handle_fullscreen) now gated.
-  See Phase Android punch list for remaining work.
+- **HEAD locally:** `bd388fe` (docs: CHANGELOG Phase 8 entry).
+- **HEAD on origin:** `272d31f` (feat: account deletion — last pushed commit).
+- **Working tree:** `ARCHITECTURE.md` + `SESSION_HANDOFF.md` modified, uncommitted.
+- **Build:** `cargo clippy --workspace --all-targets -- -D warnings` clean.
+- **Tests:** **1300+ passing / 0 failing** across the workspace.
+- **Tags on origin:** `v0.9.0` through `v0.22.0`.
 
-## Since the v0.21.8 cut
+---
 
-Seven commits since the v0.21.8 tag:
-- `a449f60` — Stats Prev/Next selector spawn site
-- `202a64d` — Android launch fixes (android_main, resize_constraints,
-  apply_smart_default_window_size) — **closes APK launch verification**
-- `16242e6` — Ignore .idea/ IDE files
-- `395a322` — double-tap auto-move for touch input
-- `0cb1587` — Play-by-Seed dialog + HomeMode card
-- `2062bd0` — 75 new challenge seeds + gen_seeds binary
-- `45436d0` — gate handle_fullscreen to non-Android
-- `2c822ba` — JNI clipboard bridge for Android Stats share-link
-- `f281425` — Android Keystore AES-GCM token storage via JNI
+## What shipped in Phase 8 (432061c – bd388fe)
 
-CHANGELOG + SESSION_HANDOFF docs ride on top; push pending.
+| Commit | Summary |
+|--------|---------|
+| `432061c` | Sync setup modal (login/register/connect/disconnect) |
+| `6ce5564` | Re-auth on expired session + server deployment artifacts |
+| `272d31f` | Account deletion flow + `handle_sync_buttons` refactor |
+| `bd388fe` | CHANGELOG v0.23.0 documentation |
 
-Open next-step menu:
-1. **Phase 8 (sync)** — the biggest open arc. Local storage
-   scaffolding, self-hosted Axum server, GPGS stub.
-2. **Android follow-ups** — JNI ClipboardManager, Android Keystore,
-   GPGS. Launch verification and double-tap both closed; these
-   are the remaining Phase Android items.
-3. **Move Log auto-scroll** — only relevant if the panel
-   row count grows beyond the current 5-row fixed window.
+Also shipped (pre-Phase 8 but post-v0.22.0, already in CHANGELOG):
+- `solitaire_wasm` crate: WASM ReplayPlayer bindings for browser-side replay playback
+- Server replay API: `POST /api/replays`, `GET /api/replays/recent`, `GET /api/replays/:id`
+- Server web UI: `/replays/:id` HTML route + `ServeDir /web` static assets
+- DB migration 002: `replays` table + two indexes
+- Full server integration tests for replay endpoints
+- `push_replay` in `sync_plugin` (uploads on win, writes share URL into replay history)
+- Stats panel "Copy Share Link" button reads `share_url` from replay history
 
-## Open punch list
+---
 
-### Phase Android (build + persistence shipped; runtime gaps remain)
+## Open punch list (ordered by priority)
 
-- *APK launch verification — closed 2026-05-08 by `202a64d`.*
-  Three fixes shipped: `android_main` export (missing NativeActivity
-  entry point), `resize_constraints` gated to non-Android (max=0
-  panic), `apply_smart_default_window_size` gated to non-Android
-  (clamp panic on zero-dimension window event). Verified booting on
-  Pixel_7 AVD (Android 14, x86_64, SwiftShader Vulkan), 2+ min
-  runtime without crash. B0004 ECS hierarchy warnings remain
-  (non-fatal; entity parent/child component mismatch); investigate
-  if they surface gameplay bugs.
-- *Double-tap auto-move — closed 2026-05-08 by `395a322`.*
-  `handle_double_tap` fires `MoveRequestEvent` on two rapid
-  `TouchPhase::Ended` events within 0.5 s. Prefers foundation;
-  falls back to tableau stack move. Fires `MoveRejectedEvent` when
-  no legal destination exists. System runs before `touch_end_drag`
-  in the chain so drag state is readable.
-- *F11 fullscreen gate — closed 2026-05-08 by `45436d0`.*
-  `handle_fullscreen` and its `MonitorSelection`/`WindowMode`
-  imports are `#[cfg(not(target_os = "android"))]`-gated. The
-  `add_systems` call is a separate statement (not mid-chain).
-- *JNI ClipboardManager bridge — closed 2026-05-08 by `2c822ba`.*
-  `android_clipboard::set_text(url)` calls `ClipboardManager` via
-  JNI. Stats share-link button now writes to the clipboard with a
-  "Copied: {url}" toast; falls back to "Share link: {url}" on JNI
-  error. Requires AVD functional test (see verification steps in
-  the approved plan).
-- *Android Keystore for credentials — closed 2026-05-08 by `f281425`.*
-  `android_keystore` module: AES-256/GCM/NoPadding device-bound key,
-  tokens serialised to JSON and stored atomically at
-  `{data_dir}/auth_tokens.bin` as `[12-byte IV][ciphertext+tag]`.
-  `auth_tokens.rs` Android stubs now delegate to it. Key
-  invalidation (biometric reset) → `TokenError::KeychainUnavailable`.
-  Requires AVD functional test before Phase 8 sync goes live on
+### 1. Documentation debt (no code)
+- [x] CHANGELOG [Unreleased] → v0.23.0 — done this session
+- [x] ARCHITECTURE.md update — all 8 gaps closed, bumped to v1.3
+- [x] SESSION_HANDOFF.md update — this file
+
+### 2. Leaderboard wiring gaps
+- **Best-score auto-post missing.** `POST /api/sync/push` merges stats/achievements/
+  progress but never touches the `leaderboard` table. Players who opt in never
+  have their `best_time_secs` / `best_score` updated automatically. Fix: update
+  the leaderboard row inside the server's sync push handler (or on `GameWonEvent`
+  via a new async task in `sync_plugin`).
+- **Display name = username.** `handle_opt_in_button` uses the `SyncBackend`
+  username as the leaderboard display name. Consider adding
+  `leaderboard_display_name: Option<String>` to `Settings` for players who
+  want a different public identity.
+
+### 3. Security hardening
+- **Refresh token rotation.** `POST /api/auth/refresh` returns only a new
+  access token; the refresh token never rotates. Standard mitigation: issue a
+  new refresh token on each call and invalidate the old one (needs a
+  `last_refresh_token` column or a separate table).
+- **Sync endpoint rate limiting.** Only `/api/auth/*` has `tower-governor`;
+  `/api/sync/push` (1 MB body) has no per-user throttle.
+
+### 4. Android validation
+- **Android Keystore functional test** — JNI AES-GCM code ships (`f281425`) but
+  no AVD round-trip test has been run. Required before Phase 8 sync goes live on
   Android.
-- **Cosmetic `cargo apk build --lib` workaround.** Post-sign
-  panic doesn't affect the APK on disk but produces noisy stderr.
-  Either upstream a cargo-apk fix or document `--lib` as
-  canonical in the runbook.
+- **JNI clipboard functional test** — same status (`2c822ba`). Note: `adb tap`
+  doesn't work in headless AVD (see memory); requires a touch-gesture path.
+- **`cargo apk build --lib` noisy stderr** — post-sign panic doesn't affect the
+  APK but pollutes CI output. Document `--lib` as canonical or upstream a fix.
 
-### Visual-identity follow-ups (post-v0.21.0)
+### 5. Feature completeness
+- **Theme importer UI.** `import_theme()` (Phase 7, `theme/importer.rs`) is
+  complete but has no Settings button trigger. Players must copy theme files
+  manually.
+- **`mirror_achievement` decision.** `SyncProvider` has this method with a
+  no-op default; `SolitaireServerClient` never overrides it, no server endpoint
+  exists. Either implement (`POST /api/achievements/mirror` + client call on
+  `AchievementUnlockedEvent`) or delete from the trait.
+- **WASM build script.** `web/pkg/` contains compiled WASM committed to git.
+  Need a `build_wasm.sh` or Makefile target documenting the `wasm-pack build`
+  invocation to regenerate it.
+- **Server password reset.** No admin endpoint or CLI tool for resetting a
+  user's password. Self-hosters have no recovery path short of direct SQLite
+  edits.
 
-The visual-identity arc is effectively complete: token system,
-chrome migration, splash boot screen, replay-overlay banner,
-card-face artwork (both rendering paths), and the `ACCENT_PRIMARY`
-palette refresh all shipped in v0.20.0 + v0.21.0. What stays open:
+### 6. Testing gaps
+- **Server 401 → refresh → retry path** — the `pull`/`push` retry logic in
+  `SolitaireServerClient` has no integration test.
+- **WASM winning-replay step-through** — current tests cover 2 stock clicks;
+  a test stepping through a full winning sequence would catch
+  `GameState`/`ReplayMove` compatibility regressions.
 
-- *Replay-overlay screen-takeover redesign — closed 2026-05-08
-  across 13 commits (v0.21.4–v0.21.7).* The full mockup
-  (`docs/ui-mockups/replay-overlay-mobile.html`) has shipped:
-  banner chrome (v0.21.0), floating MOVE chip (v0.21.2), WIN
-  MOVE scrub-bar marker (post-v0.21.3), playback controls /
-  Space accelerator (post-v0.21.3), scrub notches + labels +
-  keybind footer + ESC / ← / → accelerators + HC border
-  (v0.21.5), Move Log panel + HC scrub track + continuous
-  scrub (v0.21.6), and full-screen 50 % opacity dim layer
-  (v0.21.7). Every major B-2 sub-piece is now closed. The
-  only remaining items are minor polish: notch-label centering
-  and WIN MOVE HC contrast bump (see Open next-step menu).*
-- *Floating `MOVE N/M` chip above the focused card during
-  playback — closed 2026-05-08 by `2fb2d63`.* World-space
-  `Text2d` entity sibling to the banner overlay; uses the same
-  `LayoutResource` pile coordinates so it survives window
-  resizes without UI/camera math.
-- *Toast Warning variant wiring — closed 2026-05-08 by `279e23d`.*
-  Daily-challenge-expiry toast fires once per `daily.date` when
-  within 30 min of UTC midnight reset and today is incomplete.
-  `ToastVariant` is now fully load-bearing (every variant has at
-  least one real driver). Future Warning drivers can either reuse
-  the generic `WarningToastEvent(String)` carrier or add their
-  own domain message + `animation_plugin` handler.
-- *Toast Error variant wiring — closed 2026-05-08 by `68d50b5`.*
-  `MoveRejectedEvent` now fires a 2-second pink-bordered
-  "Invalid move" toast as the third leg of the
-  audio + visual + text rejection-feedback stool.
-- *High-contrast accessibility mode — closed 2026-05-08 by
-  `c5787c6` + `07e0357` (engine + UI) + v0.21.2's HC chrome
-  rollout (`c9af1ea` + `d87761d` + `ec804d5`) + post-cut
-  dynamic-paint rollout (`c153363`).* Card text rendering plus
-  8 static-border chrome surfaces (modal scaffold, tooltip,
-  onboarding key chips, help panel key chips, stats panel
-  cells, home Level/XP/Score row, home mode buttons, home
-  mode-hotkey chips, 4 settings panel surfaces) all boost
-  borders to `BORDER_SUBTLE_HC` under HC via the
-  `HighContrastBorder` marker. The previously-carved-out
-  dynamic-paint sites are now also covered: HUD action buttons
-  and modal buttons take the same marker (their paint cycles
-  only mutate `BackgroundColor`, so no race); the radial menu
-  rim folds HC into its per-frame spawn via
-  `radial_rim_outline` so the focused rim boosts to
-  `BORDER_SUBTLE_HC` under HC (preserving focused-vs-resting
-  hierarchy that naive marker substitution would invert).
-- *Reduced-motion mode — closed 2026-05-08 by `c5787c6` +
-  v0.21.2's `ed152e2`.* `effective_slide_secs` forces 0 on
-  card animations; `pulse_splash_cursor` skips the per-frame
-  pulse multiplier; `spawn_splash` skips the scanline overlay
-  entirely. Future scope: gate any future card-lift z-bump
-  animation, warning-chip pulse (when one materialises).
+---
 
-### Carried forward from v0.19.0
+## ARCHITECTURE.md gaps (for the update pass)
 
-- *App icon round — closed 2026-05-08 by `3eb3a26` + `716a025`.*
-  Runtime `Window::icon` wired (Linux/macOS/Windows); 9-size
-  PNG hierarchy at `assets/icon/icon_<size>.png` covers Linux
-  hicolor + downstream `.icns`/`.ico` packaging needs. The
-  `.ico` and `.icns` bundle-format files themselves are *not*
-  generated — both would need new crate deps (`ico` and
-  `icns` respectively) and only matter at app-bundle time
-  (cargo-bundle / packaging), not at `cargo run`. Open if the
-  project later ships as a packaged macOS / Windows app.
+Items missing from the doc:
+1. `solitaire_wasm` crate (§2 workspace + §3 responsibilities)
+2. Replay API endpoints (§9 API Reference — 3 new routes)
+3. Web replay player route (`/replays/:id` + `ServeDir /web`)
+4. `SyncProvider` trait: 6 added methods
+5. Theme system in Bevy plugin table (§5)
+6. `Settings` new fields: `color_blind_mode`, `high_contrast_mode`,
+   `reduce_motion_mode`, `window_geometry`, `selected_card_back`,
+   `selected_background`
+7. DB migration 002 (§7)
+8. Update "Last Updated" date
 
-### Other small candidates
+---
 
-- *Play-by-Seed dialog — closed 2026-05-08 by `0cb1587`.*
-  `PlayBySeedPlugin` adds a numeric-input modal with async solver
-  preview (debounced 500 ms). `HomeMode::PlayBySeed` card fires
-  `StartPlayBySeedRequestEvent`. 5 unit tests. 75 new verified-win
-  seeds (`2062bd0`) expand `CHALLENGE_SEEDS` via the new
-  `solitaire_assetgen::gen_seeds` binary.
-- *Prev/Next selector chips spawn site — closed 2026-05-08 by
-  `a449f60`.* `ReplayPrevButton` / `ReplayNextButton` /
-  `ReplaySelectorCaption` / `ReplaySelectorDetail` now spawn in
-  `spawn_stats_screen` as a compact chip row above the Watch
-  Replay action. The Shareable badge is in the detail line.
-  The click handler and repaint systems were already live since
-  v0.19.0; this was purely the missing spawn site.
-- **Toast queue / immediate unification.** The two toast paths
-  (`spawn_queued_toast` for `InfoToastEvent` queue; `spawn_toast`
-  for fire-and-forget) now share visual treatment but remain
-  separate functions because they serve different temporal
-  needs (sequential vs. parallel). If overlap becomes a UX
-  issue, merge into one queue with priority lanes.
+## Process notes
 
-### Process notes
+- **Commit attribution:** use `funman300` as git user. Co-author line:
+  `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>`.
+- **Commit format:** `type(scope): description` per CLAUDE.md §7.
+- **Never commit without:** `cargo test --workspace` passing + clippy clean.
+- **Sub-agents** stage/verify only; orchestrator commits.
+- **`CARD_PLAN.md`** referenced in `theme/` module comments but not present in
+  repo. Clean up references or commit the file.
+- **Token-port pattern** (v0.20.0): when migrating tokens, walk every concrete
+  artifact downstream — PNGs, SVGs, literals, comments. Three "walked past this"
+  follow-ups in v0.21.0 all had this shape.
 
-- **The desktop-adaptation spec is the canonical reference for
-  geometry decisions** when porting any future plugin. Read
-  `docs/ui-mockups/desktop-adaptation.md` first; apply the
-  universal rules to every surface; consult the per-screen
-  table for the priority surfaces. The 9 missing-plugin screens
-  (splash now ported; eight remaining) inherit the universal
-  rules without dedicated guidance.
-- **Stitch `generate_variants` is unreliable for layout-only
-  adaptation prompts** as of 2026-05-07. The first call timed
-  out and no variant ever landed in `list_screens`. If a future
-  session wants visual desktop mockups, prefer
-  `generate_screen_from_text` with a fresh narrow prompt per
-  screen rather than `generate_variants` against existing
-  mobile screens.
-- **Token-port pattern.** v0.20.0's chrome-migration commits
-  set a reusable shape for "centralised design system applied
-  across N plugins":
-  1. Constants module (`ui_theme.rs`) is the source of truth.
-  2. Const sites that can't call `Alpha::with_alpha` (not yet
-     `const` on stable) use a literal RGB matching the token,
-     with a unit test pinning the RGB to the token (e.g.
-     `MARKER_VALID`, `HINT_PILE_HIGHLIGHT_COLOUR`,
-     `RIGHT_CLICK_HIGHLIGHT_COLOUR`).
-  3. Cross-plugin duplication (e.g. `MARKER_DEFAULT` ↔
-     `PILE_MARKER_DEFAULT_COLOUR`) collapses to a single
-     promoted const re-exported from one plugin and imported
-     by the other — replaces "kept in sync" doc comments with a
-     compile-time invariant.
-  4. Domain colours (suit pips, card faces, lerp helpers) stay
-     as literals with a comment naming the rationale; only UI
-     chrome routes through tokens.
-- **`SplashFadable` scaffolding pattern** (introduced in
-  `cacb19c`). Any future overlay that needs to fade `N >> 3`
-  elements together should follow the same shape: one tiny
-  marker carrying the full-alpha base colour, one global query
-  that lerps every marker's alpha each frame, no per-element
-  query plumbing. Cleanly outscales the `Without<X>, Without<Y>`
-  query exclusion pattern that the old splash was hitting at
-  three siblings.
-
-### Canonical remote
-
-`github.com/funman300/Rusty_Solitaire` is the canonical repo.
-Always push there. As of v0.21.0 origin matches local; the next
-push happens when post-cut work accumulates and is ready to roll
-into a v0.21.1 / v0.22.0 cut.
-
-### Design direction (Terminal — base16-eighties)
-
-- **Tone:** retro-terminal / synthwave — flat depth (no box-shadows),
-  monospaced-forward typography (JetBrains Mono / FiraMono), tight
-  16 px edge margins, 8 px card radius.
-- **Palette:** near-black surface ramp (`#151515` / `#202020` /
-  `#2a2a2a` / `#353535`), brick-red primary CTA (`#a54242` —
-  swapped from cyan `#6fc2ef` in v0.21.0 commit `a292a7e`), lime
-  success (`#acc267`), gold warning (`#ddb26f`), pink error /
-  suit-red (`#fb9fb1`), lavender celebration (`#e1a3ee`), teal
-  info (`#12cfc0`).
-- **Two-color suits.** Red = `#fb9fb1`, black = `#d0d0d0`.
-  Outlined glyphs for diamonds & clubs are *always on*; the
-  Settings "color-blind mode" toggle swaps red → lime `#acc267`
-  (was red → cyan pre-v0.21.0; lime is the next-best non-red
-  base16-eighties accent now that the primary itself is red).
-- **Card glyphs render upright in both corners** — no 180°
-  inverted-corner-indicator rotation. Single-orientation
-  digital play doesn't benefit from the traditional flip-
-  readback convention. `design-system.md` § Game Cards
-  documents this deliberate deviation.
+---
 
 ## Resume prompt
 
 ```
 You are a senior Rust + Bevy developer working on Solitaire Quest.
-Working directory: <Rusty_Solitaire clone path on this machine>.
-Branch: master. v0.21.8 is tagged at c50eaf8 (cut 2026-05-08,
-replay-overlay polish). Seven post-cut commits are on master (see
-"Since the v0.21.8 cut" above); push of the last four pending.
-v0.21.7 stays at da3e542, v0.21.6 at f63db76, v0.21.5 at a2432df,
-v0.21.4 at 23ff62c, v0.21.3 at 3d92a91, v0.21.2 at f23df3b,
-v0.21.1 at daa655a, v0.21.0 at 04f9bf9.
-Working tree: uncommitted CHANGELOG + SESSION_HANDOFF docs; push
-pending. See CHANGELOG.md § [0.21.9] for full detail.
+Working directory: <Rusty_Solitaire clone path>.
+Branch: master. v0.23.0 is the current version (HEAD locally: bd388fe).
+Phase 8 sync is fully shipped. ARCHITECTURE.md is now v1.3 (all Phase 8 gaps closed).
+Push to origin pending (bd388fe + ARCHITECTURE.md + SESSION_HANDOFF.md commits).
 
-State: HEAD locally — see `git rev-parse HEAD`. Workspace
-tests: 1292 passing / 0 failing. Clippy clean.
-
-READ FIRST (in order, before doing anything):
+READ FIRST (in order):
   1. SESSION_HANDOFF.md  — this file
-  2. CHANGELOG.md        — [0.21.9] section has the pending-cut items
+  2. CHANGELOG.md        — [0.23.0] section has the full Phase 8 detail
   3. CLAUDE.md           — unified-3.0 rule set
-  4. CLAUDE_SPEC.md      — formal architecture spec
-  5. ARCHITECTURE.md     — crate responsibilities + data flow
-  6. docs/ui-mockups/    — design system + 24-mockup library +
-                           desktop-adaptation.md (the rules-based
-                           companion to the mockups; read this
-                           before any plugin port)
-  7. docs/android/*      — Android setup + build runbook
-  8. ~/.claude/projects/<this-project>/memory/MEMORY.md
-                         — saved feedback / project context
-                           (machine-local; may be missing on a
-                           fresh machine)
+  4. ARCHITECTURE.md     — v1.3, fully up to date
+  5. docs/ui-mockups/    — design system + mockup library
+  6. docs/android/       — Android setup + build runbook
+  7. ~/.claude/projects/<this-project>/memory/MEMORY.md
 
-DECISION TO ASK THE PLAYER FIRST:
-  A. Android follow-ups — JNI ClipboardManager bridge (arboard
-     has no Android backend), Android Keystore (blocked on Phase 8).
-     Launch verification + double-tap are closed.
-  B. Phase 8 (sync) — local storage scaffolding, self-hosted
-     Axum server, `SolitaireServerClient` impl. The biggest open
-     arc by scope; rolls up Android dependencies (Keystore,
-     ClipboardManager).
-  C. Play-by-Seed polish — the dialog is functional but has no
-     visual preview of the solver verdict in the UI yet; the
-     HomeMode card is wired but the dialog spawn site and verdict
-     display could use a second pass.
+OPEN WORK (in priority order):
+  B. Leaderboard best-score auto-post (server sync handler + optional
+     GameWonEvent path in sync_plugin)
+  C. Refresh token rotation (server auth handler + new column/table)
+  D. Android AVD functional tests (Keystore + clipboard)
+  E. Theme importer UI button in Settings
+  F. mirror_achievement: decide + implement or remove from trait
 
-WORKFLOW NOTES:
-  - Use the system git config (already correct).
-  - When attributing playtester feedback in commits/docs, use
-    "Quat" not "Rhys" (saved feedback memory).
-  - Sub-agents stage + verify only; orchestrator commits.
-  - Every commit must pass build / clippy / test before pushing.
-  - Push to GitHub (origin) — gh auth setup-git wired on
-    primary dev box; verify on laptop before first push.
-  - Token-port pattern: when migrating tokens, walk every
-    concrete artifact downstream of the token (PNG textures,
-    embedded SVGs, hardcoded literals, comment color names),
-    not just the token name. v0.21.0 surfaced three "the
-    migration walked past this" follow-ups that all matched
-    this shape — codified here so future similar work can
-    pattern-match instead of rediscovering.
-  - Doc-vs-implementation drift pattern: v0.21.1's pile-marker
-    visibility fix (`4d48cad`) implemented an invariant that
-    had been declared in a module doc comment but was never
-    enforced in code. When future work touches a module with
-    a "this does X" doc comment, verify the code actually does
-    X and add a test if not. Two layers, two checks.
-
-OPEN AT THE START: ask which of A–C. Don't pick unilaterally.
-Note: every remaining option is multi-session by nature (A is
-gated on Android tooling; B and C are explicitly multi-session
-arcs). A fresh session is a better fit for any of them than the
-tail of a long working stretch.
+Ask which to start. All are independent; any is a valid next arc.
 ```

@@ -6,6 +6,10 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+---
+
+## [0.23.0] — 2026-05-12
+
 Phase 8 sync UI: the self-hosted-server connection flow is now fully
 playable end-to-end. Players can open a Connect modal from Settings,
 enter a server URL + credentials, log in or register, and see the
