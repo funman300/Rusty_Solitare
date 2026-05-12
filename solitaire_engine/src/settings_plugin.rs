@@ -22,7 +22,12 @@ use solitaire_data::{
     TOOLTIP_DELAY_STEP_SECS,
 };
 
-use crate::events::{InfoToastEvent, ManualSyncRequestEvent, ToggleSettingsRequestEvent};
+use solitaire_data::settings::SyncBackend;
+
+use crate::events::{
+    InfoToastEvent, ManualSyncRequestEvent, SyncConfigureRequestEvent, SyncLogoutRequestEvent,
+    ToggleSettingsRequestEvent,
+};
 use crate::font_plugin::FontResource;
 use crate::progress_plugin::ProgressResource;
 use crate::resources::{SettingsScrollPos, SyncStatus, SyncStatusResource};
@@ -231,6 +236,10 @@ enum SettingsButton {
     /// player's last window size always wins.
     ToggleSmartDefaultSize,
     SyncNow,
+    /// Open the sync-server Connect modal (shown when backend = Local).
+    ConnectSync,
+    /// Disconnect from the sync server (shown when backend = SolitaireServer).
+    DisconnectSync,
     Done,
     /// Select a specific card-back by index from the picker row.
     SelectCardBack(usize),
@@ -284,6 +293,8 @@ impl SettingsButton {
             SettingsButton::SelectTheme(_) => 85,
             // Sync section
             SettingsButton::SyncNow => 90,
+            SettingsButton::ConnectSync => 91,
+            SettingsButton::DisconnectSync => 92,
             // Done is tagged by `attach_focusable_to_modal_buttons` and
             // never reaches `attach_focusable_to_settings_buttons`; the
             // value here is only a fallback for completeness.
@@ -333,6 +344,8 @@ impl Plugin for SettingsPlugin {
             .init_resource::<PendingWindowGeometry>()
             .add_message::<SettingsChangedEvent>()
             .add_message::<ManualSyncRequestEvent>()
+            .add_message::<SyncConfigureRequestEvent>()
+            .add_message::<SyncLogoutRequestEvent>()
             .add_message::<ToggleSettingsRequestEvent>()
             .add_message::<InfoToastEvent>()
             .add_message::<bevy::input::mouse::MouseWheel>()
@@ -849,6 +862,8 @@ fn handle_settings_buttons(
     mut color_blind_text: Query<&mut Text, (With<ColorBlindText>, Without<SfxVolumeText>, Without<MusicVolumeText>, Without<DrawModeText>, Without<ThemeText>, Without<AnimSpeedText>, Without<HighContrastText>, Without<ReduceMotionText>)>,
     mut high_contrast_text: Query<&mut Text, (With<HighContrastText>, Without<SfxVolumeText>, Without<MusicVolumeText>, Without<DrawModeText>, Without<ThemeText>, Without<AnimSpeedText>, Without<ColorBlindText>, Without<ReduceMotionText>)>,
     mut reduce_motion_text: Query<&mut Text, (With<ReduceMotionText>, Without<SfxVolumeText>, Without<MusicVolumeText>, Without<DrawModeText>, Without<ThemeText>, Without<AnimSpeedText>, Without<ColorBlindText>, Without<HighContrastText>)>,
+    mut configure_sync: MessageWriter<SyncConfigureRequestEvent>,
+    mut logout_sync: MessageWriter<SyncLogoutRequestEvent>,
 ) {
     for (interaction, button) in &interaction_query {
         if *interaction != Interaction::Pressed {
@@ -1055,6 +1070,12 @@ fn handle_settings_buttons(
             }
             SettingsButton::SyncNow => {
                 manual_sync.write(ManualSyncRequestEvent);
+            }
+            SettingsButton::ConnectSync => {
+                configure_sync.write(SyncConfigureRequestEvent);
+            }
+            SettingsButton::DisconnectSync => {
+                logout_sync.write(SyncLogoutRequestEvent);
             }
             SettingsButton::Done => {
                 screen.0 = false;
@@ -1596,7 +1617,7 @@ fn spawn_settings_panel(
 
             // --- Sync ---
             section_label(body, "Sync", font_res);
-            sync_row(body, sync_status, font_res);
+            sync_row(body, sync_status, &settings.sync_backend, font_res);
         });
 
         // Done is the only action — primary so the player always knows
@@ -2208,8 +2229,14 @@ fn spawn_thumbnail_placeholder(parent: &mut ChildSpawnerCommands) {
     ));
 }
 
-/// Status text + manual "Sync Now" button.
-fn sync_row(parent: &mut ChildSpawnerCommands, status_text: &str, font_res: Option<&FontResource>) {
+/// Sync section row — shows different controls depending on whether a server
+/// backend is configured.
+fn sync_row(
+    parent: &mut ChildSpawnerCommands,
+    status_text: &str,
+    backend: &SyncBackend,
+    font_res: Option<&FontResource>,
+) {
     let status_font = TextFont {
         font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
         font_size: TYPE_BODY,
@@ -2220,45 +2247,98 @@ fn sync_row(parent: &mut ChildSpawnerCommands, status_text: &str, font_res: Opti
         font_size: TYPE_CAPTION,
         ..default()
     };
+
+    // Helper closure to spawn a small settings-style pill button.
+    let small_button = |row: &mut ChildSpawnerCommands,
+                        marker: SettingsButton,
+                        label: &str,
+                        tooltip: String,
+                        font: TextFont| {
+        row.spawn((
+            marker,
+            Button,
+            Tooltip::new(tooltip),
+            Node {
+                padding: UiRect::axes(VAL_SPACE_3, VAL_SPACE_2),
+                justify_content: JustifyContent::Center,
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(RADIUS_SM)),
+                ..default()
+            },
+            BackgroundColor(BG_ELEVATED_HI),
+            BorderColor::all(BORDER_SUBTLE),
+            HighContrastBorder::with_default(BORDER_SUBTLE),
+        ))
+        .with_children(|b| {
+            b.spawn((
+                Text::new(label.to_string()),
+                font,
+                TextColor(TEXT_PRIMARY),
+            ));
+        });
+    };
+
     parent
         .spawn(Node {
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: VAL_SPACE_3,
+            flex_direction: FlexDirection::Column,
+            row_gap: VAL_SPACE_2,
             ..default()
         })
-        .with_children(|row| {
-            row.spawn((
-                SyncStatusText,
-                Text::new(status_text.to_string()),
-                status_font,
-                TextColor(TEXT_SECONDARY),
-            ));
-            // ManualSyncRequestEvent is always registered, so this
-            // button is safe to show even when SyncPlugin is absent.
-            row.spawn((
-                SettingsButton::SyncNow,
-                Button,
-                Tooltip::new(
-                    "Push and pull stats now. Runs automatically on launch and exit.",
-                ),
-                Node {
-                    padding: UiRect::axes(VAL_SPACE_3, VAL_SPACE_2),
-                    justify_content: JustifyContent::Center,
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(RADIUS_SM)),
-                    ..default()
-                },
-                BackgroundColor(BG_ELEVATED_HI),
-                BorderColor::all(BORDER_SUBTLE),
-                HighContrastBorder::with_default(BORDER_SUBTLE),
-            ))
-            .with_children(|b| {
-                b.spawn((
-                    Text::new("Sync Now"),
-                    button_font,
-                    TextColor(TEXT_PRIMARY),
+        .with_children(|col| {
+            // Status line + inline action buttons.
+            col.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: VAL_SPACE_3,
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: VAL_SPACE_2,
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn((
+                    SyncStatusText,
+                    Text::new(status_text.to_string()),
+                    status_font,
+                    TextColor(TEXT_SECONDARY),
                 ));
+
+                match backend {
+                    SyncBackend::Local => {
+                        small_button(
+                            row,
+                            SettingsButton::ConnectSync,
+                            "Connect",
+                            "Connect to a self-hosted Solitaire Quest sync server.".to_string(),
+                            button_font,
+                        );
+                    }
+                    SyncBackend::SolitaireServer { username, .. } => {
+                        // Show the logged-in username as a secondary label.
+                        row.spawn((
+                            Text::new(format!("({username})")),
+                            TextFont {
+                                font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+                                font_size: TYPE_CAPTION,
+                                ..default()
+                            },
+                            TextColor(TEXT_SECONDARY),
+                        ));
+                        small_button(
+                            row,
+                            SettingsButton::SyncNow,
+                            "Sync Now",
+                            "Push and pull stats now. Runs automatically on launch and exit.".to_string(),
+                            button_font.clone(),
+                        );
+                        small_button(
+                            row,
+                            SettingsButton::DisconnectSync,
+                            "Disconnect",
+                            "Unlink this device from the sync server.".to_string(),
+                            button_font,
+                        );
+                    }
+                }
             });
         });
 }
@@ -2620,19 +2700,20 @@ mod tests {
             "expected the panel to spawn many tooltipped buttons; got {tipped_count}"
         );
 
-        // Spot-check: the Sync Now button's tooltip text is the
-        // canonical microcopy. We find it via the `SettingsButton`
-        // discriminant — there is exactly one Sync Now entity per panel.
-        let sync_tip = app
+        // Spot-check: with default (Local) settings the Connect button
+        // spawns. We verify its tooltip carries the canonical microcopy.
+        let connect_tip = app
             .world_mut()
             .query::<(&SettingsButton, &Tooltip)>()
             .iter(app.world())
-            .find_map(|(btn, tip)| matches!(btn, SettingsButton::SyncNow).then(|| tip.0.clone()))
-            .expect("Sync Now button should spawn with a Tooltip");
+            .find_map(|(btn, tip)| {
+                matches!(btn, SettingsButton::ConnectSync).then(|| tip.0.clone())
+            })
+            .expect("Connect button should spawn with a Tooltip when backend is Local");
         assert_eq!(
-            sync_tip.as_ref(),
-            "Push and pull stats now. Runs automatically on launch and exit.",
-            "Sync Now tooltip must use the canonical microcopy"
+            connect_tip.as_ref(),
+            "Connect to a self-hosted Solitaire Quest sync server.",
+            "ConnectSync tooltip must use the canonical microcopy"
         );
     }
 

@@ -83,6 +83,83 @@ impl SolitaireServerClient {
         }
     }
 
+    /// Authenticate with a username + password and return `(access_token, refresh_token)`.
+    ///
+    /// On success call [`crate::auth_tokens::store_tokens`] with the returned pair.
+    /// The client's `username` field is used as the credential — the caller must
+    /// construct the client with the correct username before calling this.
+    pub async fn login(&self, password: &str) -> Result<(String, String), SyncError> {
+        let resp = self
+            .client
+            .post(format!("{}/api/auth/login", self.base_url))
+            .json(&serde_json::json!({
+                "username": self.username,
+                "password": password,
+            }))
+            .send()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+
+        Self::extract_auth_tokens(resp).await
+    }
+
+    /// Register a new account with a username + password and return `(access_token, refresh_token)`.
+    ///
+    /// On success call [`crate::auth_tokens::store_tokens`] with the returned pair.
+    pub async fn register(&self, password: &str) -> Result<(String, String), SyncError> {
+        let resp = self
+            .client
+            .post(format!("{}/api/auth/register", self.base_url))
+            .json(&serde_json::json!({
+                "username": self.username,
+                "password": password,
+            }))
+            .send()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+
+        Self::extract_auth_tokens(resp).await
+    }
+
+    /// Parse `{ "access_token": "...", "refresh_token": "..." }` from an auth response.
+    async fn extract_auth_tokens(resp: reqwest::Response) -> Result<(String, String), SyncError> {
+        let status = resp.status();
+        if !status.is_success() {
+            let body: serde_json::Value = resp
+                .json()
+                .await
+                .unwrap_or(serde_json::json!({}));
+            let msg = body["error"]
+                .as_str()
+                .or_else(|| body["message"].as_str())
+                .unwrap_or("authentication failed");
+            return Err(if status == reqwest::StatusCode::CONFLICT {
+                SyncError::Auth("username already taken".into())
+            } else if status == reqwest::StatusCode::UNAUTHORIZED
+                || status == reqwest::StatusCode::FORBIDDEN
+            {
+                SyncError::Auth("invalid credentials".into())
+            } else if status == reqwest::StatusCode::BAD_REQUEST {
+                SyncError::Auth(msg.to_string())
+            } else {
+                SyncError::Network(format!("server returned {status}"))
+            });
+        }
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| SyncError::Serialization(e.to_string()))?;
+        let access = body["access_token"]
+            .as_str()
+            .ok_or_else(|| SyncError::Serialization("missing access_token".into()))?
+            .to_string();
+        let refresh = body["refresh_token"]
+            .as_str()
+            .ok_or_else(|| SyncError::Serialization("missing refresh_token".into()))?
+            .to_string();
+        Ok((access, refresh))
+    }
+
     /// Attempt to refresh the access token using the stored refresh token.
     ///
     /// On success the new access token is persisted to the OS keychain,

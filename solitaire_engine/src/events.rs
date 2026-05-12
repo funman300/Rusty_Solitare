@@ -129,6 +129,23 @@ pub struct AchievementUnlockedEvent(pub AchievementRecord);
 #[derive(Message, Debug, Clone, Copy, Default)]
 pub struct ManualSyncRequestEvent;
 
+/// Request to open the sync-server setup modal (Connect flow).
+/// Fired by the "Connect" button in the Settings sync section.
+#[derive(Message, Debug, Clone, Copy, Default)]
+pub struct SyncConfigureRequestEvent;
+
+/// Result of an async login or register attempt. `Ok(username)` on success;
+/// `Err(human-readable message)` on failure. Consumed by `SyncSetupPlugin`
+/// to update the in-world provider and surface errors in the modal.
+#[derive(Message, Debug, Clone)]
+pub struct SyncAuthResultEvent(pub Result<String, String>);
+
+/// Request to disconnect from the current sync backend, clear stored
+/// credentials, and reset to `SyncBackend::Local`. Fired by the "Disconnect"
+/// button in the Settings sync section.
+#[derive(Message, Debug, Clone, Copy, Default)]
+pub struct SyncLogoutRequestEvent;
+
 /// Request to toggle the pause overlay. Fired by the HUD "Pause" button so
 /// the same toggle path runs whether the player presses `Esc` or clicks.
 /// Consumed by `pause_plugin::toggle_pause`, which honours the same drag /

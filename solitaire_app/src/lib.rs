@@ -32,7 +32,7 @@ use solitaire_engine::{
     OnboardingPlugin, PausePlugin, PlayBySeedPlugin, ProfilePlugin, ProgressPlugin,
     RadialMenuPlugin, ReplayOverlayPlugin, ReplayPlaybackPlugin, SafeAreaInsetsPlugin,
     SelectionPlugin, SettingsPlugin,
-    SplashPlugin, StatsPlugin, SyncPlugin, TablePlugin, ThemePlugin, ThemeRegistryPlugin,
+    SplashPlugin, StatsPlugin, SyncPlugin, SyncSetupPlugin, TablePlugin, ThemePlugin, ThemeRegistryPlugin,
     TimeAttackPlugin, UiFocusPlugin, UiModalPlugin, UiTooltipPlugin, WeeklyGoalsPlugin,
     WinSummaryPlugin,
 };
@@ -193,6 +193,7 @@ pub fn run() {
         .add_plugins(AudioPlugin)
         .add_plugins(OnboardingPlugin)
         .add_plugins(SyncPlugin::new(sync_provider))
+        .add_plugins(SyncSetupPlugin)
         .add_plugins(LeaderboardPlugin)
         .add_plugins(WinSummaryPlugin)
         .add_plugins(UiModalPlugin)

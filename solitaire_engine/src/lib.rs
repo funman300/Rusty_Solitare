@@ -40,6 +40,7 @@ pub mod selection_plugin;
 pub mod splash_plugin;
 pub mod stats_plugin;
 pub mod sync_plugin;
+pub mod sync_setup_plugin;
 pub mod table_plugin;
 pub mod theme;
 pub mod time_attack_plugin;
@@ -150,6 +151,7 @@ pub use stats_plugin::{
     StatsScreen, StatsUpdate, WatchReplayButton,
 };
 pub use sync_plugin::{SyncPlugin, SyncProviderResource};
+pub use sync_setup_plugin::SyncSetupPlugin;
 pub use ui_focus::{Disabled, FocusGroup, Focusable, FocusedButton, UiFocusPlugin};
 pub use ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_body_text, spawn_modal_button,
