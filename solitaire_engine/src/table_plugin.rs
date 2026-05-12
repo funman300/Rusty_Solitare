@@ -151,9 +151,22 @@ fn setup_table(
     safe_area: Option<Res<SafeAreaInsets>>,
 ) {
     // Only spawn a camera if one does not already exist (e.g. a parent app
-    // may have added one in tests).
+    // may have added one in tests). Use the felt-green clear colour so the
+    // background reads as green even before the background PNG finishes
+    // loading (which is asynchronous and can lag by several frames on
+    // Android).
     if existing_camera.is_empty() {
-        commands.spawn(Camera2d);
+        commands.spawn((
+            Camera2d,
+            Camera {
+                clear_color: ClearColorConfig::Custom(Color::srgb(
+                    crate::layout::TABLE_COLOUR[0],
+                    crate::layout::TABLE_COLOUR[1],
+                    crate::layout::TABLE_COLOUR[2],
+                )),
+                ..default()
+            },
+        ));
     }
 
     let (window_size, scale) = windows.iter().next().map_or(
@@ -267,20 +280,31 @@ fn spawn_pile_markers(commands: &mut Commands, layout: &Layout) {
             PileMarker(pile.clone()),
         ));
 
-        // Foundation slots no longer carry a suit letter — any Ace can claim
-        // any empty slot, so a fixed C/D/H/S badge would be misleading. Empty
-        // foundation markers render as plain translucent rectangles.
-
-        // Task #43 — King indicator on empty tableau placeholders.
-        if let PileType::Tableau(_) = &pile {
-            entity.with_children(|b| {
-                b.spawn((
-                    Text2d::new("K"),
-                    TextFont { font_size, ..default() },
-                    TextColor(TEXT_PRIMARY.with_alpha(0.35)),
-                    Transform::from_xyz(0.0, 0.0, 0.1),
-                ));
-            });
+        // Tableau markers show "K" (only a King may start an empty column).
+        // Foundation markers show "A" (only an Ace may claim an empty slot).
+        // Neither label carries a suit because any suit may start any slot.
+        match &pile {
+            PileType::Tableau(_) => {
+                entity.with_children(|b| {
+                    b.spawn((
+                        Text2d::new("K"),
+                        TextFont { font_size, ..default() },
+                        TextColor(TEXT_PRIMARY.with_alpha(0.35)),
+                        Transform::from_xyz(0.0, 0.0, 0.1),
+                    ));
+                });
+            }
+            PileType::Foundation(_) => {
+                entity.with_children(|b| {
+                    b.spawn((
+                        Text2d::new("A"),
+                        TextFont { font_size, ..default() },
+                        TextColor(TEXT_PRIMARY.with_alpha(0.35)),
+                        Transform::from_xyz(0.0, 0.0, 0.1),
+                    ));
+                });
+            }
+            _ => {}
         }
     }
 }

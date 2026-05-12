@@ -628,15 +628,42 @@ fn spawn_action_buttons(
     let top_inset = insets.as_deref().copied().unwrap_or_default().top;
     let font = TextFont {
         font: font_res.as_ref().map(|f| f.0.clone()).unwrap_or_default(),
-        // TYPE_BODY (14.0) — was a hardcoded `16.0` until the
-        // top-bar-overlap fix. Aligns with the rest of `hud_plugin`'s
-        // text (which already routes through the `TYPE_*` tokens) and
-        // reclaims horizontal space so the action button row doesn't
-        // collide with the left-anchored HUD column at narrow window
-        // widths.
         font_size: TYPE_BODY,
         ..default()
     };
+
+    // On Android, 7 text-labelled buttons at 48 dp each wrap to two rows on
+    // a 411 dp phone. Use compact Unicode symbols and tighter gaps so all 7
+    // fit in a single row (7×44 + 6×4 = 332 dp, well within a 90%-wide band
+    // of 370 dp). On desktop, keep the descriptive text labels.
+    #[cfg(target_os = "android")]
+    let (max_width, col_gap, row_gap_val) =
+        (Val::Percent(90.0), Val::Px(4.0), Val::Px(4.0));
+    #[cfg(not(target_os = "android"))]
+    let (max_width, col_gap, row_gap_val) =
+        (Val::Percent(65.0), VAL_SPACE_2, VAL_SPACE_2);
+
+    #[cfg(target_os = "android")]
+    let labels = (
+        /* menu */  "\u{2261}",          // ≡  hamburger
+        /* undo */  "\u{21A9}",          // ↩  undo arrow
+        /* pause */ "\u{23F8}",          // ⏸  pause symbol
+        /* help */  "?",
+        /* hint */  "\u{2605}",          // ★  star
+        /* modes */ "\u{2699}\u{25BE}",  // ⚙▾ gear+chevron
+        /* new */   "+",
+    );
+    #[cfg(not(target_os = "android"))]
+    let labels = (
+        "Menu \u{25BE}",
+        "Undo",
+        "Pause",
+        "Help",
+        "Hint",
+        "Modes \u{25BE}",
+        "New Game",
+    );
+
     commands
         .spawn((
             Node {
@@ -644,19 +671,11 @@ fn spawn_action_buttons(
                 right: VAL_SPACE_3,
                 top: Val::Px(SPACE_2 + top_inset),
                 flex_direction: FlexDirection::Row,
-                // 6 buttons total ~510 px wide; on a desktop window
-                // (typically >= 1280 px) `max_width: 65%` is >= 832 px
-                // and the row stays a single line. On a 411 dp phone
-                // 65% is 267 px; the 6 buttons wrap to 2 lines instead
-                // of 3, reclaiming one row of vertical HUD space.
-                max_width: Val::Percent(65.0),
+                max_width,
                 flex_wrap: FlexWrap::Wrap,
-                // When the row wraps, buttons pack to the *end* of each
-                // line so the row stays visually right-aligned (matches
-                // the `right: VAL_SPACE_3` anchor).
                 justify_content: JustifyContent::FlexEnd,
-                column_gap: VAL_SPACE_2,
-                row_gap: VAL_SPACE_2,
+                column_gap: col_gap,
+                row_gap: row_gap_val,
                 align_items: AlignItems::Center,
                 ..default()
             },
@@ -664,77 +683,15 @@ fn spawn_action_buttons(
             SafeAreaAnchoredTop { base_top: SPACE_2 },
         ))
         .with_children(|row| {
-            // Menu and Modes don't have a single hotkey accelerator
-            // (each row inside their popover has its own); their button
-            // labels carry the dropdown chevron in lieu of a key chip.
-            //
-            // The trailing `order` argument is the per-button index in
-            // visual reading order (left → right). It feeds
-            // `Focusable { group: Hud, order }` so Tab cycles the action
-            // bar in the same order the eye scans it.
-            spawn_action_button(
-                row,
-                MenuButton,
-                "Menu \u{25BE}",
-                None,
-                "Open Stats, Achievements, Profile, Settings, or Leaderboard.",
-                &font,
-                0,
-            );
-            spawn_action_button(
-                row,
-                UndoButton,
-                "Undo",
-                Some("U"),
-                "Take back your last move. Costs points and blocks No Undo.",
-                &font,
-                1,
-            );
-            spawn_action_button(
-                row,
-                PauseButton,
-                "Pause",
-                Some("Esc"),
-                "Pause the game and freeze the timer.",
-                &font,
-                2,
-            );
-            spawn_action_button(
-                row,
-                HelpButton,
-                "Help",
-                Some("F1"),
-                "Show controls, rules, and keyboard shortcuts.",
-                &font,
-                3,
-            );
-            spawn_action_button(
-                row,
-                HintButton,
-                "Hint",
-                Some("H"),
-                "Highlight a suggested move. Cycles through alternatives on repeat taps.",
-                &font,
-                4,
-            );
-            spawn_action_button(
-                row,
-                ModesButton,
-                "Modes \u{25BE}",
-                None,
-                "Switch modes: Classic, Daily, Zen, Challenge, Time Attack.",
-                &font,
-                5,
-            );
-            spawn_action_button(
-                row,
-                NewGameButton,
-                "New Game",
-                Some("N"),
-                "Start a fresh deal. Confirms first if a game is in progress.",
-                &font,
-                6,
-            );
+            // The trailing `order` argument feeds `Focusable { group: Hud, order }`
+            // so Tab cycles the action bar in visual reading order.
+            spawn_action_button(row, MenuButton,   labels.0, None,         "Open Stats, Achievements, Profile, Settings, or Leaderboard.", &font, 0);
+            spawn_action_button(row, UndoButton,   labels.1, Some("U"),    "Take back your last move. Costs points and blocks No Undo.", &font, 1);
+            spawn_action_button(row, PauseButton,  labels.2, Some("Esc"),  "Pause the game and freeze the timer.", &font, 2);
+            spawn_action_button(row, HelpButton,   labels.3, Some("F1"),   "Show controls, rules, and keyboard shortcuts.", &font, 3);
+            spawn_action_button(row, HintButton,   labels.4, Some("H"),    "Highlight a suggested move. Cycles through alternatives on repeat taps.", &font, 4);
+            spawn_action_button(row, ModesButton,  labels.5, None,         "Switch modes: Classic, Daily, Zen, Challenge, Time Attack.", &font, 5);
+            spawn_action_button(row, NewGameButton,labels.6, Some("N"),    "Start a fresh deal. Confirms first if a game is in progress.", &font, 6);
         });
 }
 
@@ -773,35 +730,29 @@ fn spawn_action_button<M: Component>(
         font_size: TYPE_CAPTION,
         ..default()
     };
+    // On Android, use tighter padding and a slightly smaller min-size so all
+    // 7 icon-label buttons fit in one row on a ~411 dp phone. 44 dp ≥
+    // Apple's minimum touch target; padding of 4 dp each side keeps the icon
+    // centred with room to breathe. On desktop, keep the comfortable 48 dp
+    // floor and 8 dp side padding.
+    #[cfg(target_os = "android")]
+    let (pad, min_w, min_h) = (UiRect::axes(Val::Px(4.0), Val::Px(4.0)), Val::Px(44.0), Val::Px(44.0));
+    #[cfg(not(target_os = "android"))]
+    let (pad, min_w, min_h) = (UiRect::axes(VAL_SPACE_2, VAL_SPACE_2), Val::Px(48.0), Val::Px(48.0));
+
     row.spawn((
         marker,
         ActionButton,
         Button,
         Tooltip::new(tooltip),
-        // Joins the `Hud` focus group at the supplied order so Tab
-        // cycles HUD buttons left-to-right under Phase 2. The HUD focus
-        // ring still only engages when a HUD button is hovered (or in
-        // future phases, when the player explicitly switches groups);
-        // the marker just declares membership.
         Focusable {
             group: FocusGroup::Hud,
             order,
         },
         Node {
-            // Horizontal padding stepped down from VAL_SPACE_3 to
-            // VAL_SPACE_2 to reclaim ~96px across the 6-button row at
-            // narrow window widths (see top-bar-overlap fix in the
-            // companion commit). Vertical padding stays at VAL_SPACE_2
-            // so button height tracks the rest of the chrome band.
-            padding: UiRect::axes(VAL_SPACE_2, VAL_SPACE_2),
-            // 48 px floors meet Material's recommended thumb-target
-            // size on touch and are a no-op on desktop for buttons
-            // whose content already exceeds 48 px in either axis
-            // (Menu, Modes, New Game, etc.). Without these, "Undo"
-            // ends up ~46 × 33 px — comfortably tappable with a mouse
-            // but right at the threshold for a finger.
-            min_width: Val::Px(48.0),
-            min_height: Val::Px(48.0),
+            padding: pad,
+            min_width: min_w,
+            min_height: min_h,
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             border_radius: BorderRadius::all(Val::Px(RADIUS_MD)),

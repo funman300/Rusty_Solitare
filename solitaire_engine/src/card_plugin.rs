@@ -41,7 +41,6 @@ use crate::ui_theme::{
 /// Fraction of card height used as vertical offset between face-up tableau cards.
 pub const TABLEAU_FAN_FRAC: f32 = 0.25;
 
-/// Tighter fan for face-down cards in the tableau — just enough to show the stack.
 /// Per-card vertical step for face-down tableau cards, as a fraction of
 /// card height. Smaller than [`TABLEAU_FAN_FRAC`] because face-down cards
 /// don't need their full body shown — only the back-pattern strip is
@@ -49,7 +48,12 @@ pub const TABLEAU_FAN_FRAC: f32 = 0.25;
 /// when hit-testing tableau columns; any drift between this and the
 /// renderer creates a visible offset between the card face and where
 /// clicks land.
-pub const TABLEAU_FACEDOWN_FAN_FRAC: f32 = 0.12;
+///
+/// Matches `layout::TABLEAU_FACEDOWN_FAN_FRAC` (0.20). Both constants must
+/// stay in sync; the layout constant drives the adaptive LayoutResource value
+/// used at runtime, while this one is the minimum floor used by
+/// `update_tableau_fan_frac` when computing proportional updates.
+pub const TABLEAU_FACEDOWN_FAN_FRAC: f32 = 0.20;
 
 /// Fraction of card height used as a tiny offset between stacked cards in
 /// non-tableau piles, so stacking is visible. Public so other plugins
@@ -1834,9 +1838,13 @@ fn resize_cards_in_place(
 
 /// Adjusts `LayoutResource.tableau_fan_frac` to match the current maximum
 /// face-up column depth. Runs after every `StateChangedEvent` so the fan
-/// grows as the player reveals cards — preventing over-spread early-game
-/// (fresh deal: max depth = 1, fan_frac = TABLEAU_FAN_FRAC = 0.25) while
-/// allowing the full window-sized fan late-game (up to 13 face-up cards).
+/// expands as the player reveals cards while staying within the window.
+///
+/// On fresh deal (max face-up depth = 1) the function returns early, leaving
+/// both fracs at the window-size-adaptive values that `compute_layout` already
+/// computed for the current viewport. Previously it overwrote the adaptive
+/// value with the desktop minimum (0.25) — the wrong behaviour on portrait
+/// phones where the adaptive value is much larger.
 fn update_tableau_fan_frac(
     mut events: MessageReader<StateChangedEvent>,
     game: Option<Res<GameStateResource>>,
@@ -1857,21 +1865,24 @@ fn update_tableau_fan_frac(
     let card_h = layout.0.card_size.y;
     let avail = layout.0.available_tableau_height;
 
-    let new_frac = if max_depth <= 1 || card_h <= 0.0 {
-        TABLEAU_FAN_FRAC
-    } else {
-        let ideal = avail / ((max_depth - 1) as f32 * card_h);
-        let max_frac = if card_h > 0.0 { avail / (12.0 * card_h) } else { TABLEAU_FAN_FRAC };
-        ideal.clamp(TABLEAU_FAN_FRAC, max_frac.max(TABLEAU_FAN_FRAC))
-    };
+    // With ≤ 1 face-up card per column (fresh deal, or completely face-down
+    // piles) the face-up fan fraction has no visible effect. Leave both fracs
+    // at the adaptive values set by compute_layout rather than snapping them
+    // to the desktop minimum.
+    if max_depth <= 1 || card_h <= 0.0 {
+        return;
+    }
+
+    let ideal = avail / ((max_depth - 1) as f32 * card_h);
+    let max_frac = if card_h > 0.0 { avail / (12.0 * card_h) } else { TABLEAU_FAN_FRAC };
+    let new_frac = ideal.clamp(TABLEAU_FAN_FRAC, max_frac.max(TABLEAU_FAN_FRAC));
     let new_facedown_frac = new_frac * (TABLEAU_FACEDOWN_FAN_FRAC / TABLEAU_FAN_FRAC);
 
-    // Only update the face-up fan. The face-down fan is left at the
-    // window-size-adaptive value from compute_layout so stacked face-down
-    // cards remain visible regardless of how many face-up cards are out.
-    let _ = new_facedown_frac; // computed but unused — leave facedown alone
     if (layout.0.tableau_fan_frac - new_frac).abs() > 1e-4 {
         layout.0.tableau_fan_frac = new_frac;
+    }
+    if (layout.0.tableau_facedown_fan_frac - new_facedown_frac).abs() > 1e-4 {
+        layout.0.tableau_facedown_fan_frac = new_facedown_frac;
     }
 }
 

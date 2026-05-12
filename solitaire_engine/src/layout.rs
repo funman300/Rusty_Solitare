@@ -61,7 +61,12 @@ const TABLEAU_FAN_FRAC: f32 = 0.25;
 
 /// Minimum fraction for face-down tableau cards. Scales proportionally with
 /// the adaptive face-up fraction so hit-testing and rendering stay in sync.
-const TABLEAU_FACEDOWN_FAN_FRAC: f32 = 0.12;
+///
+/// Raised from 0.12 to 0.20 so face-down stacks on portrait phones show
+/// enough of each card back to read as a meaningful stack rather than a
+/// thin sliver. The ratio to TABLEAU_FAN_FRAC (0.80) is preserved by
+/// the adaptive scaling in `compute_layout`.
+const TABLEAU_FACEDOWN_FAN_FRAC: f32 = 0.20;
 
 /// Largest possible face-up tableau column in Klondike: a King down to an Ace
 /// after every face-down card has flipped on column 7. Layout sizing must keep
@@ -72,10 +77,15 @@ const MAX_TABLEAU_CARDS: f32 = 13.0;
 /// (action buttons, Score / Moves / Timer readouts). The card grid starts
 /// below this band so the HUD doesn't bleed into the play surface.
 ///
-/// 64 px comfortably fits the action button bar (~32 px tall) plus the
-/// Score/Moves text line plus padding, with a few pixels of breathing room.
-/// The matching translucent background is painted by `hud_plugin::spawn_hud_band`.
+/// Desktop: 64 px fits the single-row action bar plus the Score/Moves line.
+/// Android: 128 px accommodates the two-row button wrap on narrow phones
+/// (7 buttons × ~52 dp each, with a 65% max-width constraint, wraps to two
+/// ~48 dp rows plus row-gap). Without this larger reserve the bottom row of
+/// buttons overlaps the top card row.
+#[cfg(not(target_os = "android"))]
 pub const HUD_BAND_HEIGHT: f32 = 64.0;
+#[cfg(target_os = "android")]
+pub const HUD_BAND_HEIGHT: f32 = 128.0;
 
 /// Table background colour (dark green felt).
 pub const TABLE_COLOUR: [f32; 3] = [0.059, 0.322, 0.196];
