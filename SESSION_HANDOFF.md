@@ -1,6 +1,6 @@
 # Solitaire Quest — Session Handoff
 
-**Last updated:** 2026-05-12 — WASM build script + push-retry test shipped (`198df75`). HEAD locally: `198df75`. Push pending.
+**Last updated:** 2026-05-12 — Password reset CLI shipped (`7514684`). HEAD locally: `7514684`. Push pending.
 
 Phase 8 closes the self-hosted-server connection arc end-to-end: login/register
 modal, re-auth on token expiry, account deletion flow, server deployment
@@ -12,8 +12,8 @@ and full server integration tests.
 
 ## Current state
 
-- **HEAD locally:** `198df75` (test: push retry + build_test_pool).
-- **HEAD on origin:** `08f74d1` (pushed — 3 commits ahead).
+- **HEAD locally:** `7514684` (feat: --reset-password subcommand).
+- **HEAD on origin:** `566b112` (pushed — 3 commits ahead).
 - **Working tree:** `SESSION_HANDOFF.md` modified, uncommitted.
 - **Build:** `cargo clippy --workspace --all-targets -- -D warnings` clean.
 - **Tests:** **1300+ passing / 0 failing** across the workspace.
