@@ -18,6 +18,19 @@
 //!
 //! `SyncLogoutRequestEvent` → `handle_logout` clears tokens, resets
 //! `SyncBackend::Local`, swaps provider, closes settings, shows toast.
+//!
+//! # Flow (delete account)
+//!
+//! 1. Player clicks "Delete Account" in Settings.
+//! 2. `DeleteAccountRequestEvent` → `open_delete_confirm_modal` spawns a
+//!    two-button confirmation modal.
+//! 3. "Cancel" → despawn modal.
+//! 4. "Delete Forever" → `handle_delete_confirm` → async task on
+//!    `AsyncComputeTaskPool` calling `SyncProvider::delete_account`.
+//! 5. `poll_delete_task` harvests the result:
+//!    - **Ok**: fire `SyncLogoutRequestEvent` (clears tokens + resets backend)
+//!      + toast.
+//!    - **Err**: display error in a toast; modal is already closed.
 
 use std::sync::Arc;
 
@@ -34,7 +47,8 @@ use solitaire_data::{
 };
 
 use crate::events::{
-    InfoToastEvent, ManualSyncRequestEvent, SyncConfigureRequestEvent, SyncLogoutRequestEvent,
+    DeleteAccountRequestEvent, InfoToastEvent, ManualSyncRequestEvent, SyncConfigureRequestEvent,
+    SyncLogoutRequestEvent,
 };
 use crate::font_plugin::FontResource;
 use crate::settings_plugin::{SettingsResource, SettingsScreen, SettingsStoragePath};
@@ -128,6 +142,22 @@ struct PendingAuthTask {
     username: String,
 }
 
+/// Marker on the account-deletion confirmation modal root.
+#[derive(Component, Debug)]
+struct DeleteConfirmScreen;
+
+/// Marks the "Delete Forever" confirmation button.
+#[derive(Component, Debug)]
+struct DeleteConfirmButton;
+
+/// Marks the cancel button inside the delete-confirm modal.
+#[derive(Component, Debug)]
+struct DeleteCancelButton;
+
+/// In-flight account-deletion task.
+#[derive(Resource, Default)]
+struct PendingDeleteTask(Option<Task<Result<(), SyncError>>>);
+
 // ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
@@ -139,8 +169,10 @@ impl Plugin for SyncSetupPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SyncFocusedField>()
             .init_resource::<PendingAuthTask>()
+            .init_resource::<PendingDeleteTask>()
             .add_message::<SyncConfigureRequestEvent>()
             .add_message::<SyncLogoutRequestEvent>()
+            .add_message::<DeleteAccountRequestEvent>()
             .add_message::<ManualSyncRequestEvent>()
             .add_message::<InfoToastEvent>()
             .add_systems(
@@ -153,6 +185,10 @@ impl Plugin for SyncSetupPlugin {
                     poll_auth_task,
                     handle_cancel,
                     handle_logout,
+                    open_delete_confirm_modal,
+                    handle_delete_cancel,
+                    handle_delete_confirm,
+                    poll_delete_task,
                 )
                     .chain(),
             );
@@ -480,6 +516,94 @@ fn handle_logout(
     toast.write(InfoToastEvent("Disconnected from sync server".to_string()));
 }
 
+/// Opens the account-deletion confirmation modal when `DeleteAccountRequestEvent` fires.
+fn open_delete_confirm_modal(
+    mut events: MessageReader<DeleteAccountRequestEvent>,
+    existing: Query<(), With<DeleteConfirmScreen>>,
+    mut commands: Commands,
+    font_res: Option<Res<FontResource>>,
+) {
+    if events.is_empty() {
+        return;
+    }
+    events.clear();
+    if !existing.is_empty() {
+        return;
+    }
+    spawn_delete_confirm_modal(&mut commands, font_res.as_deref());
+}
+
+/// Despawns the delete-confirm modal on the cancel button or Escape.
+fn handle_delete_cancel(
+    cancel_q: Query<&Interaction, (Changed<Interaction>, With<DeleteCancelButton>)>,
+    keys: Res<ButtonInput<KeyCode>>,
+    screen: Query<Entity, With<DeleteConfirmScreen>>,
+    mut commands: Commands,
+) {
+    let cancelled = cancel_q.iter().any(|i| *i == Interaction::Pressed)
+        || keys.just_pressed(KeyCode::Escape);
+    if !cancelled || screen.is_empty() {
+        return;
+    }
+    for entity in &screen {
+        commands.entity(entity).despawn();
+    }
+}
+
+/// Spawns the async delete-account task when "Delete Forever" is clicked.
+fn handle_delete_confirm(
+    confirm_q: Query<&Interaction, (Changed<Interaction>, With<DeleteConfirmButton>)>,
+    provider: Res<SyncProviderResource>,
+    mut pending: ResMut<PendingDeleteTask>,
+    screen: Query<Entity, With<DeleteConfirmScreen>>,
+    mut commands: Commands,
+) {
+    if !confirm_q.iter().any(|i| *i == Interaction::Pressed) || pending.0.is_some() {
+        return;
+    }
+    // Despawn the confirmation modal immediately so the player can't double-click.
+    for entity in &screen {
+        commands.entity(entity).despawn();
+    }
+    let provider = provider.0.clone();
+    pending.0 = Some(AsyncComputeTaskPool::get().spawn(async move {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| SyncError::Network(format!("tokio rt: {e}")))?
+            .block_on(provider.delete_account())
+    }));
+}
+
+/// Polls the in-flight delete-account task. On success fires `SyncLogoutRequestEvent`.
+fn poll_delete_task(
+    mut pending: ResMut<PendingDeleteTask>,
+    mut logout: MessageWriter<SyncLogoutRequestEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
+) {
+    let Some(task) = pending.0.as_mut() else {
+        return;
+    };
+    let Some(result) = future::block_on(future::poll_once(task)) else {
+        return;
+    };
+    pending.0 = None;
+    match result {
+        Ok(()) => {
+            logout.write(SyncLogoutRequestEvent);
+            toast.write(InfoToastEvent("Account deleted".to_string()));
+        }
+        Err(e) => {
+            let msg = match e {
+                SyncError::Auth(_) => "Not authorised — try reconnecting first".to_string(),
+                SyncError::Network(m) => format!("Network error: {m}"),
+                other => format!("Delete failed: {other}"),
+            };
+            toast.write(InfoToastEvent(msg));
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // UI construction
 // ---------------------------------------------------------------------------
@@ -664,6 +788,75 @@ fn make_font(font_res: Option<&FontResource>, size: f32) -> TextFont {
         font_size: size,
         ..default()
     }
+}
+
+fn spawn_delete_confirm_modal(commands: &mut Commands, font_res: Option<&FontResource>) {
+    spawn_modal(commands, DeleteConfirmScreen, Z_MODAL_PANEL + 2, |card| {
+        // Header.
+        card.spawn(Node {
+            padding: UiRect::new(VAL_SPACE_4, VAL_SPACE_4, VAL_SPACE_3, VAL_SPACE_2),
+            ..default()
+        })
+        .with_children(|h| {
+            h.spawn((
+                Text::new("Delete Account"),
+                make_font(font_res, TYPE_BODY_LG),
+                TextColor(STATE_DANGER),
+            ));
+        });
+
+        // Body.
+        card.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: VAL_SPACE_2,
+            padding: UiRect::axes(VAL_SPACE_4, VAL_SPACE_2),
+            ..default()
+        })
+        .with_children(|body| {
+            body.spawn((
+                Text::new(
+                    "This permanently deletes your account and all server data.\n\
+                     Local progress is kept. This cannot be undone.",
+                ),
+                make_font(font_res, TYPE_BODY),
+                TextColor(TEXT_SECONDARY),
+            ));
+        });
+
+        // Actions.
+        card.spawn(Node {
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::FlexEnd,
+            column_gap: VAL_SPACE_2,
+            padding: UiRect::new(VAL_SPACE_4, VAL_SPACE_4, VAL_SPACE_2, VAL_SPACE_3),
+            ..default()
+        })
+        .with_children(|actions| {
+            spawn_action_button(actions, DeleteCancelButton, "Cancel", false, font_res);
+            // "Delete Forever" button — danger styling (STATE_DANGER background).
+            actions
+                .spawn((
+                    DeleteConfirmButton,
+                    Button,
+                    Node {
+                        padding: UiRect::axes(VAL_SPACE_3, VAL_SPACE_2),
+                        justify_content: JustifyContent::Center,
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(RADIUS_SM)),
+                        ..default()
+                    },
+                    BackgroundColor(STATE_DANGER),
+                    BorderColor::all(STATE_DANGER),
+                ))
+                .with_children(|b| {
+                    b.spawn((
+                        Text::new("Delete Forever"),
+                        make_font(font_res, TYPE_BODY),
+                        TextColor(TEXT_PRIMARY),
+                    ));
+                });
+        });
+    });
 }
 
 /// Returns the display string for a field — password fields show bullets.

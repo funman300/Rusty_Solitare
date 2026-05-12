@@ -25,8 +25,8 @@ use solitaire_data::{
 use solitaire_data::settings::SyncBackend;
 
 use crate::events::{
-    InfoToastEvent, ManualSyncRequestEvent, SyncConfigureRequestEvent, SyncLogoutRequestEvent,
-    ToggleSettingsRequestEvent,
+    DeleteAccountRequestEvent, InfoToastEvent, ManualSyncRequestEvent, SyncConfigureRequestEvent,
+    SyncLogoutRequestEvent, ToggleSettingsRequestEvent,
 };
 use crate::font_plugin::FontResource;
 use crate::progress_plugin::ProgressResource;
@@ -240,6 +240,8 @@ enum SettingsButton {
     ConnectSync,
     /// Disconnect from the sync server (shown when backend = SolitaireServer).
     DisconnectSync,
+    /// Open the account-deletion confirmation modal.
+    DeleteAccount,
     Done,
     /// Select a specific card-back by index from the picker row.
     SelectCardBack(usize),
@@ -295,6 +297,7 @@ impl SettingsButton {
             SettingsButton::SyncNow => 90,
             SettingsButton::ConnectSync => 91,
             SettingsButton::DisconnectSync => 92,
+            SettingsButton::DeleteAccount => 93,
             // Done is tagged by `attach_focusable_to_modal_buttons` and
             // never reaches `attach_focusable_to_settings_buttons`; the
             // value here is only a fallback for completeness.
@@ -346,6 +349,7 @@ impl Plugin for SettingsPlugin {
             .add_message::<ManualSyncRequestEvent>()
             .add_message::<SyncConfigureRequestEvent>()
             .add_message::<SyncLogoutRequestEvent>()
+            .add_message::<DeleteAccountRequestEvent>()
             .add_message::<ToggleSettingsRequestEvent>()
             .add_message::<InfoToastEvent>()
             .add_message::<bevy::input::mouse::MouseWheel>()
@@ -372,6 +376,7 @@ impl Plugin for SettingsPlugin {
                 (
                     sync_settings_panel_visibility,
                     handle_settings_buttons,
+                    handle_sync_buttons,
                     update_sync_status_text,
                     update_card_back_text,
                     update_background_text,
@@ -853,7 +858,6 @@ fn handle_settings_buttons(
     mut screen: ResMut<SettingsScreen>,
     path: Res<SettingsStoragePath>,
     mut changed: MessageWriter<SettingsChangedEvent>,
-    mut manual_sync: MessageWriter<ManualSyncRequestEvent>,
     mut sfx_text: Query<&mut Text, (With<SfxVolumeText>, Without<MusicVolumeText>, Without<DrawModeText>, Without<ThemeText>, Without<AnimSpeedText>, Without<ColorBlindText>, Without<HighContrastText>, Without<ReduceMotionText>)>,
     mut music_text: Query<&mut Text, (With<MusicVolumeText>, Without<SfxVolumeText>, Without<DrawModeText>, Without<ThemeText>, Without<AnimSpeedText>, Without<ColorBlindText>, Without<HighContrastText>, Without<ReduceMotionText>)>,
     mut draw_text: Query<&mut Text, (With<DrawModeText>, Without<SfxVolumeText>, Without<MusicVolumeText>, Without<ThemeText>, Without<AnimSpeedText>, Without<ColorBlindText>, Without<HighContrastText>, Without<ReduceMotionText>)>,
@@ -862,8 +866,6 @@ fn handle_settings_buttons(
     mut color_blind_text: Query<&mut Text, (With<ColorBlindText>, Without<SfxVolumeText>, Without<MusicVolumeText>, Without<DrawModeText>, Without<ThemeText>, Without<AnimSpeedText>, Without<HighContrastText>, Without<ReduceMotionText>)>,
     mut high_contrast_text: Query<&mut Text, (With<HighContrastText>, Without<SfxVolumeText>, Without<MusicVolumeText>, Without<DrawModeText>, Without<ThemeText>, Without<AnimSpeedText>, Without<ColorBlindText>, Without<ReduceMotionText>)>,
     mut reduce_motion_text: Query<&mut Text, (With<ReduceMotionText>, Without<SfxVolumeText>, Without<MusicVolumeText>, Without<DrawModeText>, Without<ThemeText>, Without<AnimSpeedText>, Without<ColorBlindText>, Without<HighContrastText>)>,
-    mut configure_sync: MessageWriter<SyncConfigureRequestEvent>,
-    mut logout_sync: MessageWriter<SyncLogoutRequestEvent>,
 ) {
     for (interaction, button) in &interaction_query {
         if *interaction != Interaction::Pressed {
@@ -1068,18 +1070,39 @@ fn handle_settings_buttons(
                     changed.write(SettingsChangedEvent(settings.0.clone()));
                 }
             }
-            SettingsButton::SyncNow => {
-                manual_sync.write(ManualSyncRequestEvent);
-            }
-            SettingsButton::ConnectSync => {
-                configure_sync.write(SyncConfigureRequestEvent);
-            }
-            SettingsButton::DisconnectSync => {
-                logout_sync.write(SyncLogoutRequestEvent);
+            SettingsButton::SyncNow
+            | SettingsButton::ConnectSync
+            | SettingsButton::DisconnectSync
+            | SettingsButton::DeleteAccount => {
+                // Handled by `handle_sync_buttons`.
             }
             SettingsButton::Done => {
                 screen.0 = false;
             }
+        }
+    }
+}
+
+/// Handles sync-related settings buttons: Sync Now, Connect, Disconnect,
+/// and Delete Account. Split from `handle_settings_buttons` to stay within
+/// Bevy's 16-parameter system limit.
+fn handle_sync_buttons(
+    interaction_query: Query<(&Interaction, &SettingsButton), Changed<Interaction>>,
+    mut manual_sync: MessageWriter<ManualSyncRequestEvent>,
+    mut configure_sync: MessageWriter<SyncConfigureRequestEvent>,
+    mut logout_sync: MessageWriter<SyncLogoutRequestEvent>,
+    mut delete_account: MessageWriter<DeleteAccountRequestEvent>,
+) {
+    for (interaction, button) in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        match button {
+            SettingsButton::SyncNow => { manual_sync.write(ManualSyncRequestEvent); }
+            SettingsButton::ConnectSync => { configure_sync.write(SyncConfigureRequestEvent); }
+            SettingsButton::DisconnectSync => { logout_sync.write(SyncLogoutRequestEvent); }
+            SettingsButton::DeleteAccount => { delete_account.write(DeleteAccountRequestEvent); }
+            _ => {}
         }
     }
 }
@@ -2335,6 +2358,13 @@ fn sync_row(
                             SettingsButton::DisconnectSync,
                             "Disconnect",
                             "Unlink this device from the sync server.".to_string(),
+                            button_font.clone(),
+                        );
+                        small_button(
+                            row,
+                            SettingsButton::DeleteAccount,
+                            "Delete Account",
+                            "Permanently delete your account and all server data. Cannot be undone.".to_string(),
                             button_font,
                         );
                     }

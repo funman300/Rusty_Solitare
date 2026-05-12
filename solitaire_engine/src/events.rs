@@ -140,6 +140,12 @@ pub struct SyncConfigureRequestEvent;
 #[derive(Message, Debug, Clone, Copy, Default)]
 pub struct SyncLogoutRequestEvent;
 
+/// Request to open the account-deletion confirmation modal. Fired by the
+/// "Delete Account" button in the Settings sync section (visible only when
+/// a server backend is configured). Consumed by `SyncSetupPlugin`.
+#[derive(Message, Debug, Clone, Copy, Default)]
+pub struct DeleteAccountRequestEvent;
+
 /// Request to toggle the pause overlay. Fired by the HUD "Pause" button so
 /// the same toggle path runs whether the player presses `Esc` or clicks.
 /// Consumed by `pause_plugin::toggle_pause`, which honours the same drag /
