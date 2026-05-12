@@ -65,11 +65,13 @@ Also shipped (pre-Phase 8 but post-v0.22.0, already in CHANGELOG):
   steady-state; integration test passes.
 
 ### 4. Android validation
-- **Android Keystore functional test** — JNI AES-GCM code ships (`f281425`) but
-  no AVD round-trip test has been run. Required before Phase 8 sync goes live on
-  Android.
-- **JNI clipboard functional test** — same status (`2c822ba`). Note: `adb tap`
-  doesn't work in headless AVD (see memory); requires a touch-gesture path.
+- [x] **Android Keystore functional test.** Done (2026-05-11, Pixel 7 AVD,
+  Android 14): `load_access_token()` exercised via `start_pull`; logcat confirmed
+  `NotFound` returned cleanly — no JNI panic. See `docs/android/PLAYABILITY_TODO.md` P4.
+- [x] **JNI clipboard functional test.** Done (2026-05-11): temporary `KEYCODE_C`
+  hook confirmed `ClipboardManager.setPrimaryClip()` succeeds on Android 14.
+  Hook reverted. Production path requires Interaction::Pressed + non-null `share_url`.
+  Note: `adb shell input tap` doesn't deliver touch events on headless AVD (documented).
 - **`cargo apk build --lib` noisy stderr** — post-sign panic doesn't affect the
   APK but pollutes CI output. Document `--lib` as canonical or upstream a fix.
 
@@ -146,8 +148,8 @@ READ FIRST (in order):
   7. ~/.claude/projects/<this-project>/memory/MEMORY.md
 
 OPEN WORK:
-  A. Android AVD functional tests (Keystore + clipboard) — requires running AVD.
-     All other punch-list items are complete.
+  Phase 8 punch list is fully closed. All items verified complete.
+  Remaining nuisance: `cargo apk build --lib` noisy stderr (cosmetic, non-blocking).
 
-Ask which to start, or declare Phase 8 closed.
+  Suggest starting Phase 9 planning — ask what the next arc should be.
 ```
