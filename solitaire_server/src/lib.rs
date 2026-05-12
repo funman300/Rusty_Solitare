@@ -12,6 +12,8 @@ pub mod middleware;
 pub mod replays;
 pub mod sync;
 
+pub use auth::reset_password;
+
 use axum::{
     extract::DefaultBodyLimit,
     middleware as axum_middleware,

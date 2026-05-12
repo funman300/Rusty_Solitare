@@ -63,7 +63,7 @@ struct UserRow {
 // ---------------------------------------------------------------------------
 
 /// bcrypt work factor. Cost 12 ≈ 300 ms on modern hardware — balances security against registration latency.
-const BCRYPT_COST: u32 = 12;
+pub const BCRYPT_COST: u32 = 12;
 
 // ---------------------------------------------------------------------------
 // Token generation helpers
@@ -128,7 +128,7 @@ async fn store_refresh_jti(
 const USERNAME_MIN: usize = 3;
 const USERNAME_MAX: usize = 32;
 /// Minimum password length.
-const PASSWORD_MIN: usize = 8;
+pub const PASSWORD_MIN: usize = 8;
 
 /// Returns `true` if every character in `s` is ASCII alphanumeric or `_`.
 fn username_chars_ok(s: &str) -> bool {
@@ -300,6 +300,62 @@ pub async fn delete_account(
         .await?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Admin helpers (CLI use only — not exposed via HTTP)
+// ---------------------------------------------------------------------------
+
+/// Reset the password for `username` to `new_password`.
+///
+/// On success:
+/// - The `password_hash` column in `users` is overwritten with a fresh bcrypt
+///   hash of `new_password`.
+/// - **All** active refresh tokens for the user are deleted, forcing every
+///   existing session to re-authenticate before it can issue new access tokens.
+///
+/// Returns `AppError::NotFound` when no account with `username` exists.
+/// Returns `AppError::BadRequest` when `new_password` is shorter than
+/// [`PASSWORD_MIN`].
+pub async fn reset_password(
+    pool: &sqlx::SqlitePool,
+    username: &str,
+    new_password: &str,
+) -> Result<(), AppError> {
+    if new_password.len() < PASSWORD_MIN {
+        return Err(AppError::BadRequest(format!(
+            "password must be at least {PASSWORD_MIN} characters"
+        )));
+    }
+
+    let user_id: Option<String> = sqlx::query_scalar!(
+        "SELECT id FROM users WHERE username = ?",
+        username
+    )
+    .fetch_optional(pool)
+    .await?
+    .flatten();
+
+    let user_id =
+        user_id.ok_or_else(|| AppError::NotFound(format!("user '{username}' not found")))?;
+
+    let new_hash = hash(new_password, BCRYPT_COST)?;
+
+    sqlx::query!(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        new_hash,
+        user_id
+    )
+    .execute(pool)
+    .await?;
+
+    // Invalidate all active sessions — the user must log in again with the
+    // new password before refresh tokens work.
+    sqlx::query!("DELETE FROM refresh_tokens WHERE user_id = ?", user_id)
+        .execute(pool)
+        .await?;
+
+    Ok(())
 }
 
 #[cfg(test)]

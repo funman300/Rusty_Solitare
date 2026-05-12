@@ -42,3 +42,29 @@ git pull
 docker compose build
 docker compose up -d
 ```
+
+
+## Admin — Password Reset
+
+If a player loses access to their account, the server binary includes a
+built-in password reset command. Run it on the host (or inside the container)
+with `DATABASE_URL` pointing at your database:
+
+```bash
+# Interactive (prompts for the new password):
+DATABASE_URL=sqlite://./data/solitaire.db \
+  ./solitaire_server --reset-password <username>
+
+# Non-interactive (piped from a script or password manager):
+echo "new_password" | \
+  DATABASE_URL=sqlite://./data/solitaire.db \
+    ./solitaire_server --reset-password <username>
+
+# Inside a running Docker container:
+docker compose exec server sh -c \
+  'echo "new_password" | ./solitaire_server --reset-password alice'
+```
+
+On success the user's `password_hash` is updated and **all active refresh
+tokens are deleted**, so every open session must log in again with the new
+password. `JWT_SECRET` does not need to be set for this command.

@@ -1463,6 +1463,131 @@ async fn leaderboard_with_valid_token_returns_empty_array_when_no_opts() {
 }
 
 // ---------------------------------------------------------------------------
+// Admin password reset tests
+// ---------------------------------------------------------------------------
+
+/// `reset_password` updates `password_hash` so the user can log in with the
+/// new password and is locked out with the old one.
+#[tokio::test]
+async fn reset_password_allows_login_with_new_password() {
+    let pool = test_pool().await;
+    let app = build_test_router(pool.clone());
+
+    // Register an account.
+    let resp = post_json(
+        app.clone(),
+        "/api/auth/register",
+        serde_json::json!({ "username": "reset_user_a", "password": "oldpass1!" }),
+    )
+    .await;
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Reset password via the admin helper.
+    solitaire_server::reset_password(&pool, "reset_user_a", "newpass99!")
+        .await
+        .expect("reset_password must succeed for an existing user");
+
+    // Login with new password must succeed.
+    let new_resp = post_json(
+        app.clone(),
+        "/api/auth/login",
+        serde_json::json!({ "username": "reset_user_a", "password": "newpass99!" }),
+    )
+    .await;
+    assert_eq!(
+        new_resp.status(),
+        StatusCode::OK,
+        "login with new password must succeed"
+    );
+
+    // Login with old password must fail.
+    let old_resp = post_json(
+        app,
+        "/api/auth/login",
+        serde_json::json!({ "username": "reset_user_a", "password": "oldpass1!" }),
+    )
+    .await;
+    assert_eq!(
+        old_resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "login with old password must be rejected after reset"
+    );
+}
+
+/// `reset_password` deletes all refresh tokens for the user so existing
+/// sessions cannot refresh without re-logging in.
+#[tokio::test]
+async fn reset_password_invalidates_existing_sessions() {
+    let pool = test_pool().await;
+    let app = build_test_router(pool.clone());
+
+    let (_, refresh_token) =
+        register_user(app.clone(), "reset_user_b", "password1!").await;
+
+    // Confirm the refresh token works before the reset.
+    let pre_reset = post_json(
+        app.clone(),
+        "/api/auth/refresh",
+        serde_json::json!({ "refresh_token": &refresh_token }),
+    )
+    .await;
+    assert_eq!(
+        pre_reset.status(),
+        StatusCode::OK,
+        "refresh must work before password reset"
+    );
+
+    // Reset the password.
+    solitaire_server::reset_password(&pool, "reset_user_b", "brandnewpass!")
+        .await
+        .expect("reset_password must succeed");
+
+    // The original refresh token must now be rejected with 401.
+    let post_reset = post_json(
+        app,
+        "/api/auth/refresh",
+        serde_json::json!({ "refresh_token": &refresh_token }),
+    )
+    .await;
+    assert_eq!(
+        post_reset.status(),
+        StatusCode::UNAUTHORIZED,
+        "refresh token from before the reset must be invalidated"
+    );
+}
+
+/// `reset_password` returns `AppError::NotFound` for a username that does
+/// not exist, rather than silently succeeding.
+#[tokio::test]
+async fn reset_password_returns_not_found_for_unknown_user() {
+    let pool = test_pool().await;
+    let err = solitaire_server::reset_password(&pool, "no_such_user", "somepassword!")
+        .await
+        .expect_err("reset_password must fail for an unknown username");
+    assert!(
+        matches!(err, solitaire_server::error::AppError::NotFound(_)),
+        "expected AppError::NotFound, got {err:?}"
+    );
+}
+
+/// `reset_password` returns `AppError::BadRequest` when the new password is
+/// shorter than the minimum length.
+#[tokio::test]
+async fn reset_password_rejects_short_password() {
+    let pool = test_pool().await;
+    let app = build_test_router(pool.clone());
+    register_user(app, "reset_user_c", "password1!").await;
+
+    let err = solitaire_server::reset_password(&pool, "reset_user_c", "short")
+        .await
+        .expect_err("reset_password must reject passwords below minimum length");
+    assert!(
+        matches!(err, solitaire_server::error::AppError::BadRequest(_)),
+        "expected AppError::BadRequest, got {err:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Rate-limiting test (uses the production router with rate limiting enabled)
 // ---------------------------------------------------------------------------
 
