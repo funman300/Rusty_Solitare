@@ -347,9 +347,10 @@ async fn login_with_unknown_username_returns_401() {
     );
 }
 
-/// `POST /api/auth/refresh` with a valid refresh token returns 200 with a new access token.
+/// `POST /api/auth/refresh` with a valid refresh token returns 200 with both
+/// a new access token and a rotated refresh token.
 #[tokio::test]
-async fn refresh_returns_new_access_token() {
+async fn refresh_returns_new_access_and_refresh_tokens() {
 
     let app = build_test_router(test_pool().await);
 
@@ -368,6 +369,80 @@ async fn refresh_returns_new_access_token() {
         body["access_token"].is_string(),
         "refresh must return a new access_token"
     );
+    assert!(
+        body["refresh_token"].is_string(),
+        "refresh must return a rotated refresh_token"
+    );
+    let rotated = body["refresh_token"].as_str().unwrap();
+    assert_ne!(
+        rotated, refresh,
+        "rotated refresh token must differ from the original"
+    );
+}
+
+/// After a successful rotation, the old refresh token must be rejected (consumed).
+#[tokio::test]
+async fn consumed_refresh_token_is_rejected() {
+    let app = build_test_router(test_pool().await);
+
+    let (_access, original_refresh) =
+        register_user(app.clone(), "grace_rot", "rotation_pass").await;
+
+    // First refresh — consumes original_refresh, returns a new one.
+    let resp1 = post_json(
+        app.clone(),
+        "/api/auth/refresh",
+        serde_json::json!({ "refresh_token": original_refresh }),
+    )
+    .await;
+    assert_eq!(resp1.status(), StatusCode::OK, "first rotation must succeed");
+
+    // Second attempt with the now-consumed original token must fail.
+    let resp2 = post_json(
+        app,
+        "/api/auth/refresh",
+        serde_json::json!({ "refresh_token": original_refresh }),
+    )
+    .await;
+    assert_eq!(
+        resp2.status(),
+        StatusCode::UNAUTHORIZED,
+        "consumed refresh token must return 401"
+    );
+}
+
+/// The rotated refresh token must be usable for a subsequent refresh.
+#[tokio::test]
+async fn rotated_refresh_token_can_be_used_again() {
+    let app = build_test_router(test_pool().await);
+
+    let (_access, refresh) = register_user(app.clone(), "helen_rot", "pass_word_1").await;
+
+    // First rotation.
+    let resp1 = post_json(
+        app.clone(),
+        "/api/auth/refresh",
+        serde_json::json!({ "refresh_token": refresh }),
+    )
+    .await;
+    assert_eq!(resp1.status(), StatusCode::OK);
+    let rotated = body_json(resp1).await;
+    let second_refresh = rotated["refresh_token"].as_str().unwrap().to_string();
+
+    // Second rotation using the first rotated token.
+    let resp2 = post_json(
+        app,
+        "/api/auth/refresh",
+        serde_json::json!({ "refresh_token": second_refresh }),
+    )
+    .await;
+    assert_eq!(
+        resp2.status(),
+        StatusCode::OK,
+        "rotated token must work for a second rotation"
+    );
+    let body2 = body_json(resp2).await;
+    assert!(body2["access_token"].is_string());
 }
 
 /// Supplying an access token to `POST /api/auth/refresh` must be rejected because

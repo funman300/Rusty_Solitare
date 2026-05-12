@@ -162,16 +162,17 @@ impl SolitaireServerClient {
 
     /// Attempt to refresh the access token using the stored refresh token.
     ///
-    /// On success the new access token is persisted to the OS keychain,
-    /// replacing the previous one. The refresh token itself is unchanged.
+    /// The server rotates refresh tokens on each call: the response includes a
+    /// new refresh token that replaces the old one. Both tokens are persisted
+    /// to the OS keychain on success.
     async fn refresh_token(&self) -> Result<(), SyncError> {
-        let refresh = load_refresh_token(&self.username)
+        let old_refresh = load_refresh_token(&self.username)
             .map_err(|e| SyncError::Auth(e.to_string()))?;
 
         let resp = self
             .client
             .post(format!("{}/api/auth/refresh", self.base_url))
-            .json(&serde_json::json!({ "refresh_token": refresh }))
+            .json(&serde_json::json!({ "refresh_token": old_refresh }))
             .send()
             .await
             .map_err(|e| SyncError::Network(e.to_string()))?;
@@ -189,9 +190,11 @@ impl SolitaireServerClient {
             .as_str()
             .ok_or_else(|| SyncError::Serialization("missing access_token in refresh response".into()))?;
 
-        // store_tokens replaces both access and refresh; we keep the old
-        // refresh token unchanged so its 30-day TTL is preserved.
-        store_tokens(&self.username, new_access, &refresh)
+        // Server rotates refresh tokens — store the new one.
+        // Fall back to the old token if the field is absent (pre-rotation server).
+        let new_refresh = body["refresh_token"].as_str().unwrap_or(&old_refresh);
+
+        store_tokens(&self.username, new_access, new_refresh)
             .map_err(|e| SyncError::Auth(e.to_string()))
     }
 

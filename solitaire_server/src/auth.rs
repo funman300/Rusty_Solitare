@@ -37,10 +37,13 @@ pub struct AuthResponse {
     pub refresh_token: String,
 }
 
-/// Successful refresh response — contains only the new access token.
+/// Successful refresh response — contains the new access token and the rotated
+/// refresh token. The refresh token is always rotated: the client must store
+/// the new value and discard the old one.
 #[derive(Debug, Serialize)]
 pub struct RefreshResponse {
     pub access_token: String,
+    pub refresh_token: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -73,21 +76,47 @@ pub fn make_access_token(user_id: &str, secret: &str) -> Result<String, AppError
         sub: user_id.to_string(),
         exp,
         kind: "access".to_string(),
+        jti: None,
     };
     encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
         .map_err(|e| AppError::Internal(e.to_string()))
 }
 
 /// Encode a JWT refresh token (30-day expiry) for `user_id`.
-pub fn make_refresh_token(user_id: &str, secret: &str) -> Result<String, AppError> {
+///
+/// Returns `(jwt_string, jti)`. The caller must insert the jti into
+/// `refresh_tokens` before returning the JWT to the client.
+pub fn make_refresh_token(user_id: &str, secret: &str) -> Result<(String, String), AppError> {
+    let jti = Uuid::new_v4().to_string();
     let exp = (Utc::now() + chrono::Duration::days(30)).timestamp() as usize;
     let claims = Claims {
         sub: user_id.to_string(),
         exp,
         kind: "refresh".to_string(),
+        jti: Some(jti.clone()),
     };
-    encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
-        .map_err(|e| AppError::Internal(e.to_string()))
+    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok((token, jti))
+}
+
+/// Insert a jti row into `refresh_tokens`. Must be called immediately after
+/// [`make_refresh_token`] and before the token is sent to the client.
+async fn store_refresh_jti(
+    pool: &sqlx::SqlitePool,
+    jti: &str,
+    user_id: &str,
+) -> Result<(), AppError> {
+    let expires_at = (Utc::now() + chrono::Duration::days(30)).to_rfc3339();
+    sqlx::query!(
+        "INSERT INTO refresh_tokens (jti, user_id, expires_at) VALUES (?, ?, ?)",
+        jti,
+        user_id,
+        expires_at
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -160,9 +189,13 @@ pub async fn register(
     .execute(&state.pool)
     .await?;
 
+    let access_token = make_access_token(&user_id, &state.jwt_secret)?;
+    let (refresh_token, refresh_jti) = make_refresh_token(&user_id, &state.jwt_secret)?;
+    store_refresh_jti(&state.pool, &refresh_jti, &user_id).await?;
+
     Ok(Json(AuthResponse {
-        access_token: make_access_token(&user_id, &state.jwt_secret)?,
-        refresh_token: make_refresh_token(&user_id, &state.jwt_secret)?,
+        access_token,
+        refresh_token,
     }))
 }
 
@@ -190,27 +223,74 @@ pub async fn login(
         return Err(AppError::InvalidCredentials);
     }
 
+    let access_token = make_access_token(&row_id, &state.jwt_secret)?;
+    let (refresh_token, refresh_jti) = make_refresh_token(&row_id, &state.jwt_secret)?;
+    store_refresh_jti(&state.pool, &refresh_jti, &row_id).await?;
+
     Ok(Json(AuthResponse {
-        access_token: make_access_token(&row_id, &state.jwt_secret)?,
-        refresh_token: make_refresh_token(&row_id, &state.jwt_secret)?,
+        access_token,
+        refresh_token,
     }))
 }
 
-/// `POST /api/auth/refresh` — exchange a refresh token for a new access token.
+/// `POST /api/auth/refresh` — exchange a valid refresh token for a new token pair.
+///
+/// The incoming refresh token is consumed (its jti row is deleted) and a new
+/// refresh token is issued. Using a consumed token returns 401. Tokens issued
+/// before rotation was enabled (no `jti` claim) are also rejected with 401 —
+/// the player must re-login once after upgrading the server.
+///
+/// Expired rows from other sessions are pruned on each successful call.
 pub async fn refresh(
     State(state): State<AppState>,
     Json(body): Json<RefreshRequest>,
 ) -> Result<Json<RefreshResponse>, AppError> {
     let claims = validate_refresh_token(&body.refresh_token, &state.jwt_secret)?;
 
+    // Tokens without jti predate rotation — require re-login.
+    let jti = claims.jti.ok_or(AppError::Unauthorized)?;
+
+    // Verify this jti is still live (not yet consumed or from a deleted account).
+    // SQLite TEXT columns are always nullable in sqlx; flatten the double-Option.
+    let exists: Option<String> = sqlx::query_scalar!(
+        "SELECT jti FROM refresh_tokens WHERE jti = ?",
+        jti
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .flatten();
+
+    if exists.is_none() {
+        return Err(AppError::Unauthorized);
+    }
+
+    // Consume the old token before issuing new ones. If the insert below
+    // fails, the user loses this session (must re-login) — safe by design.
+    sqlx::query!("DELETE FROM refresh_tokens WHERE jti = ?", jti)
+        .execute(&state.pool)
+        .await?;
+
+    let new_access = make_access_token(&claims.sub, &state.jwt_secret)?;
+    let (new_refresh, new_jti) = make_refresh_token(&claims.sub, &state.jwt_secret)?;
+    store_refresh_jti(&state.pool, &new_jti, &claims.sub).await?;
+
+    // Prune expired rows from all sessions on each successful rotation.
+    // The expires_at index makes this a cheap index-backed scan.
+    let now = Utc::now().to_rfc3339();
+    sqlx::query!("DELETE FROM refresh_tokens WHERE expires_at < ?", now)
+        .execute(&state.pool)
+        .await?;
+
     Ok(Json(RefreshResponse {
-        access_token: make_access_token(&claims.sub, &state.jwt_secret)?,
+        access_token: new_access,
+        refresh_token: new_refresh,
     }))
 }
 
 /// `DELETE /api/account` — permanently delete the authenticated user's account.
 ///
-/// All related rows are removed via `ON DELETE CASCADE` in the schema.
+/// All related rows (sync_state, refresh_tokens, leaderboard) are removed
+/// via `ON DELETE CASCADE` in the schema.
 pub async fn delete_account(
     State(state): State<AppState>,
     user: AuthenticatedUser,
@@ -229,7 +309,7 @@ mod tests {
 
     const TEST_SECRET: &str = "test_secret_for_unit_tests_only";
 
-    fn decode_token(token: &str) -> Claims {
+    fn decode_claims(token: &str) -> Claims {
         let mut validation = Validation::default();
         validation.leeway = 60;
         decode::<Claims>(
@@ -244,25 +324,37 @@ mod tests {
     #[test]
     fn make_access_token_decodes_with_correct_claims() {
         let token = make_access_token("user-123", TEST_SECRET).unwrap();
-        let claims = decode_token(&token);
+        let claims = decode_claims(&token);
         assert_eq!(claims.sub, "user-123");
         assert_eq!(claims.kind, "access");
+        assert!(claims.jti.is_none(), "access token must not carry a jti");
         let now = Utc::now().timestamp() as usize;
-        // expiry should be roughly 24 hours in the future (allow ±60s for test execution)
         assert!(claims.exp > now + 86_400 - 60);
         assert!(claims.exp < now + 86_400 + 60);
     }
 
     #[test]
     fn make_refresh_token_decodes_with_correct_claims() {
-        let token = make_refresh_token("user-456", TEST_SECRET).unwrap();
-        let claims = decode_token(&token);
+        let (token, jti) = make_refresh_token("user-456", TEST_SECRET).unwrap();
+        let claims = decode_claims(&token);
         assert_eq!(claims.sub, "user-456");
         assert_eq!(claims.kind, "refresh");
+        assert_eq!(
+            claims.jti.as_deref(),
+            Some(jti.as_str()),
+            "jti in JWT must match returned jti"
+        );
+        assert!(!jti.is_empty(), "jti must be non-empty");
         let now = Utc::now().timestamp() as usize;
-        // expiry should be roughly 30 days in the future (allow ±60s for test execution)
         assert!(claims.exp > now + 30 * 86_400 - 60);
         assert!(claims.exp < now + 30 * 86_400 + 60);
+    }
+
+    #[test]
+    fn make_refresh_token_generates_unique_jtis() {
+        let (_, jti1) = make_refresh_token("u", TEST_SECRET).unwrap();
+        let (_, jti2) = make_refresh_token("u", TEST_SECRET).unwrap();
+        assert_ne!(jti1, jti2, "each call must produce a unique jti");
     }
 
     #[test]
@@ -279,9 +371,9 @@ mod tests {
     #[test]
     fn access_and_refresh_tokens_have_different_kinds() {
         let access = make_access_token("u", TEST_SECRET).unwrap();
-        let refresh = make_refresh_token("u", TEST_SECRET).unwrap();
-        let a_claims = decode_token(&access);
-        let r_claims = decode_token(&refresh);
+        let (refresh, _jti) = make_refresh_token("u", TEST_SECRET).unwrap();
+        let a_claims = decode_claims(&access);
+        let r_claims = decode_claims(&refresh);
         assert_ne!(a_claims.kind, r_claims.kind);
     }
 

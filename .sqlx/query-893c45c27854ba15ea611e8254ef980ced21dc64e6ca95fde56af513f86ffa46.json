@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT jti FROM refresh_tokens WHERE jti = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "jti",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "893c45c27854ba15ea611e8254ef980ced21dc64e6ca95fde56af513f86ffa46"
+}

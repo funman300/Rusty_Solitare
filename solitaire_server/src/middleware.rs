@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{error::AppError, AppState};
 
-/// The claims encoded in our JWT access tokens.
+/// The claims encoded in our JWTs.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     /// Subject — the user's UUID string.
@@ -24,6 +24,10 @@ pub struct Claims {
     pub exp: usize,
     /// Token kind: `"access"` or `"refresh"`.
     pub kind: String,
+    /// JWT ID — UUID v4 embedded in refresh tokens for rotation tracking.
+    /// Access tokens omit this field (`None`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jti: Option<String>,
 }
 
 /// The authenticated user identity injected into request extensions after
@@ -135,6 +139,7 @@ mod tests {
             sub: user_id.to_string(),
             exp,
             kind: kind.to_string(),
+            jti: None,
         };
         encode(&Header::default(), &claims, &EncodingKey::from_secret(SECRET.as_bytes())).unwrap()
     }

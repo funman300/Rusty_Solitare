@@ -660,7 +660,7 @@ All endpoints are under the base URL configured by the user (e.g., `https://soli
 |---|---|---|---|---|
 | POST | `/api/auth/register` | None | `{username, password}` | `{access_token, refresh_token}` |
 | POST | `/api/auth/login` | None | `{username, password}` | `{access_token, refresh_token}` |
-| POST | `/api/auth/refresh` | None | `{refresh_token}` | `{access_token}` |
+| POST | `/api/auth/refresh` | None | `{refresh_token}` | `{access_token, refresh_token}` (rotated) |
 
 ### Sync
 
@@ -1020,6 +1020,7 @@ Migrations run automatically on startup via `sqlx::migrate!()`.
 | Password storage | bcrypt, cost factor 12 — never stored in plaintext |
 | Token security | JWTs signed with HS256, stored in OS keychain via `keyring` crate |
 | Token expiry | Access: 24h, Refresh: 30d |
+| Refresh token rotation | Each `/api/auth/refresh` call consumes the incoming refresh token (deletes its jti row) and issues a new one. Reuse of a consumed token returns 401. Expired rows are pruned inline. |
 | Brute force | `tower-governor`: 10 req/min per IP on `/api/auth/*` |
 | Payload abuse | 1MB max request body, enforced by Axum middleware |
 | Data deletion | `DELETE /api/account` removes all rows via `ON DELETE CASCADE` |
