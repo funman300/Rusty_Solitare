@@ -1,7 +1,6 @@
 # Solitaire Quest — Session Handoff
 
-**Last updated:** 2026-05-12 — ARCHITECTURE.md updated to v1.3 (all 8 Phase 8 gaps closed);
-`SESSION_HANDOFF.md` updated. Push pending.
+**Last updated:** 2026-05-12 — Sync rate limiting + mirror_achievement removal + theme import scan shipped (`6e6f3ef`). HEAD locally: `6e6f3ef`. Push pending.
 
 Phase 8 closes the self-hosted-server connection arc end-to-end: login/register
 modal, re-auth on token expiry, account deletion flow, server deployment
@@ -13,9 +12,9 @@ and full server integration tests.
 
 ## Current state
 
-- **HEAD locally:** `bd388fe` (docs: CHANGELOG Phase 8 entry).
-- **HEAD on origin:** `272d31f` (feat: account deletion — last pushed commit).
-- **Working tree:** `ARCHITECTURE.md` + `SESSION_HANDOFF.md` modified, uncommitted.
+- **HEAD locally:** `6e6f3ef` (feat: sync rate limiting).
+- **HEAD on origin:** `b129664` (pushed — 4 commits ahead).
+- **Working tree:** `SESSION_HANDOFF.md` modified, uncommitted.
 - **Build:** `cargo clippy --workspace --all-targets -- -D warnings` clean.
 - **Tests:** **1300+ passing / 0 failing** across the workspace.
 - **Tags on origin:** `v0.9.0` through `v0.22.0`.
@@ -61,12 +60,12 @@ Also shipped (pre-Phase 8 but post-v0.22.0, already in CHANGELOG):
   want a different public identity.
 
 ### 3. Security hardening
-- **Refresh token rotation.** `POST /api/auth/refresh` returns only a new
-  access token; the refresh token never rotates. Standard mitigation: issue a
-  new refresh token on each call and invalidate the old one (needs a
-  `last_refresh_token` column or a separate table).
-- **Sync endpoint rate limiting.** Only `/api/auth/*` has `tower-governor`;
-  `/api/sync/push` (1 MB body) has no per-user throttle.
+- [x] **Refresh token rotation.** Done (`b129664`): `refresh_tokens` table
+  (migration 003); jti embedded in JWT; rotate-on-use pattern; 3 integration
+  tests.
+- [x] **Sync endpoint rate limiting.** Done (`6e6f3ef`): `UserIdKeyExtractor`
+  decodes JWT for per-user identity; falls back to IP; burst 10 / 6 min
+  steady-state; integration test passes.
 
 ### 4. Android validation
 - **Android Keystore functional test** — JNI AES-GCM code ships (`f281425`) but
@@ -78,13 +77,12 @@ Also shipped (pre-Phase 8 but post-v0.22.0, already in CHANGELOG):
   APK but pollutes CI output. Document `--lib` as canonical or upstream a fix.
 
 ### 5. Feature completeness
-- **Theme importer UI.** `import_theme()` (Phase 7, `theme/importer.rs`) is
-  complete but has no Settings button trigger. Players must copy theme files
-  manually.
-- **`mirror_achievement` decision.** `SyncProvider` has this method with a
-  no-op default; `SolitaireServerClient` never overrides it, no server endpoint
-  exists. Either implement (`POST /api/achievements/mirror` + client call on
-  `AchievementUnlockedEvent`) or delete from the trait.
+- [x] **Theme importer UI.** Done (`613bbf8`): "Scan for new themes" button in
+  Settings Appearance section. Shows import path label, scans user_theme_dir()
+  for .zip archives, fires InfoToastEvent per file, refreshes ThemeRegistry.
+- [x] **`mirror_achievement` removed.** Done (`549a817`): method was a no-op
+  default never overridden and never called; achievements already sync via
+  `SyncPayload` push. Deleted from trait and blanket impl.
 - **WASM build script.** `web/pkg/` contains compiled WASM committed to git.
   Need a `build_wasm.sh` or Makefile target documenting the `wasm-pack build`
   invocation to regenerate it.
@@ -151,12 +149,10 @@ READ FIRST (in order):
   7. ~/.claude/projects/<this-project>/memory/MEMORY.md
 
 OPEN WORK (in priority order):
-  B. Leaderboard best-score auto-post (server sync handler + optional
-     GameWonEvent path in sync_plugin)
-  C. Refresh token rotation (server auth handler + new column/table)
   D. Android AVD functional tests (Keystore + clipboard)
   E. Theme importer UI button in Settings
   F. mirror_achievement: decide + implement or remove from trait
+  G. Sync endpoint rate limiting (POST /api/sync/push has no per-user throttle)
 
 Ask which to start. All are independent; any is a valid next arc.
 ```
