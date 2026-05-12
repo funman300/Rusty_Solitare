@@ -48,6 +48,7 @@
 //! );
 //! ```
 
+use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;
 use bevy::ui::{ComputedNode, UiGlobalTransform};
 use bevy::window::PrimaryWindow;
@@ -388,6 +389,47 @@ pub fn spawn_modal_button<M: Component>(
                 b.spawn((Text::new(key), font_caption, TextColor(caption_color)));
             }
         });
+}
+
+// ---------------------------------------------------------------------------
+// Generic touch-scroll helper
+// ---------------------------------------------------------------------------
+
+/// Scrolls any `Overflow::scroll_y()` panel marked with `M` via single-finger
+/// touch pan. Add this as a system for each scrollable modal panel:
+///
+/// ```ignore
+/// app.add_message::<TouchInput>()
+///    .add_systems(Update, touch_scroll_panel::<MyScrollable>);
+/// ```
+///
+/// On desktop `TouchInput` events never fire, so the system is a no-op.
+pub fn touch_scroll_panel<M: Component>(
+    mut touch_evr: MessageReader<TouchInput>,
+    mut scrollables: Query<&mut ScrollPosition, With<M>>,
+    mut last_y: Local<Option<f32>>,
+) {
+    for event in touch_evr.read() {
+        match event.phase {
+            TouchPhase::Started => {
+                *last_y = Some(event.position.y);
+            }
+            TouchPhase::Moved => {
+                if let Some(prev) = *last_y {
+                    let delta = event.position.y - prev;
+                    for mut sp in scrollables.iter_mut() {
+                        // Swiping up (delta < 0 in screen coords) scrolls
+                        // content down, so sp.y increases.
+                        sp.0.y = (sp.0.y - delta).max(0.0);
+                    }
+                }
+                *last_y = Some(event.position.y);
+            }
+            TouchPhase::Ended | TouchPhase::Canceled => {
+                *last_y = None;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

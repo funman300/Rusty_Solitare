@@ -12,7 +12,6 @@
 use std::path::PathBuf;
 
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
-use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;
 use bevy::ui::{ComputedNode, UiGlobalTransform};
 use bevy::window::{WindowMoved, WindowResized};
@@ -371,7 +370,7 @@ impl Plugin for SettingsPlugin {
                     handle_volume_keys,
                     toggle_settings_screen,
                     scroll_settings_panel,
-                    touch_scroll_settings_panel,
+                    crate::ui_modal::touch_scroll_panel::<SettingsPanelScrollable>,
                     record_window_geometry_changes,
                     persist_window_geometry_after_debounce,
                 ),
@@ -1367,43 +1366,6 @@ fn scroll_settings_panel(
     }
     for mut sp in scrollables.iter_mut() {
         sp.0.y = (sp.0.y - delta_y).max(0.0);
-    }
-}
-
-/// Scrolls the settings panel in response to touch pan gestures (Android).
-/// Tracks the most recent touch Y so each `Moved` event's delta can be
-/// applied to `ScrollPosition`. `MouseWheel` handles desktop; this system
-/// fills the gap for single-finger swipe on touchscreen devices.
-fn touch_scroll_settings_panel(
-    mut touch_evr: MessageReader<TouchInput>,
-    screen: Res<SettingsScreen>,
-    mut scrollables: Query<&mut ScrollPosition, With<SettingsPanelScrollable>>,
-    mut last_y: Local<Option<f32>>,
-) {
-    if !screen.0 {
-        touch_evr.clear();
-        *last_y = None;
-        return;
-    }
-    for event in touch_evr.read() {
-        match event.phase {
-            TouchPhase::Started => {
-                *last_y = Some(event.position.y);
-            }
-            TouchPhase::Moved => {
-                if let Some(prev) = *last_y {
-                    let delta = event.position.y - prev;
-                    for mut sp in scrollables.iter_mut() {
-                        // Swiping up (delta < 0) scrolls content down (sp.y increases).
-                        sp.0.y = (sp.0.y - delta).max(0.0);
-                    }
-                }
-                *last_y = Some(event.position.y);
-            }
-            TouchPhase::Ended | TouchPhase::Canceled => {
-                *last_y = None;
-            }
-        }
     }
 }
 

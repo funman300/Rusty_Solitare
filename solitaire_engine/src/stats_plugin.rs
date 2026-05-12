@@ -203,6 +203,7 @@ impl Plugin for StatsPlugin {
             // `DefaultPlugins`; register it explicitly so the stats-scroll
             // system also runs cleanly under `MinimalPlugins` in tests.
             .add_message::<MouseWheel>()
+            .add_message::<bevy::input::touch::TouchInput>()
             // record_abandoned must read `move_count` BEFORE handle_new_game
             // clobbers it with a fresh game. These are NOT in StatsUpdate because
             // StatsUpdate (as a set) is ordered after GameMutation by external
@@ -238,7 +239,8 @@ impl Plugin for StatsPlugin {
                 )
                     .chain(),
             )
-            .add_systems(Update, scroll_stats_panel);
+            .add_systems(Update, scroll_stats_panel)
+            .add_systems(Update, crate::ui_modal::touch_scroll_panel::<StatsScrollable>);
     }
 }
 

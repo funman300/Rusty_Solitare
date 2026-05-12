@@ -116,6 +116,7 @@ impl Plugin for AchievementPlugin {
             // achievements-scroll system also runs cleanly under
             // `MinimalPlugins` in tests.
             .add_message::<MouseWheel>()
+            .add_message::<bevy::input::touch::TouchInput>()
             // Run after GameMutation (so GameWonEvent is available), after
             // StatsUpdate (so stats reflect this win), and after ProgressUpdate
             // (so daily_challenge_streak is up to date for daily_devotee).
@@ -139,6 +140,7 @@ impl Plugin for AchievementPlugin {
             .add_systems(Update, toggle_achievements_screen)
             .add_systems(Update, handle_achievements_close_button)
             .add_systems(Update, scroll_achievements_panel)
+            .add_systems(Update, crate::ui_modal::touch_scroll_panel::<AchievementsScrollable>)
             // Event-driven unlock: observe `ReplayPlaybackState` and unlock
             // `cinephile` the first time playback runs to natural completion.
             // Reads the resource via `Option<Res<_>>` so headless tests that
