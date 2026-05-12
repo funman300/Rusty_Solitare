@@ -97,6 +97,28 @@ pub fn build_router(state: AppState) -> Router {
 /// Construct the router without rate limiting.
 ///
 /// Intended for integration tests only — do not use in production.
+/// Create an in-memory SQLite pool and run all pending migrations.
+///
+/// `max_connections(1)` is required for SQLite in-memory databases: every
+/// additional connection sees an empty schema.
+///
+/// Exposed so integration tests in other crates (e.g. `solitaire_data`) can
+/// boot a real server without duplicating the migration boilerplate.
+#[doc(hidden)]
+pub async fn build_test_pool() -> SqlitePool {
+    use sqlx::sqlite::SqlitePoolOptions;
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("failed to connect to in-memory SQLite database");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("failed to run database migrations");
+    pool
+}
+
 /// Uses a fixed test JWT secret (`"test_secret_32_chars_minimum_ok!"`) so
 /// integration tests do not need to set `JWT_SECRET` in the environment.
 #[doc(hidden)]

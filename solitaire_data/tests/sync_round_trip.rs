@@ -418,3 +418,56 @@ async fn pull_after_account_deletion_returns_default_or_error() {
 
     let _ = delete_tokens(username);
 }
+
+/// **Push retry on 401.**
+///
+/// Mirrors `jwt_refresh_on_401_succeeds` but for the `push()` path.
+/// We install an expired access token so the first push attempt returns 401,
+/// the client refreshes, and the retry push succeeds.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn push_retries_after_401_on_expired_access_token() {
+    ensure_mock_keyring();
+
+    let base = spawn_test_server().await;
+    let username = "rt_push_expiring";
+
+    let (_real_access, real_refresh) =
+        register_user_raw(&base, username, "pushexpirepass1!").await;
+    let user_id = decode_sub(&_real_access);
+
+    #[derive(serde::Serialize)]
+    struct Claims {
+        sub: String,
+        exp: usize,
+        kind: String,
+    }
+    let exp = (Utc::now() - chrono::Duration::hours(2)).timestamp() as usize;
+    let expired_access = encode(
+        &Header::default(),
+        &Claims {
+            sub: user_id.clone(),
+            exp,
+            kind: "access".into(),
+        },
+        &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
+    )
+    .expect("failed to encode expired access token");
+
+    store_tokens(username, &expired_access, &real_refresh)
+        .expect("storing tokens in mock keyring must succeed");
+
+    let client = SolitaireServerClient::new(&base, username);
+    let payload = make_payload(&user_id, 17);
+
+    // Push: server returns 401, client refreshes, retries, succeeds.
+    let push_resp = client
+        .push(&payload)
+        .await
+        .expect("push must succeed after the client transparently refreshes the access token");
+    assert_eq!(
+        push_resp.merged.stats.games_played, 17,
+        "merged games_played must reflect what was pushed after auto-refresh"
+    );
+
+    let _ = delete_tokens(username);
+}
