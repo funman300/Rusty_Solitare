@@ -269,4 +269,205 @@ mod tests {
         let result = ReplayPlayer::from_json("not valid json");
         assert!(result.is_err());
     }
+
+    // -------------------------------------------------------------------------
+    // Winning-sequence step-through
+    // -------------------------------------------------------------------------
+
+    /// Greedy Klondike solver for DrawOne Classic.
+    ///
+    /// Returns a `ReplayMove` list that wins the game from `seed`, or `None`
+    /// when the greedy heuristic gets stuck within the move budget.
+    ///
+    /// Priority order (highest first):
+    ///   1. Waste → Foundation
+    ///   2. Tableau top → Foundation
+    ///   3. Tableau stack → Tableau, only if the move uncovers a face-down card
+    ///   4. Waste → Tableau
+    ///   5. Draw from stock (recycle is automatic inside `GameState::draw`)
+    fn greedy_solve(seed: u64) -> Option<Vec<ReplayMove>> {
+        use solitaire_core::game_state::{DrawMode, GameMode, GameState};
+        use solitaire_core::pile::PileType;
+
+        let mut game = GameState::new_with_mode(seed, DrawMode::DrawOne, GameMode::Classic);
+        let mut moves: Vec<ReplayMove> = Vec::new();
+        const MAX_MOVES: usize = 10_000;
+
+        'outer: loop {
+            if game.is_won {
+                return Some(moves);
+            }
+            if moves.len() >= MAX_MOVES {
+                return None;
+            }
+
+            // Auto-complete: drive to win without further player input.
+            if game.is_auto_completable {
+                while let Some((from, to)) = game.next_auto_complete_move() {
+                    if game.move_cards(from.clone(), to.clone(), 1).is_err() {
+                        return None;
+                    }
+                    moves.push(ReplayMove::Move { from, to, count: 1 });
+                }
+                return if game.is_won { Some(moves) } else { None };
+            }
+
+            // P1: Waste → Foundation.
+            for slot in 0..4_u8 {
+                if game
+                    .move_cards(PileType::Waste, PileType::Foundation(slot), 1)
+                    .is_ok()
+                {
+                    moves.push(ReplayMove::Move {
+                        from: PileType::Waste,
+                        to: PileType::Foundation(slot),
+                        count: 1,
+                    });
+                    continue 'outer;
+                }
+            }
+
+            // P2: Tableau top → Foundation.
+            for i in 0..7_usize {
+                for slot in 0..4_u8 {
+                    if game
+                        .move_cards(PileType::Tableau(i), PileType::Foundation(slot), 1)
+                        .is_ok()
+                    {
+                        moves.push(ReplayMove::Move {
+                            from: PileType::Tableau(i),
+                            to: PileType::Foundation(slot),
+                            count: 1,
+                        });
+                        continue 'outer;
+                    }
+                }
+            }
+
+            // P3: Tableau stack → Tableau only when it uncovers a face-down card.
+            let mut made_move = false;
+            'p3: for i in 0..7_usize {
+                let pile_len = game.piles[&PileType::Tableau(i)].cards.len();
+                for count in 1..=pile_len {
+                    let start = pile_len - count;
+                    // Only worth moving if a face-down card sits just below.
+                    let would_uncover =
+                        start > 0 && !game.piles[&PileType::Tableau(i)].cards[start - 1].face_up;
+                    if !would_uncover {
+                        continue;
+                    }
+                    for j in 0..7_usize {
+                        if i == j {
+                            continue;
+                        }
+                        if game
+                            .move_cards(PileType::Tableau(i), PileType::Tableau(j), count)
+                            .is_ok()
+                        {
+                            moves.push(ReplayMove::Move {
+                                from: PileType::Tableau(i),
+                                to: PileType::Tableau(j),
+                                count,
+                            });
+                            made_move = true;
+                            break 'p3;
+                        }
+                    }
+                }
+            }
+            if made_move {
+                continue 'outer;
+            }
+
+            // P4: Waste → Tableau.
+            for j in 0..7_usize {
+                if game
+                    .move_cards(PileType::Waste, PileType::Tableau(j), 1)
+                    .is_ok()
+                {
+                    moves.push(ReplayMove::Move {
+                        from: PileType::Waste,
+                        to: PileType::Tableau(j),
+                        count: 1,
+                    });
+                    continue 'outer;
+                }
+            }
+
+            // P5: Draw from stock (handles recycle automatically).
+            if game.draw().is_ok() {
+                moves.push(ReplayMove::StockClick);
+                continue 'outer;
+            }
+
+            // No moves available — greedy solver is stuck on this seed.
+            return None;
+        }
+    }
+
+    /// Full end-to-end winning-sequence regression test.
+    ///
+    /// 1. Runs the greedy solver on seeds 1–200 to find the first
+    ///    deterministically winnable game.
+    /// 2. Serialises the winning move list as a `Replay` JSON string.
+    /// 3. Feeds the JSON to `ReplayPlayer::from_json`.
+    /// 4. Steps through every move via `step_native` and asserts `is_won`
+    ///    on the final snapshot.
+    ///
+    /// Regression target: a `GameState` or `ReplayMove` change that breaks
+    /// an historically valid move sequence will cause `is_won` to be `false`
+    /// at the end of the replay, failing this test before any release.
+    #[test]
+    fn replay_player_completes_full_winning_sequence() {
+        use chrono::NaiveDate;
+        use solitaire_core::game_state::{DrawMode, GameMode};
+
+        let (seed, winning_moves) = (1_u64..=200)
+            .find_map(|s| greedy_solve(s).map(|m| (s, m)))
+            .expect("at least one seed in 1..=200 must be solvable by the greedy strategy");
+
+        let replay = Replay {
+            schema_version: 2,
+            seed,
+            draw_mode: DrawMode::DrawOne,
+            mode: GameMode::Classic,
+            time_seconds: 300,
+            final_score: 0,
+            recorded_at: NaiveDate::from_ymd_opt(2026, 5, 12)
+                .expect("2026-05-12 is a valid date"),
+            moves: winning_moves.clone(),
+        };
+        let json = serde_json::to_string(&replay).expect("replay serialises to JSON cleanly");
+
+        let mut player =
+            ReplayPlayer::from_json(&json).expect("solver-generated replay JSON must be valid");
+        assert_eq!(player.step_idx, 0, "player must start at step 0");
+        assert_eq!(
+            player.moves.len(),
+            winning_moves.len(),
+            "player must hold the complete move list"
+        );
+
+        let mut last_snap: Option<StateSnapshot> = None;
+        while let Some(snap) = player.step_native() {
+            last_snap = Some(snap);
+        }
+
+        let snap = last_snap.expect("winning sequence must contain at least one move");
+        assert!(
+            snap.is_won,
+            "seed {seed}: final snapshot after full replay must have is_won = true \
+             ({} moves applied)",
+            winning_moves.len()
+        );
+        assert_eq!(
+            snap.step_idx,
+            winning_moves.len(),
+            "step_idx after the last move must equal the total move count"
+        );
+        assert!(
+            player.step_native().is_none(),
+            "step_native must return None once all moves are exhausted"
+        );
+    }
 }
