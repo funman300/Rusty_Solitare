@@ -6,6 +6,85 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Phase 8 sync UI: the self-hosted-server connection flow is now fully
+playable end-to-end. Players can open a Connect modal from Settings,
+enter a server URL + credentials, log in or register, and see the
+sync-status section update live. Token expiry auto-reopens the modal.
+Account deletion ships a two-click destroy flow. Server deployment
+artifacts (Dockerfile + docker-compose) let self-hosters spin up in one
+command.
+
+### Added
+
+- **Sync setup modal — Connect / Disconnect flow** (`432061c`).
+  New `SyncSetupPlugin` (`solitaire_engine/src/sync_setup_plugin.rs`)
+  provides the full server-connection UI. Three tab-stopped text fields
+  (URL, Username, Password) handle keyboard input via `MessageReader<KeyboardInput>`
+  with focus cycling on Tab. "Log In" and "Register" buttons each spawn an
+  async `AsyncComputeTaskPool` task that calls the new
+  `SolitaireServerClient::login()` / `::register()` methods; `poll_auth_task`
+  harvests the result, stores tokens via `store_tokens()`, hot-swaps
+  `SyncProviderResource` to the new server backend, fires
+  `ManualSyncRequestEvent` to pull immediately, and closes the modal.
+  An inline `SyncAuthError` label displays credential errors without a
+  toast. The modal is idempotent (`existing.is_empty()` guard) — safe
+  to open programmatically.
+- **`SyncConfigureRequestEvent`, `SyncLogoutRequestEvent`,
+  `DeleteAccountRequestEvent`** (`432061c`). Three new engine events
+  wire the Settings buttons → plugin handlers. `SyncConfigureRequestEvent`
+  opens the setup modal; `SyncLogoutRequestEvent` disconnects and resets
+  `SyncProviderResource` to `LocalOnlyProvider`; `DeleteAccountRequestEvent`
+  opens the deletion confirmation modal.
+- **Settings sync section — dynamic backend UI** (`432061c`).
+  `sync_row()` in `SettingsPlugin` now takes `backend: &SyncBackend` and
+  renders conditionally: `Local` → "Connect" button; `SolitaireServer` →
+  username label + "Sync Now" + "Disconnect" + "Delete Account". Three new
+  `SettingsButton` discriminants (`ConnectSync` tab 91, `DisconnectSync`
+  tab 92, `DeleteAccount` tab 93) feed into a new `handle_sync_buttons`
+  system extracted from `handle_settings_buttons` to stay within Bevy's
+  16-parameter system limit.
+- **`SolitaireServerClient::login()` and `::register()`** (`432061c`).
+  Both POST to `/api/auth/login` and `/api/auth/register` respectively.
+  Private helper `extract_auth_tokens` parses `{ access_token, refresh_token }`.
+  409 CONFLICT → "username already taken"; 401/403 → "invalid credentials";
+  400 → server message echoed to the player.
+- **Re-auth prompt on token expiry** (`6ce5564`).
+  `poll_pull_result` in `SyncPlugin` now fires `InfoToastEvent("Session
+  expired — please reconnect")` + `SyncConfigureRequestEvent` when the
+  pull task resolves to `SyncError::Auth(_)`. Because the modal is
+  idempotent the re-open is safe to trigger from any system path.
+- **Server deployment artifacts** (`6ce5564`).
+  `solitaire_server/Dockerfile`: multi-stage build (`rust:1.95-slim` →
+  `debian:bookworm-slim`); copies `.sqlx` offline cache so `SQLX_OFFLINE=true`
+  succeeds without a live database at build time; exposes port 8080.
+  `solitaire_server/docker-compose.yml`: single-service compose file;
+  `db-data` volume at `/app/data`; `DATABASE_URL` and `JWT_SECRET` from
+  environment; HTTP health-check via `wget`. `solitaire_server/.env.example`:
+  documents all required variables with generation hint (`openssl rand -hex 32`).
+- **Account deletion flow** (`272d31f`).
+  "Delete Account" in Settings fires `DeleteAccountRequestEvent` →
+  `SyncSetupPlugin::open_delete_confirm_modal` spawns a danger-red
+  confirmation modal with "Cancel" and "Delete Forever" buttons.
+  "Delete Forever" submits an async `PendingDeleteTask` that calls
+  `SyncProvider::delete_account()`; `poll_delete_task` on Ok fires
+  `SyncLogoutRequestEvent` + a success toast; on Err shows an error toast
+  and leaves the modal open. Two-click destroy pattern — no accidental
+  account deletion possible.
+
+### Removed
+
+- **`SyncAuthResultEvent`** (`432061c`). Defined but never emitted or
+  consumed; removed as dead code.
+
+### Stats
+
+- Tests: **1300+ passing** / 0 failing
+- Clippy: clean
+- Crates touched: `solitaire_data` (sync_client), `solitaire_engine`
+  (events, settings_plugin, sync_plugin, sync_setup_plugin [new], lib),
+  `solitaire_app` (lib.rs), `solitaire_server` (Dockerfile,
+  docker-compose.yml, .env.example [new])
+
 ## [0.22.0] — 2026-05-08
 
 Adds difficulty-tier game selection, Android JNI bridges for keystore and
