@@ -283,6 +283,15 @@ pub struct ForfeitEvent;
 #[derive(Message, Debug, Clone, Copy, Default)]
 pub struct ForfeitRequestEvent;
 
+/// Fired when the player clicks "Scan for new themes" in Settings.
+///
+/// Consumed by `handle_scan_themes` in `SettingsPlugin`, which scans
+/// `user_theme_dir()` for `.zip` files, calls `import_theme()` on each
+/// unrecognised archive, refreshes [`crate::theme::ThemeRegistry`], and
+/// fires [`InfoToastEvent`] messages to report results.
+#[derive(Message, Debug, Clone, Copy, Default)]
+pub struct ScanThemesRequestEvent;
+
 /// Fired when the player requests a hint (H key). Carries the source card ID
 /// and destination pile for visual highlighting.
 ///

@@ -31,7 +31,8 @@ use crate::events::{
 use crate::font_plugin::FontResource;
 use crate::progress_plugin::ProgressResource;
 use crate::resources::{SettingsScrollPos, SyncStatus, SyncStatusResource};
-use crate::theme::{ThemeThumbnailCache, ThemeThumbnailPair};
+use crate::assets::user_theme_dir;
+use crate::theme::{import_theme, ImportError, ThemeThumbnailCache, ThemeThumbnailPair, refresh_registry};
 use crate::ui_focus::{FocusGroup, FocusRow, Focusable, FocusedButton};
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
@@ -235,6 +236,8 @@ enum SettingsButton {
     /// flag only affects launches without saved geometry — the
     /// player's last window size always wins.
     ToggleSmartDefaultSize,
+    /// Scan `user_theme_dir()` for new `.zip` files and import each one.
+    ScanThemes,
     SyncNow,
     /// Open the sync-server Connect modal (shown when backend = Local).
     ConnectSync,
@@ -293,6 +296,7 @@ impl SettingsButton {
             SettingsButton::SelectCardBack(_) => 70,
             SettingsButton::SelectBackground(_) => 80,
             SettingsButton::SelectTheme(_) => 85,
+            SettingsButton::ScanThemes => 86,
             // Sync section
             SettingsButton::SyncNow => 90,
             SettingsButton::ConnectSync => 91,
@@ -377,6 +381,7 @@ impl Plugin for SettingsPlugin {
                     sync_settings_panel_visibility,
                     handle_settings_buttons,
                     handle_sync_buttons,
+                    handle_scan_themes,
                     update_sync_status_text,
                     update_card_back_text,
                     update_background_text,
@@ -1070,6 +1075,9 @@ fn handle_settings_buttons(
                     changed.write(SettingsChangedEvent(settings.0.clone()));
                 }
             }
+            SettingsButton::ScanThemes => {
+                // Handled by `handle_scan_themes`.
+            }
             SettingsButton::SyncNow
             | SettingsButton::ConnectSync
             | SettingsButton::DisconnectSync
@@ -1637,6 +1645,7 @@ fn spawn_settings_panel(
                     font_res,
                 );
             }
+            import_themes_row(body, font_res);
 
             // --- Sync ---
             section_label(body, "Sync", font_res);
@@ -2394,6 +2403,172 @@ fn value_text_font(font_res: Option<&FontResource>) -> TextFont {
 /// `tooltip` is the hover-reveal caption attached via [`Tooltip`]. Every
 /// Settings icon button ships with one because the glyph alone (`+`, `−`,
 /// `⇄`) does not name what it adjusts; the tooltip carries that meaning.
+/// Scans `user_theme_dir()` for `.zip` files and calls [`import_theme`] on
+/// each one. On success, [`ThemeRegistry`] is refreshed in place and an
+/// [`InfoToastEvent`] is fired per imported theme. `IdCollision` errors (theme
+/// already installed) are silently skipped; all other errors produce a warning
+/// toast. A final toast tells the player to reopen Settings to see new themes.
+fn handle_scan_themes(
+    interaction_query: Query<(&Interaction, &SettingsButton), Changed<Interaction>>,
+    mut toast: MessageWriter<InfoToastEvent>,
+    mut registry: Option<ResMut<crate::theme::ThemeRegistry>>,
+) {
+    for (interaction, button) in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if !matches!(button, SettingsButton::ScanThemes) {
+            continue;
+        }
+
+        let themes_dir = user_theme_dir();
+
+        let zips: Vec<std::path::PathBuf> = match std::fs::read_dir(&themes_dir) {
+            Ok(entries) => entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|ext| ext == "zip"))
+                .collect(),
+            Err(_) => {
+                toast.write(InfoToastEvent(
+                    "Themes folder not found — drop .zip files there first.".to_string(),
+                ));
+                return;
+            }
+        };
+
+        if zips.is_empty() {
+            toast.write(InfoToastEvent(
+                "No .zip files found in themes folder.".to_string(),
+            ));
+            return;
+        }
+
+        let mut imported = 0u32;
+        let mut errors = 0u32;
+
+        for zip_path in &zips {
+            match import_theme(zip_path) {
+                Ok(theme_id) => {
+                    toast.write(InfoToastEvent(format!(
+                        "Imported theme '{}'.",
+                        theme_id.as_str()
+                    )));
+                    imported += 1;
+                }
+                Err(ImportError::IdCollision { .. }) => {
+                    // Already installed — silent skip.
+                }
+                Err(e) => {
+                    let name = zip_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    toast.write(InfoToastEvent(format!("Import failed ({name}): {e}")));
+                    errors += 1;
+                }
+            }
+        }
+
+        if imported == 0 && errors == 0 {
+            toast.write(InfoToastEvent("All themes already installed.".to_string()));
+            return;
+        }
+
+        if imported > 0 {
+            if let Some(reg) = &mut registry {
+                refresh_registry(reg, &themes_dir);
+            }
+            toast.write(InfoToastEvent(
+                "Reopen Settings to see new themes in the picker.".to_string(),
+            ));
+        }
+    }
+}
+
+/// A small pill-shaped settings button, matching the style used in `sync_row`.
+fn pill_button(
+    parent: &mut ChildSpawnerCommands,
+    marker: SettingsButton,
+    label: &str,
+    tooltip: &'static str,
+    font_res: Option<&FontResource>,
+) {
+    let font = TextFont {
+        font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: TYPE_CAPTION,
+        ..default()
+    };
+    parent
+        .spawn((
+            marker,
+            Button,
+            Tooltip::new(tooltip),
+            Node {
+                padding: UiRect::axes(VAL_SPACE_3, VAL_SPACE_2),
+                justify_content: JustifyContent::Center,
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(RADIUS_SM)),
+                ..default()
+            },
+            BackgroundColor(BG_ELEVATED_HI),
+            BorderColor::all(BORDER_SUBTLE),
+            HighContrastBorder::with_default(BORDER_SUBTLE),
+        ))
+        .with_children(|b| {
+            b.spawn((Text::new(label.to_string()), font, TextColor(TEXT_PRIMARY)));
+        });
+}
+
+/// "Import Theme" row: folder-path label + "Scan for new themes" button.
+///
+/// The player drops `.zip` theme archives into the themes folder shown here,
+/// then presses the button. [`handle_scan_themes`] picks them up, validates,
+/// and installs them. Reopen Settings to see newly imported themes in the
+/// card-theme picker.
+fn import_themes_row(parent: &mut ChildSpawnerCommands, font_res: Option<&FontResource>) {
+    let caption_font = TextFont {
+        font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+        font_size: TYPE_CAPTION,
+        ..default()
+    };
+
+    parent
+        .spawn((
+            FocusRow,
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: VAL_SPACE_2,
+                ..default()
+            },
+        ))
+        .with_children(|col| {
+            // Folder path hint.
+            let path_str = user_theme_dir().to_string_lossy().into_owned();
+            col.spawn((
+                Text::new(format!("Drop .zip files into: {path_str}")),
+                caption_font,
+                TextColor(TEXT_SECONDARY),
+            ));
+
+            // Scan button.
+            col.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|row| {
+                pill_button(
+                    row,
+                    SettingsButton::ScanThemes,
+                    "Scan for new themes",
+                    "Scan the themes folder for .zip archives and install any that are new.",
+                    font_res,
+                );
+            });
+        });
+}
+
 fn icon_button(
     parent: &mut ChildSpawnerCommands,
     label: &str,
