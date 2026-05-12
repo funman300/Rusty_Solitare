@@ -1523,6 +1523,68 @@ async fn auth_rate_limit_returns_429_on_11th_request() {
     );
 }
 
+/// The 11th `POST /api/sync/push` from the same authenticated user within the
+/// rate-limit window must return 429 Too Many Requests.
+///
+/// Uses [`solitaire_server::build_router`] (rate limiting ON) so the
+/// GovernorLayer is applied. We register a fresh account, then send 10 pushes
+/// (consuming the burst allowance), and assert the 11th is throttled.
+///
+/// Note: the push body deliberately omits valid `SyncPayload` structure —
+/// that would return 422, but the rate limiter fires before deserialization,
+/// so the response code for the first 10 is 422 and for the 11th is 429.
+/// The test only asserts `!= 429` for requests 1–10 and `== 429` for request 11.
+#[tokio::test]
+async fn sync_push_rate_limit_returns_429_on_11th_request() {
+    let state = solitaire_server::AppState {
+        pool: test_pool().await,
+        jwt_secret: TEST_SECRET.to_string(),
+    };
+    let app = solitaire_server::build_router(state);
+
+    // Register a user to obtain a valid JWT for the UserIdKeyExtractor.
+    let (token, _) = register_user(app.clone(), "sync_ratelimit_user", "p4ssword!").await;
+
+    let stub_body = serde_json::to_vec(&serde_json::json!({})).unwrap();
+
+    // First 10 requests consume the burst allowance (burst_size = 10).
+    // The body is intentionally invalid — the rate limiter fires before
+    // deserialization, so we get 422 rather than 200. We only assert != 429.
+    for i in 0..10 {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/sync/push")
+            .header("content-type", "application/json")
+            .header("Authorization", format!("Bearer {token}"))
+            .header("x-forwarded-for", TEST_CLIENT_IP)
+            .body(Body::from(stub_body.clone()))
+            .expect("failed to build request");
+        let resp = app.clone().oneshot(req).await.expect("oneshot failed");
+        assert_ne!(
+            resp.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "request {} of 10 must not be rate-limited",
+            i + 1
+        );
+    }
+
+    // The 11th request must be throttled.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/sync/push")
+        .header("content-type", "application/json")
+        .header("Authorization", format!("Bearer {token}"))
+        .header("x-forwarded-for", TEST_CLIENT_IP)
+        .body(Body::from(stub_body))
+        .expect("failed to build 11th request");
+    let resp = app.clone().oneshot(req).await.expect("oneshot failed");
+    assert_eq!(
+        resp.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "11th sync push must be rate-limited with 429"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Replay endpoints
 //
