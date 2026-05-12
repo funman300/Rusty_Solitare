@@ -134,12 +134,6 @@ pub struct ManualSyncRequestEvent;
 #[derive(Message, Debug, Clone, Copy, Default)]
 pub struct SyncConfigureRequestEvent;
 
-/// Result of an async login or register attempt. `Ok(username)` on success;
-/// `Err(human-readable message)` on failure. Consumed by `SyncSetupPlugin`
-/// to update the in-world provider and surface errors in the modal.
-#[derive(Message, Debug, Clone)]
-pub struct SyncAuthResultEvent(pub Result<String, String>);
-
 /// Request to disconnect from the current sync backend, clear stored
 /// credentials, and reset to `SyncBackend::Local`. Fired by the "Disconnect"
 /// button in the Settings sync section.

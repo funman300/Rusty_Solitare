@@ -25,7 +25,10 @@ use solitaire_data::{
 use solitaire_sync::{merge, SyncPayload, SyncResponse};
 
 use crate::achievement_plugin::{AchievementsResource, AchievementsStoragePath};
-use crate::events::{GameWonEvent, ManualSyncRequestEvent, SyncCompleteEvent};
+use crate::events::{
+    GameWonEvent, InfoToastEvent, ManualSyncRequestEvent, SyncCompleteEvent,
+    SyncConfigureRequestEvent,
+};
 use crate::game_plugin::RecordingReplay;
 use crate::progress_plugin::{ProgressResource, ProgressStoragePath};
 use crate::resources::{GameStateResource, SyncStatus, SyncStatusResource};
@@ -104,6 +107,8 @@ impl Plugin for SyncPlugin {
             .init_resource::<PendingReplayUpload>()
             .add_message::<ManualSyncRequestEvent>()
             .add_message::<SyncCompleteEvent>()
+            .add_message::<SyncConfigureRequestEvent>()
+            .add_message::<InfoToastEvent>()
             .add_systems(Startup, start_pull)
             .add_systems(
                 Update,
@@ -191,6 +196,8 @@ fn poll_pull_result(
     mut progress: ResMut<ProgressResource>,
     progress_path: Res<ProgressStoragePath>,
     mut complete_writer: MessageWriter<SyncCompleteEvent>,
+    mut configure_sync: MessageWriter<SyncConfigureRequestEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
 ) {
     let Some(task) = task_res.0.as_mut() else {
         return;
@@ -240,10 +247,19 @@ fn poll_pull_result(
             warn!("sync pull failed: {e}");
             let msg = match &e {
                 SyncError::Network(_) => "Can't reach server — check your connection".to_string(),
-                SyncError::Auth(_) => "Login expired — tap Sync Now after re-logging in".to_string(),
+                SyncError::Auth(_) => "Session expired — please reconnect".to_string(),
                 SyncError::Serialization(_) => format!("Unexpected server response: {e}"),
                 SyncError::UnsupportedPlatform => unreachable!("handled above"),
             };
+            // On auth failure, reopen the Connect modal so the player can
+            // re-enter credentials without having to navigate through Settings.
+            // `open_sync_setup_modal` is idempotent — it ignores the event when
+            // the modal is already on screen, so repeated pull failures don't
+            // stack multiple modals.
+            if matches!(e, SyncError::Auth(_)) {
+                toast.write(InfoToastEvent("Session expired — please reconnect".to_string()));
+                configure_sync.write(SyncConfigureRequestEvent);
+            }
             status.0 = SyncStatus::Error(msg.clone());
             complete_writer.write(SyncCompleteEvent(Err(msg)));
         }
