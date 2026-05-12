@@ -49,11 +49,9 @@ Also shipped (pre-Phase 8 but post-v0.22.0, already in CHANGELOG):
 - [x] SESSION_HANDOFF.md update — this file
 
 ### 2. Leaderboard wiring gaps
-- **Best-score auto-post missing.** `POST /api/sync/push` merges stats/achievements/
-  progress but never touches the `leaderboard` table. Players who opt in never
-  have their `best_time_secs` / `best_score` updated automatically. Fix: update
-  the leaderboard row inside the server's sync push handler (or on `GameWonEvent`
-  via a new async task in `sync_plugin`). **Requires DB schema confirmation.**
+- [x] **Best-score auto-post.** Done (`303c78a`): `update_leaderboard_if_opted_in`
+  called from both first-push and merge paths in `sync.rs`; uses SQLite `MIN`/`MAX`
+  in the UPDATE so scores never regress on stale data.
 - [x] **Display name = username.** Done (`03be4fc`): `leaderboard_display_name:
   Option<String>` added to `Settings`; editor modal in leaderboard panel; persists
   to `settings.json`; `handle_opt_in_button` prefers custom name over username.
@@ -147,10 +145,9 @@ READ FIRST (in order):
   6. docs/android/       — Android setup + build runbook
   7. ~/.claude/projects/<this-project>/memory/MEMORY.md
 
-OPEN WORK (in priority order):
-  A. Best-score auto-post: sync push handler never writes leaderboard table.
-     Requires server-side change + DB schema confirmation before starting.
-  B. Android AVD functional tests (Keystore + clipboard) — requires running AVD.
+OPEN WORK:
+  A. Android AVD functional tests (Keystore + clipboard) — requires running AVD.
+     All other punch-list items are complete.
 
-Ask which to start. Both are independent.
+Ask which to start, or declare Phase 8 closed.
 ```
