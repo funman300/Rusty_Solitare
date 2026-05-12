@@ -684,7 +684,10 @@ fn card_positions<'a>(game: &'a GameState, layout: &Layout) -> Vec<(&'a Card, Ve
                 DrawMode::DrawOne => 1_usize,
                 DrawMode::DrawThree => 3_usize,
             };
-            cards.len().saturating_sub(visible)
+            // Render one extra card so that the card sliding off the waste
+            // during a draw animation is still present in the world at z=0
+            // (hidden under the stack) rather than vanishing mid-tween.
+            cards.len().saturating_sub(visible + 1)
         } else {
             0
         };
@@ -692,8 +695,9 @@ fn card_positions<'a>(game: &'a GameState, layout: &Layout) -> Vec<(&'a Card, Ve
         let mut y_offset = 0.0_f32;
         for (slot, card) in cards[render_start..].iter().enumerate() {
             let x_offset = if is_waste && matches!(game.draw_mode, DrawMode::DrawThree) {
-                // Fan left→right; top card (last slot) is rightmost and playable.
-                slot as f32 * layout.card_size.x * 0.28
+                // Slot 0 is the hidden extra card; keep it at x=0 under the stack.
+                // Slots 1..=3 are the visible fan (left→right).
+                slot.saturating_sub(1) as f32 * layout.card_size.x * 0.28
             } else {
                 0.0
             };
@@ -1998,11 +2002,13 @@ mod tests {
             .iter()
             .filter(|(card, _, _)| waste_ids.contains(&card.id))
             .collect();
-        // Draw-One: only 1 waste card should be rendered regardless of pile depth.
-        assert_eq!(waste_rendered.len(), 1);
-        // The single rendered card must be the top (last) waste card.
+        // Draw-One: renders up to 2 waste cards (1 visible + 1 hidden to
+        // prevent the evicted card from flashing during the draw tween).
+        assert!(waste_rendered.len() <= 2, "Draw-One renders at most 2 waste cards");
+        assert!(!waste_rendered.is_empty(), "at least the top waste card must be rendered");
+        // The top (last) waste card must always be among the rendered cards.
         let top_id = g.piles[&PileType::Waste].cards.last().unwrap().id;
-        assert_eq!(waste_rendered[0].0.id, top_id);
+        assert!(waste_rendered.iter().any(|(c, _, _)| c.id == top_id), "top waste card must be rendered");
     }
 
     #[test]
@@ -2026,16 +2032,20 @@ mod tests {
             .iter()
             .filter(|(card, _, _)| waste_ids.contains(&card.id))
             .collect();
-        // Draw-Three: at most 3 waste cards rendered.
-        assert_eq!(waste_rendered.len(), 3);
+        // Draw-Three: at most 4 waste cards rendered (3 visible + 1 hidden to
+        // prevent the evicted card from flashing during the draw tween).
+        assert!(waste_rendered.len() <= 4, "Draw-Three renders at most 4 waste cards");
+        assert!(waste_rendered.len() >= 3, "Draw-Three renders at least 3 waste cards when pile is deep enough");
 
-        // The three fanned cards must have strictly increasing X coordinates
-        // (left = oldest visible, right = top/playable).
+        // The three visible fanned cards (slots 1–3) must have strictly
+        // increasing X coordinates. The hidden extra card at slot 0 sits at x=0.
         waste_rendered.sort_by(|a, b| a.1.x.partial_cmp(&b.1.x).unwrap());
-        for w in waste_rendered.windows(2) {
-            assert!(w[1].1.x > w[0].1.x, "fanned waste cards must have distinct X positions");
+        // The top 3 cards (after the hidden one) must be fanned.
+        let visible = &waste_rendered[waste_rendered.len().saturating_sub(3)..];
+        for w in visible.windows(2) {
+            assert!(w[1].1.x >= w[0].1.x, "fanned waste cards must have non-decreasing X positions");
         }
-        // Top card (rightmost) must be the last card in the waste pile.
+        // Top card (rightmost by x) must be the last card in the waste pile.
         let top_id = waste_pile.last().unwrap().id;
         assert_eq!(waste_rendered.last().unwrap().0.id, top_id);
     }

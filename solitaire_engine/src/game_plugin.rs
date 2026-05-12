@@ -990,18 +990,26 @@ pub fn has_legal_moves(game: &GameState) -> bool {
     use solitaire_core::rules::{can_place_on_foundation, can_place_on_tableau};
 
     let mut sources: Vec<Card> = Vec::new();
-    for ty in [PileType::Stock, PileType::Waste] {
-        if let Some(p) = game.piles.get(&ty) {
-            sources.extend(p.cards.iter().cloned());
-        }
+    // Only the top waste card is playable.
+    if let Some(p) = game.piles.get(&PileType::Waste)
+        && let Some(top) = p.cards.last()
+    {
+        sources.push(top.clone());
     }
+    // Any face-up card in a tableau column can be the base of a movable run.
     for i in 0..7_usize {
-        if let Some(t) = game.piles.get(&PileType::Tableau(i))
-            && let Some(top) = t.cards.last().filter(|c| c.face_up)
-        {
-            sources.push(top.clone());
+        if let Some(t) = game.piles.get(&PileType::Tableau(i)) {
+            for card in t.cards.iter().filter(|c| c.face_up) {
+                sources.push(card.clone());
+            }
         }
     }
+    // Stock cards are face-down and cannot be placed directly; drawing is
+    // only useful if the drawn card can subsequently be placed, which the
+    // waste-card check above already covers for the currently visible card.
+    // Including all stock cards would produce false positives for unplayable
+    // face-down cards (the test has_legal_moves_returns_false_when_stock_only_holds_unplayable_cards
+    // explicitly guards this case).
 
     for card in &sources {
         for slot in 0..4_u8 {
@@ -1728,6 +1736,40 @@ mod tests {
         });
 
         assert!(!has_legal_moves(&game), "Two of Clubs with empty board has no legal move");
+    }
+
+    #[test]
+    fn has_legal_moves_detects_non_top_face_up_card_as_source() {
+        // Regression: the bug only checked t.cards.last() (top face-up card).
+        // If the only legal move involves a face-up card that is NOT the top
+        // card of its column the previous code would return false (softlock)
+        // even though the player can still move that run.
+        use solitaire_core::card::{Card, Rank, Suit};
+        let mut game = GameState::new(1, DrawMode::DrawOne);
+
+        game.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+        game.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+        for slot in 0..4_u8 {
+            game.piles.get_mut(&PileType::Foundation(slot)).unwrap().cards.clear();
+        }
+        for i in 0..7_usize {
+            game.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+        }
+
+        // Tableau 0: face-up Queen of Spades (non-top) + face-up Jack of Hearts on top.
+        // King of Diamonds is on Tableau 1 (empty otherwise), so Queen→King is the
+        // only legal tableau move, and that move targets the Queen which is non-top.
+        let t0 = game.piles.get_mut(&PileType::Tableau(0)).unwrap();
+        t0.cards.push(Card { id: 10, suit: Suit::Spades, rank: Rank::Queen, face_up: true });
+        t0.cards.push(Card { id: 11, suit: Suit::Hearts, rank: Rank::Jack, face_up: true });
+
+        let t1 = game.piles.get_mut(&PileType::Tableau(1)).unwrap();
+        t1.cards.push(Card { id: 12, suit: Suit::Diamonds, rank: Rank::King, face_up: true });
+
+        assert!(
+            has_legal_moves(&game),
+            "Queen (non-top face-up) should be detected as a valid move source onto King",
+        );
     }
 
     // -----------------------------------------------------------------------
