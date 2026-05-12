@@ -27,10 +27,6 @@ pub trait SyncProvider: Send + Sync {
     fn backend_name(&self) -> &'static str;
     /// Returns true if the user is currently authenticated with this backend.
     fn is_authenticated(&self) -> bool;
-    /// Mirror an achievement unlock to this backend (no-op for most backends).
-    async fn mirror_achievement(&self, _id: &str) -> Result<(), SyncError> {
-        Ok(())
-    }
     /// Fetch the global leaderboard from this backend. Returns an empty list
     /// for backends that do not support leaderboards (e.g. `LocalOnlyProvider`).
     async fn fetch_leaderboard(&self) -> Result<Vec<LeaderboardEntry>, SyncError> {
@@ -82,9 +78,6 @@ impl SyncProvider for Box<dyn SyncProvider + Send + Sync> {
     }
     fn is_authenticated(&self) -> bool {
         (**self).is_authenticated()
-    }
-    async fn mirror_achievement(&self, id: &str) -> Result<(), SyncError> {
-        (**self).mirror_achievement(id).await
     }
     async fn fetch_leaderboard(&self) -> Result<Vec<LeaderboardEntry>, SyncError> {
         (**self).fetch_leaderboard().await
