@@ -1,6 +1,6 @@
 # Solitaire Quest — Session Handoff
 
-**Last updated:** 2026-05-12 — WASM winning-sequence test shipped (`b4ada2a`). HEAD locally: `b4ada2a`. Push pending.
+**Last updated:** 2026-05-12 — Leaderboard display name shipped (`03be4fc`). All commits pushed to origin.
 
 Phase 8 closes the self-hosted-server connection arc end-to-end: login/register
 modal, re-auth on token expiry, account deletion flow, server deployment
@@ -12,9 +12,9 @@ and full server integration tests.
 
 ## Current state
 
-- **HEAD locally:** `b4ada2a` (test: WASM winning-sequence step-through).
-- **HEAD on origin:** `d44cedb` (pushed — 2 commits ahead).
-- **Working tree:** `SESSION_HANDOFF.md` modified, uncommitted.
+- **HEAD locally:** `03be4fc` (feat: leaderboard custom display name).
+- **HEAD on origin:** `03be4fc` (fully pushed).
+- **Working tree:** clean (only `solitaire-release.jks.bak2` untracked — intentional).
 - **Build:** `cargo clippy --workspace --all-targets -- -D warnings` clean.
 - **Tests:** **1300+ passing / 0 failing** across the workspace.
 - **Tags on origin:** `v0.9.0` through `v0.22.0`.
@@ -53,11 +53,10 @@ Also shipped (pre-Phase 8 but post-v0.22.0, already in CHANGELOG):
   progress but never touches the `leaderboard` table. Players who opt in never
   have their `best_time_secs` / `best_score` updated automatically. Fix: update
   the leaderboard row inside the server's sync push handler (or on `GameWonEvent`
-  via a new async task in `sync_plugin`).
-- **Display name = username.** `handle_opt_in_button` uses the `SyncBackend`
-  username as the leaderboard display name. Consider adding
-  `leaderboard_display_name: Option<String>` to `Settings` for players who
-  want a different public identity.
+  via a new async task in `sync_plugin`). **Requires DB schema confirmation.**
+- [x] **Display name = username.** Done (`03be4fc`): `leaderboard_display_name:
+  Option<String>` added to `Settings`; editor modal in leaderboard panel; persists
+  to `settings.json`; `handle_opt_in_button` prefers custom name over username.
 
 ### 3. Security hardening
 - [x] **Refresh token rotation.** Done (`b129664`): `refresh_tokens` table
@@ -86,9 +85,9 @@ Also shipped (pre-Phase 8 but post-v0.22.0, already in CHANGELOG):
 - [x] **WASM build script.** Done (`40d0712`): `build_wasm.sh` at repo root
   documents `wasm-pack build --target web`, cleans up pkg metadata files,
   includes dependency guard + install instructions.
-- **Server password reset.** No admin endpoint or CLI tool for resetting a
-  user's password. Self-hosters have no recovery path short of direct SQLite
-  edits.
+- [x] **Server password reset.** Done (`7514684`): `--reset-password <username>`
+  subcommand reads new password from stdin, bcrypt-hashes it, invalidates all
+  active sessions for the user.
 
 ### 6. Testing gaps
 - [x] **Server 401 → refresh → retry path.** Done (`198df75`): both
@@ -137,13 +136,11 @@ Items missing from the doc:
 ```
 You are a senior Rust + Bevy developer working on Solitaire Quest.
 Working directory: <Rusty_Solitaire clone path>.
-Branch: master. v0.23.0 is the current version (HEAD locally: bd388fe).
-Phase 8 sync is fully shipped. ARCHITECTURE.md is now v1.3 (all Phase 8 gaps closed).
-Push to origin pending (bd388fe + ARCHITECTURE.md + SESSION_HANDOFF.md commits).
+Branch: master. v0.23.0 is the current version (HEAD: 03be4fc). Fully pushed.
 
 READ FIRST (in order):
   1. SESSION_HANDOFF.md  — this file
-  2. CHANGELOG.md        — [0.23.0] section has the full Phase 8 detail
+  2. CHANGELOG.md        — [0.23.0] section has full Phase 8 detail
   3. CLAUDE.md           — unified-3.0 rule set
   4. ARCHITECTURE.md     — v1.3, fully up to date
   5. docs/ui-mockups/    — design system + mockup library
@@ -151,10 +148,9 @@ READ FIRST (in order):
   7. ~/.claude/projects/<this-project>/memory/MEMORY.md
 
 OPEN WORK (in priority order):
-  D. Android AVD functional tests (Keystore + clipboard)
-  E. Theme importer UI button in Settings
-  F. mirror_achievement: decide + implement or remove from trait
-  G. Sync endpoint rate limiting (POST /api/sync/push has no per-user throttle)
+  A. Best-score auto-post: sync push handler never writes leaderboard table.
+     Requires server-side change + DB schema confirmation before starting.
+  B. Android AVD functional tests (Keystore + clipboard) — requires running AVD.
 
-Ask which to start. All are independent; any is a valid next arc.
+Ask which to start. Both are independent.
 ```
