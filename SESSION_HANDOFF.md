@@ -1,6 +1,6 @@
 # Solitaire Quest — Session Handoff
 
-**Last updated:** 2026-05-12 — Password reset CLI shipped (`7514684`). HEAD locally: `7514684`. Push pending.
+**Last updated:** 2026-05-12 — WASM winning-sequence test shipped (`b4ada2a`). HEAD locally: `b4ada2a`. Push pending.
 
 Phase 8 closes the self-hosted-server connection arc end-to-end: login/register
 modal, re-auth on token expiry, account deletion flow, server deployment
@@ -12,8 +12,8 @@ and full server integration tests.
 
 ## Current state
 
-- **HEAD locally:** `7514684` (feat: --reset-password subcommand).
-- **HEAD on origin:** `566b112` (pushed — 3 commits ahead).
+- **HEAD locally:** `b4ada2a` (test: WASM winning-sequence step-through).
+- **HEAD on origin:** `d44cedb` (pushed — 2 commits ahead).
 - **Working tree:** `SESSION_HANDOFF.md` modified, uncommitted.
 - **Build:** `cargo clippy --workspace --all-targets -- -D warnings` clean.
 - **Tests:** **1300+ passing / 0 failing** across the workspace.
@@ -95,9 +95,9 @@ Also shipped (pre-Phase 8 but post-v0.22.0, already in CHANGELOG):
   `jwt_refresh_on_401_succeeds` (pull) and
   `push_retries_after_401_on_expired_access_token` (push) in
   `solitaire_data/tests/sync_round_trip.rs`.
-- **WASM winning-replay step-through** — current tests cover 2 stock clicks;
-  a test stepping through a full winning sequence would catch
-  `GameState`/`ReplayMove` compatibility regressions.
+- [x] **WASM winning-replay step-through.** Done (`b4ada2a`): greedy solver
+  searches seeds 1–200 at test time; steps every move through `ReplayPlayer`;
+  asserts `is_won = true` on the final `StateSnapshot`.
 
 ---
 
