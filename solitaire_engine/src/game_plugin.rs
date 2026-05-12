@@ -252,20 +252,25 @@ pub fn advance_elapsed(
 }
 
 /// Increment `GameState.elapsed_seconds` once per real-world second while
-/// the game is in progress (not won), not paused, and the launch /
-/// mode-picker Home modal isn't covering the board. Stops counting on
-/// win so the final time reflects how long the player took to solve
-/// the deal; stops while the pause overlay is open; stops while Home
-/// is up so the timer doesn't tick under the picker before the player
-/// has actually committed to a deal.
+/// the game is in progress (not won), not paused, and no blocking modal
+/// (Home picker or first-run onboarding) is covering the board. Stops
+/// counting on win so the final time reflects how long the player took;
+/// stops while the pause overlay is open; stops while Home is up so the
+/// timer doesn't tick before the player commits to a deal; stops while
+/// the onboarding modal is visible so a new player's first-game time
+/// isn't inflated by reading the tutorial.
 fn tick_elapsed_time(
     time: Res<Time>,
     mut game: ResMut<GameStateResource>,
     mut accumulator: Local<f32>,
     paused: Option<Res<crate::pause_plugin::PausedResource>>,
     home_screens: Query<(), With<crate::home_plugin::HomeScreen>>,
+    onboarding_screens: Query<(), With<crate::onboarding_plugin::OnboardingScreen>>,
 ) {
-    if paused.is_some_and(|p| p.0) || !home_screens.is_empty() {
+    if paused.is_some_and(|p| p.0)
+        || !home_screens.is_empty()
+        || !onboarding_screens.is_empty()
+    {
         return;
     }
     let is_won = game.0.is_won;
