@@ -693,11 +693,16 @@ fn card_positions<'a>(game: &'a GameState, layout: &Layout) -> Vec<(&'a Card, Ve
         };
 
         let mut y_offset = 0.0_f32;
+        let rendered_len = cards[render_start..].len();
         for (slot, card) in cards[render_start..].iter().enumerate() {
             let x_offset = if is_waste && matches!(game.draw_mode, DrawMode::DrawThree) {
-                // Slot 0 is the hidden extra card; keep it at x=0 under the stack.
-                // Slots 1..=3 are the visible fan (left→right).
-                slot.saturating_sub(1) as f32 * layout.card_size.x * 0.28
+                // When len > visible, slot 0 is a hidden buffer card kept at
+                // x=0 to prevent a flash during the draw tween. When len ≤
+                // visible (small pile), every card is visible and should fan
+                // normally — no card is hidden, so the shift is 0.
+                let visible = 3_usize;
+                let hidden = rendered_len.saturating_sub(visible);
+                slot.saturating_sub(hidden) as f32 * layout.card_size.x * 0.28
             } else {
                 0.0
             };
@@ -2048,6 +2053,43 @@ mod tests {
         // Top card (rightmost by x) must be the last card in the waste pile.
         let top_id = waste_pile.last().unwrap().id;
         assert_eq!(waste_rendered.last().unwrap().0.id, top_id);
+    }
+
+    #[test]
+    fn waste_draw_three_fans_correctly_when_pile_smaller_than_visible() {
+        // Regression: slot.saturating_sub(1) always hid slot-0 even when the
+        // pile was too small to have a buffer card, collapsing 2 visible cards
+        // onto x=0 instead of fanning them.
+        use solitaire_core::game_state::DrawMode;
+        let mut g = GameState::new(42, DrawMode::DrawThree);
+        // Draw exactly once — in Draw-Three mode with a full stock this gives
+        // 3 waste cards (still ≤ visible=3, so no hidden buffer needed).
+        let _ = g.draw();
+        let waste_pile = &g.piles[&PileType::Waste].cards;
+        // We need exactly 2 or 3 waste cards to hit the small-pile path.
+        // One draw in Draw-Three adds up to 3 cards; take the first 2 if needed.
+        let count = waste_pile.len();
+        assert!(count >= 2, "need at least 2 waste cards");
+
+        let waste_ids: std::collections::HashSet<u32> =
+            waste_pile.iter().map(|c| c.id).collect();
+        let layout = crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let positions = card_positions(&g, &layout);
+
+        let mut waste_rendered: Vec<_> = positions
+            .iter()
+            .filter(|(card, _, _)| waste_ids.contains(&card.id))
+            .collect();
+        // All waste cards should be visible (no hidden buffer when len ≤ visible).
+        assert_eq!(waste_rendered.len(), count, "all waste cards rendered when pile ≤ visible");
+
+        // Cards must be fanned with distinct x positions (or equal for 1-card).
+        waste_rendered.sort_by(|a, b| a.1.x.partial_cmp(&b.1.x).unwrap());
+        if count >= 2 {
+            let last = waste_rendered.last().unwrap();
+            let second_last = &waste_rendered[waste_rendered.len() - 2];
+            assert!(last.1.x > second_last.1.x, "top 2 waste cards must fan to distinct x positions");
+        }
     }
 
     #[test]

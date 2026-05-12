@@ -167,10 +167,11 @@ pub struct SessionAchievements {
 #[derive(Component, Debug)]
 pub struct WinSummaryOverlay;
 
-/// Marker on the "Play Again" button inside the win-summary modal.
+/// Marker on the "Play Again" / "Watch Replay" buttons inside the win-summary modal.
 #[derive(Component, Debug)]
 enum WinSummaryButton {
     PlayAgain,
+    WatchReplay,
 }
 
 /// Marker for one row of the win-modal score-breakdown reveal.
@@ -602,25 +603,57 @@ fn spawn_win_summary_after_delay(
     }
 }
 
-/// Despawns the win-summary modal and fires `NewGameRequestEvent` when
-/// the player presses "Play Again".
+/// Handles "Play Again" and "Watch Replay" in the win-summary modal.
+/// Handles "Play Again" and "Watch Replay" in the win-summary modal.
 fn handle_win_summary_buttons(
     interaction_query: Query<(&Interaction, &WinSummaryButton), Changed<Interaction>>,
     overlays: Query<Entity, With<WinSummaryOverlay>>,
     mut commands: Commands,
     mut new_game: MessageWriter<NewGameRequestEvent>,
+    mut toast: MessageWriter<InfoToastEvent>,
+    history: Option<Res<crate::stats_plugin::ReplayHistoryResource>>,
+    mut playback: Option<ResMut<crate::replay_playback::ReplayPlaybackState>>,
 ) {
-    for (interaction, button) in &interaction_query {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+    // Collect all pressed buttons first to avoid moving `playback` inside the loop.
+    let pressed: Vec<&WinSummaryButton> = interaction_query
+        .iter()
+        .filter(|(i, _)| **i == Interaction::Pressed)
+        .map(|(_, b)| b)
+        .collect();
+
+    for button in pressed {
         match button {
             WinSummaryButton::PlayAgain => {
-                // Despawn the modal.
                 for entity in &overlays {
                     commands.entity(entity).despawn();
                 }
                 new_game.write(NewGameRequestEvent::default());
+            }
+            WinSummaryButton::WatchReplay => {
+                let latest = history
+                    .as_ref()
+                    .and_then(|h| h.0.replays.last())
+                    .cloned();
+                match (latest, playback.as_mut()) {
+                    (Some(replay), Some(pb)) => {
+                        for entity in &overlays {
+                            commands.entity(entity).despawn();
+                        }
+                        crate::replay_playback::start_replay_playback(
+                            &mut commands,
+                            pb,
+                            replay,
+                        );
+                    }
+                    (Some(_), None) => {
+                        toast.write(InfoToastEvent(
+                            "Replay playback not available".to_string(),
+                        ));
+                    }
+                    (None, _) => {
+                        toast.write(InfoToastEvent("No replay saved yet".to_string()));
+                    }
+                }
             }
         }
     }
@@ -811,28 +844,56 @@ fn spawn_overlay(
                     spawn_achievements_section(card, &session.names);
                 }
 
-                // Play Again button
-                card.spawn((
-                    WinSummaryButton::PlayAgain,
-                    Button,
-                    Node {
-                        padding: UiRect::axes(Val::Px(28.0), VAL_SPACE_3),
-                        justify_content: JustifyContent::Center,
-                        margin: UiRect::top(VAL_SPACE_2),
-                        border_radius: BorderRadius::all(Val::Px(RADIUS_MD)),
-                        ..default()
-                    },
-                    BackgroundColor(ACCENT_PRIMARY),
-                ))
-                .with_children(|b| {
-                    // Append the Enter / Return glyph so keyboard players see
-                    // the accelerator on the button itself — mirrors the
-                    // chip-style hints on every modal button helper.
-                    b.spawn((
-                        Text::new("Play Again  \u{21B5}"),
-                        TextFont { font_size: TYPE_BODY_LG, ..default() },
-                        TextColor(BG_BASE),
-                    ));
+                // Button row: Watch Replay + Play Again side by side.
+                card.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::Center,
+                    column_gap: VAL_SPACE_3,
+                    margin: UiRect::top(VAL_SPACE_2),
+                    ..default()
+                })
+                .with_children(|row| {
+                    // Watch Replay (secondary style)
+                    row.spawn((
+                        WinSummaryButton::WatchReplay,
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(20.0), VAL_SPACE_3),
+                            justify_content: JustifyContent::Center,
+                            border_radius: BorderRadius::all(Val::Px(RADIUS_MD)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::NONE),
+                        BorderColor::all(ACCENT_PRIMARY),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((
+                            Text::new("Watch Replay"),
+                            TextFont { font_size: TYPE_BODY_LG, ..default() },
+                            TextColor(ACCENT_PRIMARY),
+                        ));
+                    });
+
+                    // Play Again (primary style)
+                    row.spawn((
+                        WinSummaryButton::PlayAgain,
+                        Button,
+                        Node {
+                            padding: UiRect::axes(Val::Px(20.0), VAL_SPACE_3),
+                            justify_content: JustifyContent::Center,
+                            border_radius: BorderRadius::all(Val::Px(RADIUS_MD)),
+                            ..default()
+                        },
+                        BackgroundColor(ACCENT_PRIMARY),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((
+                            Text::new("Play Again  \u{21B5}"),
+                            TextFont { font_size: TYPE_BODY_LG, ..default() },
+                            TextColor(BG_BASE),
+                        ));
+                    });
                 });
             });
         });

@@ -1072,9 +1072,11 @@ fn check_no_moves(
     }
 
     if !moves_ok && !*already_fired {
-        toast.write(InfoToastEvent(
-            "No moves available \u{2014} press D to draw or N for a new game".to_string(),
-        ));
+        #[cfg(target_os = "android")]
+        let no_moves_msg = "No moves available \u{2014} tap the stock to draw or start a new game";
+        #[cfg(not(target_os = "android"))]
+        let no_moves_msg = "No moves available \u{2014} press D to draw or N for a new game";
+        toast.write(InfoToastEvent(no_moves_msg.to_string()));
         *already_fired = true;
         // Only spawn the overlay if one does not already exist.
         if game_over_screens.is_empty() {

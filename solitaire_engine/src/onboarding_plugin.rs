@@ -41,7 +41,13 @@ use crate::ui_theme::{
 // ---------------------------------------------------------------------------
 
 /// Total number of onboarding slides (0-based index goes 0..SLIDE_COUNT-1).
+///
+/// Android omits the keyboard-shortcuts slide (index 2) because there is no
+/// physical keyboard on a touchscreen device, dropping the count to 2.
+#[cfg(not(target_os = "android"))]
 const SLIDE_COUNT: u8 = 3;
+#[cfg(target_os = "android")]
+const SLIDE_COUNT: u8 = 2;
 
 // ---------------------------------------------------------------------------
 // Components (private — never re-exported)
@@ -276,6 +282,8 @@ fn spawn_slide(commands: &mut Commands, index: u8, font_res: Option<&FontResourc
     match index {
         0 => spawn_slide_welcome(commands, font_res),
         1 => spawn_slide_how_to_play(commands, font_res),
+        // Slide 2 (keyboard shortcuts) is desktop-only; Android has no keyboard.
+        #[cfg(not(target_os = "android"))]
         2 => spawn_slide_hotkeys(commands, font_res),
         _ => spawn_slide_welcome(commands, font_res),
     }
@@ -664,8 +672,15 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
+    #[cfg(not(target_os = "android"))]
     fn slide_count_constant_is_three() {
-        assert_eq!(SLIDE_COUNT, 3, "SLIDE_COUNT must be 3");
+        assert_eq!(SLIDE_COUNT, 3, "SLIDE_COUNT must be 3 on desktop");
+    }
+
+    #[test]
+    #[cfg(target_os = "android")]
+    fn slide_count_constant_is_two_on_android() {
+        assert_eq!(SLIDE_COUNT, 2, "SLIDE_COUNT must be 2 on Android (no keyboard slide)");
     }
 
     #[test]

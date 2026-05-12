@@ -242,6 +242,11 @@ pub struct PauseButton;
 #[derive(Component, Debug)]
 pub struct HelpButton;
 
+/// Marker on the "Hint" action button. Click spawns an async solver task
+/// (same as the `H` keyboard accelerator) and highlights the suggested card.
+#[derive(Component, Debug)]
+pub struct HintButton;
+
 /// Marker on the "Modes" action button. Click toggles the [`ModesPopover`]
 /// (a small dropdown panel) below the action bar. Each popover row starts
 /// the corresponding game mode.
@@ -367,6 +372,7 @@ impl Plugin for HudPlugin {
                     handle_undo_button,
                     handle_pause_button,
                     handle_help_button,
+                    handle_hint_button,
                     handle_modes_button,
                     handle_mode_option_click,
                     handle_modes_backdrop_click,
@@ -704,12 +710,21 @@ fn spawn_action_buttons(
             );
             spawn_action_button(
                 row,
+                HintButton,
+                "Hint",
+                Some("H"),
+                "Highlight a suggested move. Cycles through alternatives on repeat taps.",
+                &font,
+                4,
+            );
+            spawn_action_button(
+                row,
                 ModesButton,
                 "Modes \u{25BE}",
                 None,
                 "Switch modes: Classic, Daily, Zen, Challenge, Time Attack.",
                 &font,
-                4,
+                5,
             );
             spawn_action_button(
                 row,
@@ -718,7 +733,7 @@ fn spawn_action_buttons(
                 Some("N"),
                 "Start a fresh deal. Confirms first if a game is in progress.",
                 &font,
-                5,
+                6,
             );
         });
 }
@@ -853,6 +868,36 @@ fn handle_help_button(
     for interaction in &interaction_query {
         if *interaction == Interaction::Pressed {
             help.write(HelpRequestEvent);
+        }
+    }
+}
+
+fn handle_hint_button(
+    interaction_query: Query<&Interaction, (With<HintButton>, Changed<Interaction>)>,
+    paused: Option<Res<crate::PausedResource>>,
+    game: Option<Res<GameStateResource>>,
+    solver_config: Option<Res<crate::input_plugin::HintSolverConfig>>,
+    mut pending_hint: Option<ResMut<crate::pending_hint::PendingHintTask>>,
+    mut info_toast: MessageWriter<InfoToastEvent>,
+) {
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if paused.as_ref().is_some_and(|p| p.0) {
+            return;
+        }
+        let Some(ref g) = game else { return };
+        if g.0.is_won {
+            #[cfg(target_os = "android")]
+            let won_msg = "Game won! Tap New Game to play again";
+            #[cfg(not(target_os = "android"))]
+            let won_msg = "Game won! Press N for a new game";
+            info_toast.write(InfoToastEvent(won_msg.to_string()));
+            return;
+        }
+        if let (Some(cfg), Some(hint)) = (solver_config.as_ref(), pending_hint.as_mut()) {
+            hint.spawn(g.0.clone(), cfg.0);
         }
     }
 }
@@ -2648,6 +2693,7 @@ mod tests {
             focusable_for::<UndoButton>(&mut app),
             focusable_for::<PauseButton>(&mut app),
             focusable_for::<HelpButton>(&mut app),
+            focusable_for::<HintButton>(&mut app),
             focusable_for::<ModesButton>(&mut app),
             focusable_for::<NewGameButton>(&mut app),
         ] {
@@ -2755,6 +2801,10 @@ mod tests {
         assert_eq!(
             tooltip_for::<HelpButton>(&mut app),
             "Show controls, rules, and keyboard shortcuts."
+        );
+        assert_eq!(
+            tooltip_for::<HintButton>(&mut app),
+            "Highlight a suggested move. Cycles through alternatives on repeat taps."
         );
         assert_eq!(
             tooltip_for::<ModesButton>(&mut app),
@@ -2875,14 +2925,15 @@ mod tests {
     fn hud_button_order_matches_spawn_order() {
         let mut app = headless_app();
         // Visual reading order (left → right): Menu, Undo, Pause, Help,
-        // Modes, New Game. Their `order` fields must be 0..=5 in that
-        // order so Tab cycles them as the player reads them.
+        // Hint, Modes, New Game. Their `order` fields must be 0..=6 in
+        // that order so Tab cycles them as the player reads them.
         assert_eq!(focusable_for::<MenuButton>(&mut app).order, 0);
         assert_eq!(focusable_for::<UndoButton>(&mut app).order, 1);
         assert_eq!(focusable_for::<PauseButton>(&mut app).order, 2);
         assert_eq!(focusable_for::<HelpButton>(&mut app).order, 3);
-        assert_eq!(focusable_for::<ModesButton>(&mut app).order, 4);
-        assert_eq!(focusable_for::<NewGameButton>(&mut app).order, 5);
+        assert_eq!(focusable_for::<HintButton>(&mut app).order, 4);
+        assert_eq!(focusable_for::<ModesButton>(&mut app).order, 5);
+        assert_eq!(focusable_for::<NewGameButton>(&mut app).order, 6);
     }
 
     #[test]
