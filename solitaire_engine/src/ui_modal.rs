@@ -296,6 +296,10 @@ pub fn spawn_modal_body_text(
 
 /// Spawns the bottom actions row — flex-row with primary right-aligned.
 /// The closure populates the row's buttons via `spawn_modal_button`.
+///
+/// `flex_wrap: Wrap` lets the row reflow onto a second line when buttons
+/// collectively exceed the modal width on narrow screens (e.g. high-DPI
+/// Android where the logical viewport is ~411 dp).
 pub fn spawn_modal_actions<F>(parent: &mut ChildSpawnerCommands, build_buttons: F)
 where
     F: FnOnce(&mut ChildSpawnerCommands),
@@ -305,7 +309,9 @@ where
             ModalActions,
             Node {
                 flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
                 column_gap: VAL_SPACE_3,
+                row_gap: VAL_SPACE_2,
                 justify_content: JustifyContent::FlexEnd,
                 margin: UiRect::top(VAL_SPACE_2),
                 ..default()
