@@ -8,7 +8,7 @@ use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::input::ButtonInput;
 use bevy::prelude::*;
 use chrono::{Duration, Local, NaiveDate};
-use solitaire_core::achievement::achievement_by_id;
+use solitaire_core::achievement::{achievement_by_id, ALL_ACHIEVEMENTS};
 use solitaire_data::SyncBackend;
 
 use crate::achievement_plugin::AchievementsResource;
@@ -323,7 +323,7 @@ fn spawn_profile_screen(
                 let records = &ar.0;
                 let unlocked_count = records.iter().filter(|r| r.unlocked).count();
                 body.spawn((
-                    Text::new(format!("{unlocked_count} / 18 unlocked")),
+                    Text::new(format!("{unlocked_count} / {} unlocked", ALL_ACHIEVEMENTS.len())),
                     font_row.clone(),
                     TextColor(ACCENT_PRIMARY),
                 ));
