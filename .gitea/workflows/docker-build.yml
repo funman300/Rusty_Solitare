@@ -1,0 +1,65 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [master]
+    # Only run when server code changes, not when CI itself updates deploy/.
+    paths-ignore:
+      - 'deploy/**'
+      - 'argocd/**'
+      - '**.md'
+
+env:
+  REGISTRY: git.aleshym.co
+  IMAGE: git.aleshym.co/funman300/solitaire-server
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Need full history so we can push the tag-update commit back.
+          fetch-depth: 0
+          token: ${{ secrets.CI_TOKEN }}
+
+      - name: Set image tag
+        id: meta
+        run: echo "sha=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Gitea registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ gitea.actor }}
+          password: ${{ secrets.CI_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: solitaire_server/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.sha }}
+            ${{ env.IMAGE }}:latest
+
+      - name: Install kustomize
+        run: |
+          curl -sL "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/kustomize
+
+      - name: Pin image tag in deploy manifests
+        run: |
+          cd deploy
+          kustomize edit set image solitaire-server=${{ env.IMAGE }}:${{ steps.meta.outputs.sha }}
+
+      - name: Commit and push updated kustomization
+        run: |
+          git config user.email "ci@gitea.local"
+          git config user.name "Gitea CI"
+          git add deploy/kustomization.yaml
+          git commit -m "chore(deploy): bump image to ${{ steps.meta.outputs.sha }} [skip ci]" || true
+          git push

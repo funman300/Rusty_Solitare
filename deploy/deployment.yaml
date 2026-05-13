@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: solitaire-server
+  namespace: solitaire
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: solitaire-server
+  # SQLite is single-writer; Recreate avoids two pods owning the PVC at once.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: solitaire-server
+    spec:
+      imagePullSecrets:
+        - name: gitea-registry
+      containers:
+        - name: server
+          image: solitaire-server
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              value: sqlite:///data/sol.db
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: solitaire-secrets
+                  key: jwt-secret
+            - name: SERVER_PORT
+              value: "8080"
+          volumeMounts:
+            - name: db-data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: db-data
+          persistentVolumeClaim:
+            claimName: solitaire-db

@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: solitaire-server
+  namespace: solitaire
+  annotations:
+    # Remove the next two lines if you are not using cert-manager.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: klondike.aleshym.co
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: solitaire-server
+                port:
+                  name: http
+  # Remove the tls block if you are not using cert-manager.
+  tls:
+    - hosts:
+        - klondike.aleshym.co
+      secretName: solitaire-tls

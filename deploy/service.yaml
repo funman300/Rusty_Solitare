@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: solitaire-server
+  namespace: solitaire
+spec:
+  selector:
+    app: solitaire-server
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

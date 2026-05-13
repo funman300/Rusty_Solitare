@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: solitaire-server
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: http://10.10.0.64:3000/funman300/Rusty_Solitare.git
+    targetRevision: master
+    path: deploy
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: solitaire
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
