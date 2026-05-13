@@ -143,16 +143,18 @@ After the APK is signed cargo-apk panics with:
 thread 'main' panicked: Bin is not compatible with Cdylib
 ```
 
-This happens AFTER the APK is on disk and signed. cargo-apk is
-trying to also wrap the desktop `[[bin]]` target. The APK is still
-valid. Work around with `--lib`:
+This happens AFTER the APK is on disk and signed. cargo-apk tries to
+also wrap the desktop `[[bin]]` target alongside the `[lib]`. The APK
+is valid — the panic is cosmetic. **Always use `--lib`**, which is the
+canonical build command (see `CLAUDE.md §15.1`):
 
 ```bash
-cargo apk build -p solitaire_app --target x86_64-linux-android --lib
+cargo apk build -p solitaire_app --lib
 ```
 
-(Permanent fix to come — likely a `[[bin]] required-features = ["desktop"]`
-gate so cargo-apk skips the bin target on Android.)
+Root cause: upstream cargo-apk bug — it does not skip `[[bin]]` targets
+when building for Android. No in-repo fix is possible; `--lib` is the
+accepted workaround.
 
 ---
 

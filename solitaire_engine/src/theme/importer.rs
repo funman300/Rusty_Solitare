@@ -1,6 +1,6 @@
 //! Theme zip-archive importer.
 //!
-//! Phase 7 of the card-theme system (see `CARD_PLAN.md`). Players ship
+//! Players ship
 //! and install third-party themes as a single `.zip` containing a
 //! `theme.ron` manifest at the archive root plus the 52 face SVGs and
 //! one back SVG referenced by that manifest. [`import_theme`] is the

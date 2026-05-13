@@ -3,10 +3,8 @@
 //! with the currently-loaded theme so existing card-rendering systems
 //! pick up the new artwork on the next state-changed tick.
 //!
-//! Phase 4 of `CARD_PLAN.md`. The plugin's `set_theme` helper is the
-//! public API that the future picker UI (Phase 6) calls; for now it's
-//! exposed for tests and for any embedder that wants to load an
-//! alternative theme manually.
+//! The plugin's `set_theme` helper is the public API used by the
+//! Settings appearance picker and exposed for tests.
 
 use std::collections::HashMap;
 

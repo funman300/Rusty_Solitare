@@ -1,10 +1,8 @@
 //! Asset-loading infrastructure for runtime SVG rasterisation and the
 //! per-platform user-themes directory.
 //!
-//! See `CARD_PLAN.md` for the full multi-phase implementation plan.
-//! This module is the entry point for Phases 1 (SVG → `Image`) and 5
-//! (user-themes directory). Phase 3 will extend it further with custom
-//! `AssetSource` implementations for `embedded://` and `themes://`.
+//! Provides the SVG → `Image` loader and the `embedded://` / `themes://`
+//! custom `AssetSource` implementations used by the theme system.
 
 pub mod card_face_svg;
 pub mod icon_svg;

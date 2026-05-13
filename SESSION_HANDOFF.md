@@ -72,8 +72,8 @@ Also shipped (pre-Phase 8 but post-v0.22.0, already in CHANGELOG):
   hook confirmed `ClipboardManager.setPrimaryClip()` succeeds on Android 14.
   Hook reverted. Production path requires Interaction::Pressed + non-null `share_url`.
   Note: `adb shell input tap` doesn't deliver touch events on headless AVD (documented).
-- **`cargo apk build --lib` noisy stderr** — post-sign panic doesn't affect the
-  APK but pollutes CI output. Document `--lib` as canonical or upstream a fix.
+- [x] **`cargo apk build --lib` noisy stderr** — upstream cargo-apk bug; `--lib`
+  is the canonical command (CLAUDE.md §15.1, docs/ANDROID.md). No in-repo fix possible.
 
 ### 5. Feature completeness
 - [x] **Theme importer UI.** Done (`613bbf8`): "Scan for new themes" button in

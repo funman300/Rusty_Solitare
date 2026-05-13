@@ -1,6 +1,6 @@
 //! Bevy `AssetLoader` that rasterises an SVG into `bevy::image::Image`.
 //!
-//! The card-theme system (see `CARD_PLAN.md`) ships SVG sources both as
+//! The card-theme system ships SVG sources both as
 //! the embedded default theme and as user-supplied themes. Bevy 0.18 has
 //! no built-in SVG support, so this loader bridges `usvg` (parser) +
 //! `resvg` (renderer) + `tiny-skia` (CPU pixmap) to produce textures

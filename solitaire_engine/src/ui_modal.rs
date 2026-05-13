@@ -372,6 +372,7 @@ pub fn spawn_modal_button<M: Component>(
             Button,
             Node {
                 padding: UiRect::axes(VAL_SPACE_4, VAL_SPACE_3),
+                min_height: Val::Px(48.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 column_gap: VAL_SPACE_2,
