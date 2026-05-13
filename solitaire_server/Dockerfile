@@ -56,7 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY --from=builder /build/target/release/solitaire_server ./solitaire_server
+COPY --from=builder /build/target/release/solitaire_server ./server
 # Migrations are embedded via sqlx::migrate!("./migrations") at compile time.
 # Static web assets are served via ServeDir at runtime from these paths:
 #   /app/solitaire_server/web  →  /web route
@@ -67,5 +67,4 @@ COPY assets ./assets
 ENV SERVER_PORT=8080
 EXPOSE 8080
 
-ENTRYPOINT ["./solitaire_server"]
-# build
+ENTRYPOINT ["./server"]
