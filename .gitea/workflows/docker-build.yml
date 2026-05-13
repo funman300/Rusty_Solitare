@@ -69,4 +69,5 @@ jobs:
           git config user.name "Gitea CI"
           git add deploy/kustomization.yaml
           git commit -m "chore(deploy): bump image to ${{ steps.meta.outputs.sha }} [skip ci]" || true
+          git pull --rebase origin master
           git push
