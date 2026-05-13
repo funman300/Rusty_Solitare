@@ -61,6 +61,16 @@ header {
 
 .logo { font-size: 16px; font-weight: 700; }
 .muted { color: var(--text-muted); font-size: 12px; }
+.home-link {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 18px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: color 120ms, background 120ms;
+}
+.home-link:hover { color: var(--text); background: var(--panel-hi); }
 
 button {
     background: var(--panel-hi);
