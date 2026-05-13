@@ -237,6 +237,12 @@ pub struct Settings {
     /// field existed deserialize cleanly to `None` via `#[serde(default)]`.
     #[serde(default)]
     pub leaderboard_display_name: Option<String>,
+    /// When `true`, the player may drag the top card of a completed foundation
+    /// pile back onto a compatible tableau column — a non-standard house rule.
+    /// Off by default. Older `settings.json` files deserialize cleanly to
+    /// `false` via `#[serde(default)]`.
+    #[serde(default)]
+    pub take_from_foundation: bool,
 }
 
 fn default_draw_mode() -> DrawMode {
@@ -357,6 +363,7 @@ impl Default for Settings {
             replay_move_interval_secs: default_replay_move_interval_secs(),
             last_difficulty: None,
             leaderboard_display_name: None,
+            take_from_foundation: false,
         }
     }
 }

@@ -490,6 +490,9 @@ fn handle_new_game(
         let chosen_seed = initial_seed;
 
         game.0 = GameState::new_with_mode(chosen_seed, draw_mode, mode);
+        if let Some(s) = settings.as_ref() {
+            game.0.take_from_foundation = s.0.take_from_foundation;
+        }
         // Reset the in-flight replay buffer — a fresh deal starts with
         // an empty move list. The previously saved replay on disk
         // (latest_replay.json) is preserved until the player wins again.

@@ -145,6 +145,10 @@ pub struct GameState {
     /// Used by the `comeback` achievement condition.
     #[serde(default)]
     pub recycle_count: u32,
+    /// When `true`, the player may move the top card of a foundation pile back
+    /// onto a compatible tableau column. Off by default — non-standard house rule.
+    #[serde(default)]
+    pub take_from_foundation: bool,
     /// Save-file schema version. Defaults to `1` for older files that pre-date
     /// the field. The loader refuses any value other than
     /// [`GAME_STATE_SCHEMA_VERSION`].
@@ -187,6 +191,7 @@ impl GameState {
             is_auto_completable: false,
             undo_count: 0,
             recycle_count: 0,
+            take_from_foundation: false,
             schema_version: GAME_STATE_SCHEMA_VERSION,
             undo_stack: VecDeque::new(),
         }
@@ -312,6 +317,18 @@ impl GameState {
                     }
                 }
                 PileType::Tableau(_) => {
+                    if matches!(&from, PileType::Foundation(_)) {
+                        if !self.take_from_foundation {
+                            return Err(MoveError::RuleViolation(
+                                "take-from-foundation rule is disabled".into(),
+                            ));
+                        }
+                        if count != 1 {
+                            return Err(MoveError::RuleViolation(
+                                "only one card can return from foundation at a time".into(),
+                            ));
+                        }
+                    }
                     let dest = self.piles.get(&to).ok_or(MoveError::InvalidDestination)?;
                     if !can_place_on_tableau(&bottom_card, dest) {
                         return Err(MoveError::RuleViolation("invalid tableau placement".into()));
@@ -1257,5 +1274,72 @@ mod tests {
             PileType::Foundation(1),
             "must target the Hearts-claimed slot, not the empty slot 0",
         );
+    }
+
+    fn setup_take_from_foundation_game() -> GameState {
+        let mut g = new_game();
+        // Clear the board so we control the layout exactly.
+        g.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+        g.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+        for i in 0..7 {
+            g.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+        }
+        // Foundation slot 0: A♠, 2♠ (top = 2♠)
+        let f = g.piles.get_mut(&PileType::Foundation(0)).unwrap();
+        f.cards.push(Card { id: 1, suit: Suit::Spades, rank: Rank::Ace,  face_up: true });
+        f.cards.push(Card { id: 2, suit: Suit::Spades, rank: Rank::Two,  face_up: true });
+        // Tableau 0: 3♥ face-up (2♠ can go on 3♥ — different colour, rank-1)
+        g.piles.get_mut(&PileType::Tableau(0)).unwrap().cards.push(Card {
+            id: 3, suit: Suit::Hearts, rank: Rank::Three, face_up: true,
+        });
+        g
+    }
+
+    #[test]
+    fn take_from_foundation_blocked_by_default() {
+        let mut g = setup_take_from_foundation_game();
+        assert!(!g.take_from_foundation);
+        let err = g
+            .move_cards(PileType::Foundation(0), PileType::Tableau(0), 1)
+            .unwrap_err();
+        assert!(
+            matches!(err, MoveError::RuleViolation(_)),
+            "expected RuleViolation, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn take_from_foundation_allowed_when_enabled() {
+        let mut g = setup_take_from_foundation_game();
+        g.take_from_foundation = true;
+        g.move_cards(PileType::Foundation(0), PileType::Tableau(0), 1).unwrap();
+        // Foundation slot 0 should now hold only the Ace.
+        assert_eq!(g.piles[&PileType::Foundation(0)].cards.len(), 1);
+        assert_eq!(g.piles[&PileType::Foundation(0)].cards[0].rank, Rank::Ace);
+        // The 2♠ should be on top of tableau 0 above the 3♥.
+        let t0 = &g.piles[&PileType::Tableau(0)].cards;
+        assert_eq!(t0.len(), 2);
+        assert_eq!(t0[1].rank, Rank::Two);
+    }
+
+    #[test]
+    fn take_from_foundation_rejects_illegal_tableau_placement() {
+        let mut g = setup_take_from_foundation_game();
+        g.take_from_foundation = true;
+        // Tableau 1 is empty — only a King can go there; 2♠ is not a King.
+        let err = g
+            .move_cards(PileType::Foundation(0), PileType::Tableau(1), 1)
+            .unwrap_err();
+        assert!(matches!(err, MoveError::RuleViolation(_)));
+    }
+
+    #[test]
+    fn take_from_foundation_rejects_count_gt_1() {
+        let mut g = setup_take_from_foundation_game();
+        g.take_from_foundation = true;
+        let err = g
+            .move_cards(PileType::Foundation(0), PileType::Tableau(0), 2)
+            .unwrap_err();
+        assert!(matches!(err, MoveError::RuleViolation(_)));
     }
 }
