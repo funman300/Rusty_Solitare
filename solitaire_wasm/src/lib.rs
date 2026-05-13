@@ -1,4 +1,4 @@
-//! WebAssembly bindings for browser-side replay playback.
+//! WebAssembly bindings for browser-side replay playback and interactive gameplay.
 //!
 //! The web replay player at `<server>/replays/<id>` fetches a [`Replay`]
 //! JSON via `GET /api/replays/:id`, hands it to [`ReplayPlayer::new`],
@@ -219,6 +219,208 @@ impl ReplayPlayer {
     /// Returns `true` once every move has been applied.
     pub fn is_finished(&self) -> bool {
         self.step_idx >= self.moves.len()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Interactive game surface
+// ---------------------------------------------------------------------------
+
+/// Full snapshot of a live `SolitaireGame` for the JS renderer.
+#[derive(Debug, Clone, Serialize)]
+pub struct GameSnapshot {
+    pub score: i32,
+    pub move_count: u32,
+    pub is_won: bool,
+    pub is_auto_completable: bool,
+    pub undo_count: u32,
+    pub stock: Vec<CardSnapshot>,
+    pub waste: Vec<CardSnapshot>,
+    pub foundations: [Vec<CardSnapshot>; 4],
+    pub tableaus: [Vec<CardSnapshot>; 7],
+}
+
+/// Result returned to JS from every mutating game action.
+#[derive(Debug, Clone, Serialize)]
+pub struct ActionResult {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<GameSnapshot>,
+}
+
+/// Interactive Klondike game backed by the real `solitaire_core` rules engine.
+///
+/// Construct with `new(seed, draw_three)`, then call `draw()`, `move_cards()`,
+/// `undo()`, `auto_complete_step()` to advance the game. `state()` returns the
+/// full pile snapshot at any time without mutating state.
+#[wasm_bindgen]
+pub struct SolitaireGame {
+    game: GameState,
+}
+
+impl SolitaireGame {
+    fn snap(&self) -> GameSnapshot {
+        let cards = |t: PileType| -> Vec<CardSnapshot> {
+            self.game
+                .piles
+                .get(&t)
+                .map(|p| p.cards.iter().map(CardSnapshot::from).collect())
+                .unwrap_or_default()
+        };
+        GameSnapshot {
+            score: self.game.score,
+            move_count: self.game.move_count,
+            is_won: self.game.is_won,
+            is_auto_completable: self.game.is_auto_completable,
+            undo_count: self.game.undo_count,
+            stock: cards(PileType::Stock),
+            waste: cards(PileType::Waste),
+            foundations: [
+                cards(PileType::Foundation(0)),
+                cards(PileType::Foundation(1)),
+                cards(PileType::Foundation(2)),
+                cards(PileType::Foundation(3)),
+            ],
+            tableaus: [
+                cards(PileType::Tableau(0)),
+                cards(PileType::Tableau(1)),
+                cards(PileType::Tableau(2)),
+                cards(PileType::Tableau(3)),
+                cards(PileType::Tableau(4)),
+                cards(PileType::Tableau(5)),
+                cards(PileType::Tableau(6)),
+            ],
+        }
+    }
+
+    fn pile_from_str(s: &str) -> Result<PileType, String> {
+        match s {
+            "stock" => Ok(PileType::Stock),
+            "waste" => Ok(PileType::Waste),
+            _ if s.starts_with("foundation-") => {
+                let slot: u8 = s["foundation-".len()..]
+                    .parse()
+                    .map_err(|_| format!("bad pile: {s}"))?;
+                if slot >= 4 {
+                    return Err(format!("foundation slot out of range: {slot}"));
+                }
+                Ok(PileType::Foundation(slot))
+            }
+            _ if s.starts_with("tableau-") => {
+                let col: usize = s["tableau-".len()..]
+                    .parse()
+                    .map_err(|_| format!("bad pile: {s}"))?;
+                if col >= 7 {
+                    return Err(format!("tableau col out of range: {col}"));
+                }
+                Ok(PileType::Tableau(col))
+            }
+            _ => Err(format!("unknown pile: {s}")),
+        }
+    }
+
+    fn ok_js(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&ActionResult {
+            ok: true,
+            error: None,
+            snapshot: Some(self.snap()),
+        })
+        .unwrap_or(JsValue::NULL)
+    }
+
+    fn err_js(msg: impl std::fmt::Display) -> JsValue {
+        serde_wasm_bindgen::to_value(&ActionResult {
+            ok: false,
+            error: Some(msg.to_string()),
+            snapshot: None,
+        })
+        .unwrap_or(JsValue::NULL)
+    }
+}
+
+#[wasm_bindgen]
+impl SolitaireGame {
+    /// Create a new DrawOne or DrawThree Classic game from the given seed.
+    ///
+    /// `seed` is a JS `number` (f64); values up to 2^53 are represented exactly.
+    /// Pass `Date.now()` or a random integer from JS for variety.
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: f64, draw_three: bool) -> SolitaireGame {
+        #[cfg(feature = "console_error_panic_hook")]
+        console_error_panic_hook::set_once();
+        let dm = if draw_three {
+            DrawMode::DrawThree
+        } else {
+            DrawMode::DrawOne
+        };
+        SolitaireGame {
+            game: GameState::new_with_mode(seed as u64, dm, GameMode::Classic),
+        }
+    }
+
+    /// Full pile snapshot as a JS object.
+    pub fn state(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.snap()).unwrap_or(JsValue::NULL)
+    }
+
+    /// The seed used to deal this game.
+    pub fn seed(&self) -> f64 {
+        self.game.seed as f64
+    }
+
+    /// Draw from stock to waste (or recycle waste → stock when stock is empty).
+    /// Returns `{ok, error?, snapshot?}`.
+    pub fn draw(&mut self) -> JsValue {
+        match self.game.draw() {
+            Ok(()) => self.ok_js(),
+            Err(e) => Self::err_js(e),
+        }
+    }
+
+    /// Move `count` cards from pile `from` to pile `to`.
+    ///
+    /// Pile names: `"stock"`, `"waste"`, `"foundation-0"` .. `"foundation-3"`,
+    /// `"tableau-0"` .. `"tableau-6"`.
+    ///
+    /// Returns `{ok, error?, snapshot?}`.
+    pub fn move_cards(&mut self, from: &str, to: &str, count: usize) -> JsValue {
+        let from_pile = match Self::pile_from_str(from) {
+            Ok(p) => p,
+            Err(e) => return Self::err_js(e),
+        };
+        let to_pile = match Self::pile_from_str(to) {
+            Ok(p) => p,
+            Err(e) => return Self::err_js(e),
+        };
+        match self.game.move_cards(from_pile, to_pile, count) {
+            Ok(()) => self.ok_js(),
+            Err(e) => Self::err_js(e),
+        }
+    }
+
+    /// Undo the last move. Returns `{ok, error?, snapshot?}`.
+    pub fn undo(&mut self) -> JsValue {
+        match self.game.undo() {
+            Ok(()) => self.ok_js(),
+            Err(e) => Self::err_js(e),
+        }
+    }
+
+    /// Apply one auto-complete move (only valid when `is_auto_completable`).
+    /// Returns the post-move snapshot or `null` when auto-complete is unavailable.
+    pub fn auto_complete_step(&mut self) -> JsValue {
+        if !self.game.is_auto_completable {
+            return JsValue::NULL;
+        }
+        match self.game.next_auto_complete_move() {
+            Some((from, to)) => {
+                let _ = self.game.move_cards(from, to, 1);
+                self.ok_js()
+            }
+            None => JsValue::NULL,
+        }
     }
 }
 

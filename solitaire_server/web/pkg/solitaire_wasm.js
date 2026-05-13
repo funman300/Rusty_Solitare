@@ -71,6 +71,103 @@ export class ReplayPlayer {
     }
 }
 if (Symbol.dispose) ReplayPlayer.prototype[Symbol.dispose] = ReplayPlayer.prototype.free;
+
+/**
+ * Interactive Klondike game backed by the real `solitaire_core` rules engine.
+ *
+ * Construct with `new(seed, draw_three)`, then call `draw()`, `move_cards()`,
+ * `undo()`, `auto_complete_step()` to advance the game. `state()` returns the
+ * full pile snapshot at any time without mutating state.
+ */
+export class SolitaireGame {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        SolitaireGameFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_solitairegame_free(ptr, 0);
+    }
+    /**
+     * Apply one auto-complete move (only valid when `is_auto_completable`).
+     * Returns the post-move snapshot or `null` when auto-complete is unavailable.
+     * @returns {any}
+     */
+    auto_complete_step() {
+        const ret = wasm.solitairegame_auto_complete_step(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Draw from stock to waste (or recycle waste → stock when stock is empty).
+     * Returns `{ok, error?, snapshot?}`.
+     * @returns {any}
+     */
+    draw() {
+        const ret = wasm.solitairegame_draw(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Move `count` cards from pile `from` to pile `to`.
+     *
+     * Pile names: `"stock"`, `"waste"`, `"foundation-0"` .. `"foundation-3"`,
+     * `"tableau-0"` .. `"tableau-6"`.
+     *
+     * Returns `{ok, error?, snapshot?}`.
+     * @param {string} from
+     * @param {string} to
+     * @param {number} count
+     * @returns {any}
+     */
+    move_cards(from, to, count) {
+        const ptr0 = passStringToWasm0(from, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(to, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.solitairegame_move_cards(this.__wbg_ptr, ptr0, len0, ptr1, len1, count);
+        return ret;
+    }
+    /**
+     * Create a new DrawOne or DrawThree Classic game from the given seed.
+     *
+     * `seed` is a JS `number` (f64); values up to 2^53 are represented exactly.
+     * Pass `Date.now()` or a random integer from JS for variety.
+     * @param {number} seed
+     * @param {boolean} draw_three
+     */
+    constructor(seed, draw_three) {
+        const ret = wasm.solitairegame_new(seed, draw_three);
+        this.__wbg_ptr = ret;
+        SolitaireGameFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * The seed used to deal this game.
+     * @returns {number}
+     */
+    seed() {
+        const ret = wasm.solitairegame_seed(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Full pile snapshot as a JS object.
+     * @returns {any}
+     */
+    state() {
+        const ret = wasm.solitairegame_state(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Undo the last move. Returns `{ok, error?, snapshot?}`.
+     * @returns {any}
+     */
+    undo() {
+        const ret = wasm.solitairegame_undo(this.__wbg_ptr);
+        return ret;
+    }
+}
+if (Symbol.dispose) SolitaireGame.prototype[Symbol.dispose] = SolitaireGame.prototype.free;
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -151,6 +248,9 @@ function __wbg_get_imports() {
 const ReplayPlayerFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_replayplayer_free(ptr, 1));
+const SolitaireGameFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_solitairegame_free(ptr, 1));
 
 let cachedDataViewMemory0 = null;
 function getDataViewMemory0() {

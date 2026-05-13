@@ -205,6 +205,10 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
             "/replays/{id}",
             get(|| async { Html(include_str!("../web/index.html")) }),
         )
+        .route(
+            "/play",
+            get(|| async { Html(include_str!("../web/game.html")) }),
+        )
         .nest_service("/web", ServeDir::new("solitaire_server/web"));
 
     Router::new()

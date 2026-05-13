@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solitaire Quest — Play</title>
+    <link rel="stylesheet" href="/web/game.css">
+</head>
+<body>
+    <header>
+        <div class="hud-left">
+            <span class="logo">Solitaire Quest</span>
+            <span id="hud-seed" class="muted"></span>
+        </div>
+        <div class="hud-center">
+            <span id="hud-score">Score: 0</span>
+            <span id="hud-moves">Moves: 0</span>
+        </div>
+        <div class="hud-right">
+            <button id="btn-undo" title="Undo (Z)">↩ Undo</button>
+            <button id="btn-new" title="New game">↺ New</button>
+            <label class="toggle-label" title="Draw one or three cards">
+                <input type="checkbox" id="chk-draw3"> Draw 3
+            </label>
+        </div>
+    </header>
+
+    <main>
+        <section id="board"></section>
+    </main>
+
+    <div id="win-overlay" class="hidden">
+        <div class="win-card">
+            <div class="win-title">You Won!</div>
+            <div id="win-score" class="win-score"></div>
+            <div id="win-moves" class="win-detail"></div>
+            <button id="btn-win-new">Play Again ↺</button>
+        </div>
+    </div>
+
+    <script type="module" src="/web/game.js"></script>
+</body>
+</html>
