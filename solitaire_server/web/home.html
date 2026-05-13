@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solitaire Quest</title>
+    <style>
+        @font-face {
+            font-family: "FiraMono";
+            src: url("/assets/fonts/main.ttf") format("truetype");
+        }
+
+        :root {
+            --bg:         #151515;
+            --panel:      #202020;
+            --panel-hi:   #2a2a2a;
+            --border:     rgba(255,255,255,0.07);
+            --text:       #d0d0d0;
+            --text-muted: #a0a0a0;
+            --accent:     #a54242;
+            --accent-hi:  #c25e5e;
+            --felt:       #0f5232;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: "FiraMono", "Fira Mono", monospace;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            margin-bottom: 6px;
+        }
+
+        .tagline {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 48px;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .cards {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+            max-width: 360px;
+        }
+
+        .card {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 20px 24px;
+            text-decoration: none;
+            color: var(--text);
+            transition: background 120ms, border-color 120ms, transform 120ms;
+            cursor: pointer;
+        }
+
+        .card:hover {
+            background: var(--panel-hi);
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+
+        .card-icon {
+            font-size: 28px;
+            width: 40px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .card-body {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .card-title {
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .card-desc {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .divider {
+            width: 100%;
+            max-width: 360px;
+            height: 1px;
+            background: var(--border);
+            margin: 8px 0;
+        }
+
+        footer {
+            margin-top: 48px;
+            font-size: 11px;
+            color: var(--text-muted);
+            letter-spacing: 0.04em;
+        }
+    </style>
+</head>
+<body>
+    <div class="logo">Solitaire Quest</div>
+    <div class="tagline">Klondike Solitaire</div>
+
+    <nav class="cards">
+        <a class="card" href="/play">
+            <div class="card-icon">&#9824;</div>
+            <div class="card-body">
+                <div class="card-title">Play</div>
+                <div class="card-desc">Start a new game of Klondike solitaire</div>
+            </div>
+        </a>
+
+        <div class="divider"></div>
+
+        <a class="card" href="/leaderboard">
+            <div class="card-icon">&#9733;</div>
+            <div class="card-body">
+                <div class="card-title">Leaderboard</div>
+                <div class="card-desc">Top scores from all players</div>
+            </div>
+        </a>
+
+        <a class="card" href="/api/replays/recent">
+            <div class="card-icon">&#9654;</div>
+            <div class="card-body">
+                <div class="card-title">Recent Replays</div>
+                <div class="card-desc">Watch recent completed games</div>
+            </div>
+        </a>
+    </nav>
+
+    <footer>v0.1.0</footer>
+</body>
+</html>

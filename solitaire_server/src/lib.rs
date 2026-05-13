@@ -202,6 +202,10 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
     // and fetches the replay JSON from `/api/replays/:id`.
     let web = Router::new()
         .route(
+            "/",
+            get(|| async { Html(include_str!("../web/home.html")) }),
+        )
+        .route(
             "/replays/{id}",
             get(|| async { Html(include_str!("../web/index.html")) }),
         )
@@ -209,7 +213,8 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
             "/play",
             get(|| async { Html(include_str!("../web/game.html")) }),
         )
-        .nest_service("/web", ServeDir::new("solitaire_server/web"));
+        .nest_service("/web", ServeDir::new("solitaire_server/web"))
+        .nest_service("/assets", ServeDir::new("assets"));
 
     Router::new()
         .merge(protected)
