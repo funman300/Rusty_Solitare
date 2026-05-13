@@ -13,16 +13,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy only the files needed to build the server crate.
 # Layer order: workspace manifests first so dependency fetches are cached.
 COPY Cargo.toml Cargo.lock ./
-COPY solitaire_sync/Cargo.toml ./solitaire_sync/Cargo.toml
-COPY solitaire_server/Cargo.toml ./solitaire_server/Cargo.toml
-COPY solitaire_core/Cargo.toml ./solitaire_core/Cargo.toml
+COPY solitaire_core/Cargo.toml     ./solitaire_core/Cargo.toml
+COPY solitaire_sync/Cargo.toml     ./solitaire_sync/Cargo.toml
+COPY solitaire_data/Cargo.toml     ./solitaire_data/Cargo.toml
+COPY solitaire_engine/Cargo.toml   ./solitaire_engine/Cargo.toml
+COPY solitaire_server/Cargo.toml   ./solitaire_server/Cargo.toml
+COPY solitaire_app/Cargo.toml      ./solitaire_app/Cargo.toml
+COPY solitaire_assetgen/Cargo.toml ./solitaire_assetgen/Cargo.toml
+COPY solitaire_wasm/Cargo.toml     ./solitaire_wasm/Cargo.toml
 
-# Stub every crate source so `cargo fetch` succeeds without full source.
-RUN mkdir -p solitaire_sync/src solitaire_server/src solitaire_core/src && \
-    echo "pub fn _stub() {}" > solitaire_sync/src/lib.rs && \
-    echo "pub fn _stub() {}" > solitaire_core/src/lib.rs && \
-    echo "pub fn _stub() {}" > solitaire_server/src/lib.rs && \
-    echo "fn main() {}" > solitaire_server/src/main.rs
+# Stub every workspace crate so `cargo fetch --locked` resolves the full
+# dependency graph without requiring source files beyond Cargo.toml.
+RUN for crate in solitaire_core solitaire_sync solitaire_data solitaire_engine \
+        solitaire_server solitaire_app solitaire_assetgen solitaire_wasm; do \
+      mkdir -p $crate/src && echo "pub fn _stub() {}" > $crate/src/lib.rs; \
+    done && \
+    echo "fn main() {}" > solitaire_server/src/main.rs && \
+    echo "fn main() {}" > solitaire_app/src/main.rs && \
+    echo "fn main() {}" > solitaire_assetgen/src/main.rs
 
 RUN cargo fetch --locked
 
