@@ -89,6 +89,22 @@ Also shipped (pre-Phase 8 but post-v0.22.0, already in CHANGELOG):
   subcommand reads new password from stdin, bcrypt-hashes it, invalidates all
   active sessions for the user.
 
+### 5b. Android UX polish (2026-05-12)
+
+- [x] **UX-1 — Modal Done button in gesture zone.** `apply_safe_area_to_modal_scrims` system
+  added to `SafeAreaInsetsPlugin` (`safe_area.rs`). Pads every `ModalScrim` bottom by
+  `insets.bottom / scale`. Fires on resource change + `Added<ModalScrim>`. Verified on device.
+- [x] **UX-5b — Home mode glyph corruption.** Geometric Shapes (U+25xx, absent from FiraMono)
+  replaced with card suits U+2660–2666 in `home_plugin.rs`. Affects Zen/Challenge/Daily mode
+  selector buttons at level 5+.
+- [x] **UX-7 — Help text wrap.** Android HUD entry shortened to
+  `"Open menu (Stats, Settings, Profile...)"` in `help_plugin.rs` — fits one line.
+- [x] **BUG-3 — Multi-modal stacking.** `handle_menu_button` now checks
+  `scrims: Query<(), With<ModalScrim>>` and guards `spawn_menu_popover` with `scrims.is_empty()`.
+  Verified on device: ≡ tap while Stats open does nothing.
+
+  **Note:** These 4 fixes are implemented and verified but not yet committed.
+
 ### 6. Testing gaps
 - [x] **Server 401 → refresh → retry path.** Done (`198df75`): both
   `jwt_refresh_on_401_succeeds` (pull) and
@@ -141,7 +157,7 @@ Branch: master. v0.23.0 is the current version (HEAD: 03be4fc). Fully pushed.
 READ FIRST (in order):
   1. SESSION_HANDOFF.md  — this file
   2. CHANGELOG.md        — [0.23.0] section has full Phase 8 detail
-  3. CLAUDE.md           — unified-3.0 rule set
+  3. CLAUDE.md           — unified-4.0 rule set
   4. ARCHITECTURE.md     — v1.3, fully up to date
   5. docs/ui-mockups/    — design system + mockup library
   6. docs/android/       — Android setup + build runbook
@@ -151,5 +167,11 @@ OPEN WORK:
   Phase 8 punch list is fully closed. All items verified complete.
   Remaining nuisance: `cargo apk build --lib` noisy stderr (cosmetic, non-blocking).
 
-  Suggest starting Phase 9 planning — ask what the next arc should be.
+  4 Android UX fixes are implemented and verified but NOT YET COMMITTED:
+    - BUG-3 (hud_plugin.rs): multi-modal stacking guard
+    - UX-7 (help_plugin.rs): help text wrap on Android
+    - UX-5b (home_plugin.rs): FiraMono glyph corruption in mode selector
+    - UX-1 (safe_area.rs): modal Done button in gesture zone
+
+  Commit those first, then suggest Phase 9 planning.
 ```

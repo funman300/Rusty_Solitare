@@ -41,6 +41,10 @@ solitaire_server:
 depends_on: [solitaire_sync, axum, sqlx, jsonwebtoken]
 role: "backend"
 
+solitaire_wasm:
+depends_on: [solitaire_core, wasm-bindgen, serde-wasm-bindgen]
+role: "wasm_replay_player"
+
 solitaire_app:
 depends_on: [solitaire_engine]
 role: "entrypoint"
@@ -180,7 +184,7 @@ threading:
 
 plugins:
 pattern: "feature_isolation"
-communication: "events"
+communication: "events and resources"
 
 ---
 

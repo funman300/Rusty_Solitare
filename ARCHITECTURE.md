@@ -43,6 +43,7 @@ Solitaire Quest is a cross-platform Klondike Solitaire game written in Rust, tar
 | macOS | Self-hosted server | Full feature set |
 | Windows | Self-hosted server | Full feature set |
 | Linux | Self-hosted server | Full feature set |
+| Android | Self-hosted server | Touch input; safe-area insets via JNI; `cargo-apk` build |
 
 ### Design Principles
 
@@ -322,6 +323,12 @@ struct FontResource(Handle<Font>);
 struct BackgroundImageSet {
     handles: Vec<Handle<Image>>,    // indices 0–4 match selected_background setting
 }
+
+// OS-reserved edge insets (physical px); zero on desktop
+struct SafeAreaInsets { top: f32, bottom: f32, left: f32, right: f32 }
+
+// Whether the HUD band is visible (auto-hide chrome feature)
+enum HudVisibility { Visible, Hidden }
 ```
 
 ### Key Bevy Events
@@ -900,7 +907,7 @@ All sound effect WAV files are embedded at compile time via `include_bytes!()` i
 | macOS | Primary | Self-hosted server | x86_64 + Apple Silicon (universal binary via `cargo-lipo`) |
 | Windows | Primary | Self-hosted server | x86_64, MSVC toolchain |
 | Linux | Primary | Self-hosted server | x86_64, tested on Ubuntu 22.04+ and Fedora 39+ |
-| Android | Stretch | Self-hosted server | `cargo-mobile2`, touch input |
+| Android | Active | Self-hosted server | `cargo-apk`; touch + long-press + double-tap; safe-area JNI; portrait layout |
 | iOS | Stretch | Self-hosted server | `cargo-mobile2`, touch input |
 
 Minimum Bevy window size enforced: 800×600. Desktop windows are freely resizable; layout recomputes on `WindowResized`.

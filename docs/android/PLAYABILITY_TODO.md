@@ -230,6 +230,31 @@ rewrites required.
 
 ---
 
+## P5 — UX polish (2026-05-12)
+
+- [x] **UX-1 — Modal Done button unreachable in gesture zone.** *Closed
+  2026-05-12.* New `apply_safe_area_to_modal_scrims` system in
+  `safe_area.rs` pads every `ModalScrim` bottom by `insets.bottom /
+  window.scale_factor()` (logical pixels). Fires when `SafeAreaInsets`
+  changes AND when a new `ModalScrim` is spawned (`Added<ModalScrim>`
+  filter). Verified on device: Settings Done button reachable at physical
+  y ≈ 1800–2000 (was y ≈ 2232+, inside gesture zone).
+- [x] **UX-5b — Home mode selector glyph corruption.** *Closed
+  2026-05-12.* `home_plugin.rs` mode glyphs changed from Geometric Shapes
+  block (U+25xx — absent from FiraMono, renders as rectangles) to card
+  suits U+2660 ♠ / U+2665 ♥ / U+2666 ♦. Affects Zen, Challenge, and
+  Daily mode selector buttons shown at level 5+.
+- [x] **UX-7 — Help screen HUD button entry wraps to two lines.** *Closed
+  2026-05-12.* Android `CONTROL_SECTIONS` entry for ≡ button shortened
+  from `"Menu: Stats, Settings, Profile, Achievements"` to
+  `"Open menu (Stats, Settings, Profile...)"` in `help_plugin.rs`.
+  Fits on one line at 360 dp.
+- [x] **BUG-3 — Multi-modal stacking (Stats + Profile simultaneously).** *Closed
+  2026-05-12.* `handle_menu_button` in `hud_plugin.rs` now checks
+  `scrims: Query<(), With<ModalScrim>>` and only calls
+  `spawn_menu_popover` when `scrims.is_empty()`. Tapping ≡ while any
+  modal is open is a no-op. Verified on device.
+
 ## Notes / decisions
 
 * This list is screenshot-driven; expect more items to surface once

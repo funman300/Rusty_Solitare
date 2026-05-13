@@ -12,7 +12,7 @@ You must follow CLAUDE_SPEC.md strictly.
 Rules:
 - Do not expand scope beyond what is defined
 - Do not refactor unrelated code
-- Do not introduce new dependencies
+- Do not introduce new dependencies to solitaire_core or solitaire_sync without confirmation
 - Prefer minimal, surgical changes
 - Use existing patterns in the codebase
 - Return minimal diffs or changed functions only
@@ -360,7 +360,7 @@ notes:
 target:
 "<what is slow>"
 
-constraints:CLAUDE_WORKFLOW.md
+constraints:
 - no behavior change
 - no architecture change
 - minimal code changes

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-version: unified-3.0
+version: unified-4.0
 
 ---
 
@@ -29,8 +29,9 @@ solitaire_sync/    # Shared API + merge logic
 solitaire_data/    # Persistence + sync client
 solitaire_engine/  # Bevy ECS + UI + gameplay orchestration
 solitaire_server/  # Axum backend (optional sync layer)
+solitaire_wasm/    # WASM bindings for browser-side replay player
 solitaire_app/     # Entry binary
-assets/            # Runtime assets (except audio)
+assets/            # Runtime assets (except audio + default theme)
 ```
 
 ---
@@ -72,11 +73,15 @@ These override all other instructions.
 
 * NO `unwrap()`
 * NO `panic!()` in runtime/game logic
-* All state transitions:
+* Core game state mutations MUST return:
 
 ```rust id="err_model"
 Result<T, MoveError>
 ```
+
+* Engine / UI state changes follow ECS patterns (Resources, Events) —
+  they do not return `MoveError`
+* Use `thiserror`-derived types for any new error enums outside `solitaire_core`
 
 ---
 
@@ -126,9 +131,14 @@ trait SyncProvider
 ## 3.1 ECS Design
 
 * systems = single responsibility
-* communication = Events only
-* shared state = Resources only
+* cross-system communication = Events (fire-and-forget triggers)
+* persistent shared state = Resources (polled every frame or on change)
 * per-entity state = Components only
+
+Events and Resources are both valid communication paths — use Events when
+the receiver needs to react once; use Resources when the receiver polls
+or when multiple systems read the same value (e.g. `SafeAreaInsets`,
+`HudVisibility`, `LayoutResource`).
 
 ---
 
@@ -149,11 +159,22 @@ Every player action MUST:
 Keyboard shortcuts are:
 → optional accelerators only
 
+**Exception — UI chrome gestures:**
+Tap-to-toggle visibility of UI chrome (e.g. auto-hiding HUD band) is
+permitted without a visible button. The gesture MUST:
+* affect only chrome visibility, never game state
+* restore chrome automatically when any modal opens
+* be purely additive (game remains fully playable with chrome always visible)
+
 ---
 
 ## 3.4 Layout System
 
 * recompute on `WindowResized`
+* recompute on `SafeAreaInsets` changed
+* recompute on `HudVisibility` changed
+* `compute_layout` MUST accept `hud_visible: bool`; pass `HUD_BAND_HEIGHT`
+  when `true`, `0.0` when `false`
 * no fixed resolution assumptions
 
 ---
@@ -178,11 +199,18 @@ Includes:
 
 ## 4.2 Embedded Assets
 
-Only audio:
+Embed via `include_bytes!()` only when ALL of the following are true:
 
-```text id="audio_rule"
-include_bytes!()
-```
+* the asset is small (< 500 KB uncompressed)
+* it changes rarely (not user-customisable)
+* a missing file would be a hard crash, not a graceful degradation
+
+Currently embedded:
+* **Audio** — all `.wav` files in `audio_plugin.rs`
+* **Default card theme** — shipped via `embedded://` scheme in `ThemePlugin`
+
+Do NOT embed card face PNGs, background images, or user fonts —
+these are loaded via `AssetServer` so art can be swapped without recompile.
 
 ---
 
@@ -210,7 +238,9 @@ Must degrade gracefully under `MinimalPlugins`.
 ## 5.2 Public API Rules
 
 * prefer `Into<T>` over concrete types
-* all public items require doc comments
+* publicly exported functions, traits, and non-trivial types require doc comments
+* simple marker components, newtype wrappers, and internal `pub` items
+  used only within the same crate are exempt from doc comment requirements
 
 ---
 
@@ -276,11 +306,13 @@ NEVER commit otherwise
 
 Claude must request confirmation before:
 
-* adding dependencies
-* modifying `solitaire_sync`
-* changing DB schema
+* adding dependencies to `solitaire_core` or `solitaire_sync`
+  (engine/server crates may add deps without confirmation)
+* modifying `solitaire_sync` types or the `SyncProvider` trait
+* changing DB schema (migrations are append-only)
 * introducing `unsafe`
-* changing merge strategy
+* changing the merge strategy in `solitaire_sync::merge`
+* changing the `SyncPayload` wire format (breaking change for existing servers)
 
 ---
 
@@ -304,10 +336,29 @@ Core is always the source of truth.
 
 Must always be handled explicitly:
 
+**All platforms**
 * Bevy `Time` uses `f32`
 * `sqlx::migrate!()` path is crate-relative
 * `dirs::data_dir()` may return `None`
-* Linux may lack keyring backend
+* Linux may lack keyring backend — handle `keyring::Error` gracefully
+
+**Android (active target — not stretch)**
+* Safe-area insets arrive in frames 1–3 via JNI polling, not at startup;
+  UI that depends on them must handle the zero-inset initial state
+* Physical pixels ≠ logical pixels: `SafeAreaInsets` values are physical
+  (from `WindowInsets` API); divide by `window.scale_factor()` before
+  passing to Bevy `Val::Px`
+* `adb shell input tap` uses physical pixel coordinates
+* FiraMono (bundled font) covers: ASCII, card suits U+2660–2666,
+  Arrows U+2190–21FF. It does NOT cover Geometric Shapes (U+25xx) —
+  those render as missing-glyph rectangles on Android
+* The gesture/navigation bar at the bottom (≈132px physical on common
+  devices) is inside the Bevy viewport; use `SafeAreaInsets.bottom` to
+  avoid placing interactive elements in that zone
+* `HUD_BAND_HEIGHT` is 128px on Android (two-row wrap) vs 64px on desktop;
+  layout constants are `#[cfg(target_os = "android")]` gated
+* JNI calls must use `attach_current_thread_permanently` — not
+  `attach_current_thread` — to avoid detach-on-drop panics
 
 ---
 
@@ -318,6 +369,12 @@ Must always be handled explicitly:
 * blocking async calls in ECS
 * insecure credential storage
 * bypassing core logic layer
+* hardcoded pixel coordinates in layout — always derive from `compute_layout`
+* Unicode Geometric Shapes block (U+25xx) in UI text — not in FiraMono
+* spawning a second `ModalScrim` while one already exists without first
+  dismissing the existing one (use `scrims.is_empty()` guard)
+* reading `SafeAreaInsets` physical values directly into `Val::Px` without
+  dividing by `window.scale_factor()`
 
 ---
 
@@ -345,9 +402,74 @@ If unclear:
 | Both combined   | full system understanding |
 
 ---
-# 14. Context Injection System (AUTOMATIC SCOPE FILTER)
+# 14. Modal System Conventions
 
-## 14.1 Purpose
+All full-screen overlay panels MUST use the `spawn_modal` / `ModalScrim` pattern
+from `solitaire_engine::ui_modal`.
+
+## 14.1 Spawn pattern
+
+```rust
+let scrim = spawn_modal(commands, MyScreenMarker, Z_MODAL_PANEL, |card| {
+    spawn_modal_header(card, "Title", font_res);
+    // ... body nodes ...
+    spawn_modal_actions(card, |actions| {
+        spawn_modal_button(actions, MyCloseButton, "Done", None,
+                           ButtonVariant::Primary, font_res);
+    });
+});
+// Optional: allow clicking the scrim outside the card to dismiss
+commands.entity(scrim).insert(ScrimDismissible);
+```
+
+## 14.2 Guard rule
+
+Before spawning a new modal, check `scrims: Query<(), With<ModalScrim>>`
+and return early if `!scrims.is_empty()` — unless the new modal is
+explicitly replacing the current one (despawn first, then spawn).
+
+## 14.3 Safe area
+
+Every `ModalScrim` automatically receives `padding.bottom` equal to the
+logical gesture-bar height via `apply_safe_area_to_modal_scrims` in
+`SafeAreaInsetsPlugin`. Do not manually add bottom padding to scrim nodes.
+
+## 14.4 Z-ordering
+
+Use `Z_MODAL_PANEL` from `ui_theme` for all modal scrims. Do not use
+raw `z_index` values — they drift and cause ordering bugs.
+
+---
+
+# 15. Android Build & Verification
+
+## 15.1 Build command
+
+```bash
+cargo apk build --package solitaire_app --lib
+adb install -r target/debug/apk/solitaire-quest.apk
+```
+
+## 15.2 Coordinate system reminder
+
+Device physical: 1080×2400. Bevy logical: 900×2000. Scale factor: 1.20.
+`adb shell input tap X Y` takes PHYSICAL coordinates.
+To convert from what you see on screen (logical): multiply by 1.20.
+
+## 15.3 Android-specific test checklist
+
+Before shipping any Android build:
+- [ ] Safe area insets arrive and shift HUD correctly (check after 3s)
+- [ ] All modal Done buttons are above the gesture bar
+- [ ] No Geometric Shapes glyphs in UI text
+- [ ] HUD band does not overlap the top status bar
+- [ ] Touch drag-and-drop works on all pile types
+
+---
+
+# 16. Context Injection System (AUTOMATIC SCOPE FILTER)
+
+## 16.1 Purpose
 
 Before generating any response, Claude MUST construct a **minimal relevant context set**.
 
@@ -360,7 +482,7 @@ This prevents:
 
 ---
 
-## 14.2 Input Classification Step (MANDATORY)
+## 16.2 Input Classification Step (MANDATORY)
 
 Every request MUST be classified into exactly one task type:
 
@@ -381,13 +503,13 @@ If uncertain → ask clarification.
 
 ---
 
-## 14.3 Context Selection Engine
+## 16.3 Context Selection Engine
 
 After classification, Claude MUST include ONLY the relevant sections below.
 
 ---
 
-## 14.4 Context Map (CORE RULESET)
+## 16.4 Context Map (CORE RULESET)
 
 ### feature
 
@@ -495,7 +617,7 @@ Include:
 
 ---
 
-## 14.5 Context Compression Rules
+## 16.5 Context Compression Rules
 
 Claude MUST obey:
 
@@ -506,7 +628,7 @@ Claude MUST obey:
 
 ---
 
-## 14.6 Context Priority Order
+## 16.6 Context Priority Order
 
 When space is limited:
 
@@ -517,7 +639,7 @@ When space is limited:
 
 ---
 
-## 14.7 “No Context Pollution” Rule
+## 16.7 “No Context Pollution” Rule
 
 Claude must NOT include:
 
@@ -529,7 +651,7 @@ Claude must NOT include:
 
 ---
 
-## 14.8 Self-Check Before Execution
+## 16.8 Self-Check Before Execution
 
 Before writing code, Claude MUST verify:
 
@@ -542,7 +664,7 @@ If any fail → revise context selection.
 
 ---
 
-## 14.9 Injection Output Format (Internal Model)
+## 16.9 Injection Output Format (Internal Model)
 
 Claude should behave as if it constructed:
 
@@ -560,7 +682,7 @@ Claude should behave as if it constructed:
 
 ---
 
-## 14.10 Relationship to ARCHITECTURE.md
+## 16.10 Relationship to ARCHITECTURE.md
 
 * ARCHITECTURE.md = source of truth
 * CLAUDE.md = execution constraints

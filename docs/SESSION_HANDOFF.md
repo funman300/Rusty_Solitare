@@ -1,4 +1,8 @@
-# Solitaire Quest — Session Handoff
+# Solitaire Quest — Session Handoff (ARCHIVED)
+
+> **This file is from Phase 2 (2026-04-25, 242 tests). It is kept for historical
+> reference only. The authoritative session handoff is at the repo root:
+> `SESSION_HANDOFF.md`.**
 
 > Last updated: 2026-04-25
 > Branch: `master` — pushed to https://github.com/funman300/Rusty_Solitaire.git
