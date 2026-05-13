@@ -604,7 +604,7 @@ mod tests {
         use crate::layout::compute_layout;
 
         let game = GameState::new(42, DrawMode::DrawOne);
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         // A cursor far off-screen should never hit anything.
         assert!(!cursor_over_draggable(Vec2::new(-9999.0, -9999.0), &game, &layout));
     }
@@ -624,7 +624,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(GameStateResource(game))
-            .insert_resource(LayoutResource(compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0)))
+            .insert_resource(LayoutResource(compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true)))
             .insert_resource(DragState::default())
             .add_systems(Update, update_drop_target_overlays);
         app

@@ -51,6 +51,16 @@ use crate::resources::{DragState, GameStateResource, HintCycleIndex};
 use crate::selection_plugin::SelectionState;
 use crate::time_attack_plugin::TimeAttackResource;
 
+/// System-set labels used to anchor external systems relative to the touch
+/// drag pipeline without duplicating the internal chain ordering.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TouchDragSet {
+    /// After `touch_start_drag` has run — drag state is populated if a card was touched.
+    AfterStartDrag,
+    /// Before `touch_end_drag` runs — drag state has not yet been cleared.
+    BeforeEndDrag,
+}
+
 /// Z-depth used for cards while being dragged — above all resting cards.
 const DRAG_Z: f32 = 500.0;
 
@@ -103,10 +113,10 @@ impl Plugin for InputPlugin {
                     follow_drag,
                     end_drag.before(GameMutation),
                     // Touch drag pipeline (parallel path through DragState).
-                    touch_start_drag,
+                    touch_start_drag.in_set(TouchDragSet::AfterStartDrag),
                     touch_follow_drag,
                     handle_double_tap, // before touch_end_drag: reads drag state pre-clear
-                    touch_end_drag.before(GameMutation),
+                    touch_end_drag.after(TouchDragSet::BeforeEndDrag).before(GameMutation),
                 )
                     .chain(),
             )
@@ -1632,7 +1642,7 @@ mod tests {
     #[test]
     fn find_draggable_picks_top_of_tableau() {
         let game = GameState::new(42, DrawMode::DrawOne);
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
 
         // In tableau 6, the visually topmost card is the last (face-up) one.
         // Its position: base.y + fan * 6.
@@ -1646,7 +1656,7 @@ mod tests {
     #[test]
     fn find_draggable_skips_face_down_cards() {
         let game = GameState::new(42, DrawMode::DrawOne);
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
 
         // Tableau 6 has 7 cards: 6 face-down (indices 0..5) + 1 face-up at
         // the bottom (index 6). Click at the topmost face-down card's
@@ -1667,7 +1677,7 @@ mod tests {
         // face-up bottom card, clicking the visible card face missed the
         // hit-test box and only the bottom strip of the card responded.
         let game = GameState::new(42, DrawMode::DrawOne);
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
 
         // Tableau 6 starts with 6 face-down + 1 face-up. The face-up card
         // sits at base.y - 6 * TABLEAU_FACEDOWN_FAN_FRAC * card_h, NOT at
@@ -1706,7 +1716,7 @@ mod tests {
             face_up: true,
         });
 
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         // The Queen's geometric center (index 1) is inside the Jack's bounding box
         // (Jack fans 0.5h below base; its box spans [base-h, base]).  To hit the
         // Queen we click in her visible strip: the 0.25h band above the Jack's top
@@ -1738,7 +1748,7 @@ mod tests {
             face_up: true,
         });
 
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         // Both cards in waste sit at the same (x, y). Clicking should pick
         // the visually top card (id 201), with count = 1.
         let pos = card_position(&game, &layout, &PileType::Waste, 0);
@@ -1751,7 +1761,7 @@ mod tests {
     #[test]
     fn find_drop_target_hits_empty_tableau_pile_marker() {
         let game = GameState::new(42, DrawMode::DrawOne);
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         // Move all cards out of tableau 0 so its marker is the only drop area.
         let mut game = game;
         game.piles.get_mut(&PileType::Tableau(0)).unwrap().cards.clear();
@@ -1763,7 +1773,7 @@ mod tests {
     #[test]
     fn find_drop_target_returns_none_for_origin() {
         let game = GameState::new(42, DrawMode::DrawOne);
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         let pos = layout.pile_positions[&PileType::Tableau(3)];
         let target = find_drop_target(pos, &game, &layout, &PileType::Tableau(3));
         assert_eq!(target, None);
@@ -1772,7 +1782,7 @@ mod tests {
     #[test]
     fn pile_drop_rect_extends_for_tableau_with_cards() {
         let game = GameState::new(42, DrawMode::DrawOne);
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         // Tableau 6 has 7 cards.
         let (_, size) = pile_drop_rect(&PileType::Tableau(6), &layout, &game);
         // Expected: card_height + 6 * fan. fan = 0.25 * card_height, so
@@ -1797,7 +1807,7 @@ mod tests {
         waste.cards.push(Card { id: 201, suit: Suit::Hearts, rank: Rank::Three, face_up: true });
         waste.cards.push(Card { id: 202, suit: Suit::Clubs, rank: Rank::Four, face_up: true });
 
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         let waste_base = layout.pile_positions[&PileType::Waste];
         // Top card (slot=2) is at base.x + 2 * 0.28 * card_width.
         let top_card_x = waste_base.x + 2.0 * 0.28 * layout.card_size.x;
@@ -1813,7 +1823,7 @@ mod tests {
     #[test]
     fn find_draggable_returns_none_for_click_on_empty_pile() {
         let mut game = GameState::new(42, DrawMode::DrawOne);
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         // Clear tableau 0 so it's an empty slot.
         game.piles.get_mut(&PileType::Tableau(0)).unwrap().cards.clear();
         let pos = layout.pile_positions[&PileType::Tableau(0)];
@@ -1824,7 +1834,7 @@ mod tests {
     #[test]
     fn pile_drop_rect_is_card_sized_for_non_tableau() {
         let game = GameState::new(42, DrawMode::DrawOne);
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         for pile in [
             PileType::Waste,
             PileType::Foundation(2),
@@ -2325,7 +2335,7 @@ mod tests {
         app.init_resource::<crate::pending_hint::PendingHintTask>();
         app.init_resource::<ButtonInput<KeyCode>>();
         app.insert_resource(crate::layout::LayoutResource(
-            crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0),
+            crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true),
         ));
         app.insert_resource(GameStateResource(GameState::new(42, DrawMode::DrawOne)));
         app.add_systems(Update, handle_keyboard_hint);

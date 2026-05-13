@@ -36,7 +36,14 @@ use crate::events::{
 };
 use crate::font_plugin::FontResource;
 use crate::game_plugin::GameMutation;
+#[cfg(target_os = "android")]
+use crate::input_plugin::TouchDragSet;
+use crate::layout::LayoutSystem;
+#[cfg(target_os = "android")]
+use crate::pause_plugin::PausedResource;
 use crate::resources::GameStateResource;
+#[cfg(target_os = "android")]
+use crate::resources::DragState;
 use crate::selection_plugin::SelectionState;
 use crate::time_attack_plugin::TimeAttackResource;
 use crate::ui_focus::{FocusGroup, Focusable};
@@ -118,6 +125,37 @@ pub struct HudDrawCycle;
 /// out from the other white HUD items.
 #[derive(Component, Debug)]
 pub struct HudSelection;
+
+/// Marker on the HUD band background node (the translucent band behind buttons).
+#[derive(Component, Debug)]
+pub struct HudBand;
+
+/// Marker on the HUD score/info column root node.
+#[derive(Component, Debug)]
+pub struct HudColumn;
+
+/// Marker on the action button bar root node.
+#[derive(Component, Debug)]
+pub struct HudActionBar;
+
+/// Controls whether the in-game HUD (band, score column, action buttons) is
+/// visible. Toggled on Android by tapping empty board space; always `Visible`
+/// on desktop. Resets to `Visible` whenever a modal opens.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HudVisibility {
+    #[default]
+    Visible,
+    Hidden,
+}
+
+#[cfg(target_os = "android")]
+#[derive(Resource, Debug, Default)]
+struct HudTapTracker {
+    start_pos: Option<bevy::math::Vec2>,
+}
+
+#[cfg(target_os = "android")]
+const HUD_TAP_SLOP_PX: f32 = 15.0;
 
 /// Drives the score-readout pulse: scales the [`HudScore`] text from
 /// 1.0 → 1.1 → 1.0 over [`MOTION_SCORE_PULSE_SECS`] (scaled by
@@ -350,6 +388,7 @@ impl Plugin for HudPlugin {
             .add_message::<WinStreakMilestoneEvent>()
             .init_resource::<PreviousScore>()
             .init_resource::<HudActionFade>()
+            .init_resource::<HudVisibility>()
             // Escape-close handlers for popovers read this; init defensively
             // so HudPlugin works under MinimalPlugins in tests.
             .init_resource::<ButtonInput<KeyCode>>()
@@ -358,6 +397,11 @@ impl Plugin for HudPlugin {
             .add_message::<WindowResized>()
             .add_systems(Startup, (spawn_hud_band, spawn_hud, spawn_action_buttons))
             .add_systems(Update, update_hud.after(GameMutation))
+            .add_systems(
+                Update,
+                apply_hud_visibility.before(LayoutSystem::UpdateOnResize),
+            )
+            .add_systems(Update, restore_hud_on_modal)
             .add_systems(Update, update_won_previously.after(GameMutation))
             .add_systems(Update, announce_auto_complete.after(GameMutation))
             .add_systems(Update, update_selection_hud)
@@ -403,6 +447,17 @@ impl Plugin for HudPlugin {
             // `paint_action_buttons` would clobber the alpha back to 1.0
             // mid-fade and produce a visible blip.
             .add_systems(Last, (update_action_fade, apply_action_fade).chain());
+        #[cfg(target_os = "android")]
+        {
+            app.init_resource::<HudTapTracker>()
+                .add_message::<bevy::input::touch::TouchInput>()
+                .add_systems(
+                    Update,
+                    toggle_hud_on_tap
+                        .after(TouchDragSet::AfterStartDrag)
+                        .in_set(TouchDragSet::BeforeEndDrag),
+                );
+        }
     }
 }
 
@@ -434,6 +489,7 @@ fn spawn_hud_band(insets: Option<Res<SafeAreaInsets>>, mut commands: Commands) {
         // entities and rendered behind UI regardless).
         ZIndex(Z_HUD - 1),
         SafeAreaAnchoredTop { base_top: BASE_TOP },
+        HudBand,
     ));
 }
 
@@ -516,6 +572,7 @@ fn spawn_hud(
             },
             ZIndex(Z_HUD),
             SafeAreaAnchoredTop { base_top: SPACE_2 },
+            HudColumn,
         ))
         .with_children(|hud| {
             // Tier 1 — primary readouts. Score is the protagonist (HEADLINE);
@@ -697,6 +754,7 @@ fn spawn_action_buttons(
             },
             ZIndex(Z_HUD),
             SafeAreaAnchoredTop { base_top: SPACE_2 },
+            HudActionBar,
         ))
         .with_children(|row| {
             // The trailing `order` argument feeds `Focusable { group: Hud, order }`
@@ -2220,6 +2278,82 @@ fn update_hud_typography(
     }
     for mut font in &mut time_q {
         font.font_size = secondary_size;
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn apply_hud_visibility(
+    hud_vis: Res<HudVisibility>,
+    mut nodes: Query<
+        &mut Visibility,
+        Or<(With<HudBand>, With<HudColumn>, With<HudActionBar>)>,
+    >,
+    window_entities: Query<(Entity, &Window)>,
+    mut resize_events: MessageWriter<WindowResized>,
+) {
+    if !hud_vis.is_changed() {
+        return;
+    }
+    let v = if *hud_vis == HudVisibility::Visible {
+        Visibility::Visible
+    } else {
+        Visibility::Hidden
+    };
+    for mut node_vis in &mut nodes {
+        *node_vis = v;
+    }
+    if let Some((entity, window)) = window_entities.iter().next() {
+        resize_events.write(WindowResized {
+            window: entity,
+            width: window.resolution.width(),
+            height: window.resolution.height(),
+        });
+    }
+}
+
+fn restore_hud_on_modal(
+    new_scrims: Query<(), (With<ModalScrim>, Added<ModalScrim>)>,
+    mut hud_vis: ResMut<HudVisibility>,
+) {
+    if !new_scrims.is_empty() {
+        *hud_vis = HudVisibility::Visible;
+    }
+}
+
+#[cfg(target_os = "android")]
+fn toggle_hud_on_tap(
+    mut touch_events: MessageReader<bevy::input::touch::TouchInput>,
+    drag: Res<DragState>,
+    scrims: Query<(), With<ModalScrim>>,
+    paused: Option<Res<PausedResource>>,
+    mut tracker: ResMut<HudTapTracker>,
+    mut hud_vis: ResMut<HudVisibility>,
+) {
+    use bevy::input::touch::TouchPhase;
+    if !scrims.is_empty() || paused.is_some_and(|p| p.0) {
+        tracker.start_pos = None;
+        return;
+    }
+    for event in touch_events.read() {
+        match event.phase {
+            TouchPhase::Started => {
+                tracker.start_pos = Some(event.position);
+            }
+            TouchPhase::Ended if drag.is_idle() => {
+                if let Some(start) = tracker.start_pos.take() {
+                    if (event.position - start).length() < HUD_TAP_SLOP_PX {
+                        *hud_vis = match *hud_vis {
+                            HudVisibility::Visible => HudVisibility::Hidden,
+                            HudVisibility::Hidden => HudVisibility::Visible,
+                        };
+                    }
+                }
+            }
+            TouchPhase::Canceled | TouchPhase::Moved => {
+                tracker.start_pos = None;
+            }
+            _ => {}
+        }
     }
 }
 

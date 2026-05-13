@@ -146,8 +146,9 @@ pub struct Layout {
 /// - Top row (stock, waste, 4 foundations) aligns with tableau columns
 ///   0, 1, 3, 4, 5, 6 — column 2 is intentionally empty to separate the
 ///   waste/stock cluster from the foundations.
-pub fn compute_layout(window: Vec2, safe_area_top: f32, safe_area_bottom: f32) -> Layout {
+pub fn compute_layout(window: Vec2, safe_area_top: f32, safe_area_bottom: f32, hud_visible: bool) -> Layout {
     let window = window.max(MIN_WINDOW);
+    let band_h = if hud_visible { HUD_BAND_HEIGHT } else { 0.0 };
 
     // Width-based candidate (existing behaviour): 7 cards + 8 h_gaps = 9*card_width.
     let card_width_width_based = window.x / 9.0;
@@ -169,7 +170,7 @@ pub fn compute_layout(window: Vec2, safe_area_top: f32, safe_area_bottom: f32) -
     //   (window.y - HUD_BAND_HEIGHT) = w * (0.5 + (1 + fan_factor + VERTICAL_GAP_FRAC) * CARD_ASPECT)
     let fan_factor = 1.0 + (MAX_TABLEAU_CARDS - 1.0) * TABLEAU_FAN_FRAC;
     let height_denom = 0.5 + (1.0 + fan_factor + VERTICAL_GAP_FRAC) * CARD_ASPECT;
-    let card_width_height_based = (window.y - safe_area_top - safe_area_bottom - HUD_BAND_HEIGHT).max(0.0) / height_denom;
+    let card_width_height_based = (window.y - safe_area_top - safe_area_bottom - band_h).max(0.0) / height_denom;
 
     let card_width = card_width_width_based.min(card_width_height_based);
     let card_height = card_width * CARD_ASPECT;
@@ -189,7 +190,7 @@ pub fn compute_layout(window: Vec2, safe_area_top: f32, safe_area_bottom: f32) -
     };
 
     let vertical_gap = card_height * VERTICAL_GAP_FRAC;
-    let top_y = window.y / 2.0 - safe_area_top - HUD_BAND_HEIGHT - h_gap - card_height / 2.0;
+    let top_y = window.y / 2.0 - safe_area_top - band_h - h_gap - card_height / 2.0;
     let tableau_y = top_y - card_height - vertical_gap;
 
     let mut pile_positions: HashMap<PileType, Vec2> = HashMap::with_capacity(13);
@@ -270,15 +271,15 @@ mod tests {
 
     #[test]
     fn layout_has_all_thirteen_piles() {
-        assert_all_piles_present(&compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0));
-        assert_all_piles_present(&compute_layout(Vec2::new(800.0, 600.0), 0.0, 0.0));
-        assert_all_piles_present(&compute_layout(Vec2::new(1920.0, 1080.0), 0.0, 0.0));
+        assert_all_piles_present(&compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true));
+        assert_all_piles_present(&compute_layout(Vec2::new(800.0, 600.0), 0.0, 0.0, true));
+        assert_all_piles_present(&compute_layout(Vec2::new(1920.0, 1080.0), 0.0, 0.0, true));
     }
 
     #[test]
     fn card_size_scales_with_window_width() {
-        let small = compute_layout(Vec2::new(800.0, 600.0), 0.0, 0.0);
-        let large = compute_layout(Vec2::new(1920.0, 1080.0), 0.0, 0.0);
+        let small = compute_layout(Vec2::new(800.0, 600.0), 0.0, 0.0, true);
+        let large = compute_layout(Vec2::new(1920.0, 1080.0), 0.0, 0.0, true);
         assert!(large.card_size.x > small.card_size.x);
         assert!(
             (large.card_size.y / large.card_size.x - CARD_ASPECT).abs() < 1e-5,
@@ -289,9 +290,9 @@ mod tests {
     #[test]
     fn layout_below_minimum_clamps_to_minimum() {
         // 200×200 sits below the floor on both axes, so the clamp pulls each
-        // axis up to MIN_WINDOW and the layout matches compute_layout(MIN_WINDOW, 0.0, 0.0).
-        let below = compute_layout(Vec2::new(200.0, 200.0), 0.0, 0.0);
-        let at_min = compute_layout(MIN_WINDOW, 0.0, 0.0);
+        // axis up to MIN_WINDOW and the layout matches compute_layout(MIN_WINDOW, 0.0, 0.0, true).
+        let below = compute_layout(Vec2::new(200.0, 200.0), 0.0, 0.0, true);
+        let at_min = compute_layout(MIN_WINDOW, 0.0, 0.0, true);
         assert_eq!(below.card_size, at_min.card_size);
     }
 
@@ -302,7 +303,7 @@ mod tests {
     #[test]
     fn phone_portrait_layout_fits_horizontally() {
         let window = Vec2::new(360.0, 800.0);
-        let layout = compute_layout(window, 0.0, 0.0);
+        let layout = compute_layout(window, 0.0, 0.0, true);
         let half_w = window.x / 2.0;
         let half_card = layout.card_size.x / 2.0;
         for (pile, pos) in &layout.pile_positions {
@@ -323,7 +324,7 @@ mod tests {
 
     #[test]
     fn tableau_columns_are_sorted_left_to_right() {
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         for i in 0..6 {
             let lhs = layout.pile_positions[&PileType::Tableau(i)].x;
             let rhs = layout.pile_positions[&PileType::Tableau(i + 1)].x;
@@ -333,7 +334,7 @@ mod tests {
 
     #[test]
     fn top_row_is_above_tableau_row() {
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         let stock_y = layout.pile_positions[&PileType::Stock].y;
         let tableau_y = layout.pile_positions[&PileType::Tableau(0)].y;
         assert!(stock_y > tableau_y);
@@ -346,7 +347,7 @@ mod tests {
     #[test]
     fn top_row_clears_hud_band() {
         let window = Vec2::new(1280.0, 800.0);
-        let layout = compute_layout(window, 0.0, 0.0);
+        let layout = compute_layout(window, 0.0, 0.0, true);
         let stock_y = layout.pile_positions[&PileType::Stock].y;
         let card_top = stock_y + layout.card_size.y / 2.0;
         let band_bottom = window.y / 2.0 - HUD_BAND_HEIGHT;
@@ -358,7 +359,7 @@ mod tests {
 
     #[test]
     fn stock_aligns_with_tableau_col_0_and_waste_with_col_1() {
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         let stock_x = layout.pile_positions[&PileType::Stock].x;
         let waste_x = layout.pile_positions[&PileType::Waste].x;
         let t0_x = layout.pile_positions[&PileType::Tableau(0)].x;
@@ -369,7 +370,7 @@ mod tests {
 
     #[test]
     fn foundations_align_with_tableau_cols_3_to_6() {
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         for slot in 0..4_u8 {
             let f_x = layout.pile_positions[&PileType::Foundation(slot)].x;
             let t_x = layout.pile_positions[&PileType::Tableau(3 + slot as usize)].x;
@@ -388,7 +389,7 @@ mod tests {
         // keep a worst-case 13-card column inside the window. (Most desktop
         // monitors fall into this regime — e.g. 1280x800, 1920x1080.)
         let window = Vec2::new(2560.0, 1080.0);
-        let layout = compute_layout(window, 0.0, 0.0);
+        let layout = compute_layout(window, 0.0, 0.0, true);
         let width_based = window.x / 9.0;
         assert!(
             layout.card_size.x < width_based,
@@ -404,7 +405,7 @@ mod tests {
         // the bottleneck and card_width matches the legacy window.x / 9
         // derivation exactly.
         let window = Vec2::new(900.0, 1600.0);
-        let layout = compute_layout(window, 0.0, 0.0);
+        let layout = compute_layout(window, 0.0, 0.0, true);
         let width_based = window.x / 9.0;
         assert!(
             (layout.card_size.x - width_based).abs() < 1e-3,
@@ -418,7 +419,7 @@ mod tests {
     fn worst_case_tableau_fits_vertically_on_default_resolution() {
         // Default app resolution (see solitaire_app/src/main.rs).
         let window = Vec2::new(1280.0, 800.0);
-        let layout = compute_layout(window, 0.0, 0.0);
+        let layout = compute_layout(window, 0.0, 0.0, true);
         let tableau_y = layout.pile_positions[&PileType::Tableau(6)].y;
         let card_h = layout.card_size.y;
         // Bottom edge of the 13th fanned face-up card.
@@ -437,7 +438,7 @@ mod tests {
     fn worst_case_tableau_fits_vertically_on_full_hd() {
         // The bug originally reproduced at 1920x1080. Lock in a regression test.
         let window = Vec2::new(1920.0, 1080.0);
-        let layout = compute_layout(window, 0.0, 0.0);
+        let layout = compute_layout(window, 0.0, 0.0, true);
         let tableau_y = layout.pile_positions[&PileType::Tableau(6)].y;
         let card_h = layout.card_size.y;
         let bottom_edge = tableau_y - 12.0 * card_h * TABLEAU_FAN_FRAC - card_h / 2.0;
@@ -453,8 +454,8 @@ mod tests {
     /// the desktop minimum so the tableau fills the available vertical space.
     #[test]
     fn portrait_phone_expands_tableau_fan_frac() {
-        let desktop = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
-        let phone = compute_layout(Vec2::new(360.0, 800.0), 0.0, 0.0);
+        let desktop = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
+        let phone = compute_layout(Vec2::new(360.0, 800.0), 0.0, 0.0, true);
         assert!(
             phone.tableau_fan_frac > desktop.tableau_fan_frac,
             "portrait phone fan_frac ({:.3}) should exceed desktop ({:.3})",
@@ -468,7 +469,7 @@ mod tests {
     #[test]
     fn expanded_fan_fits_phone_viewport() {
         let window = Vec2::new(360.0, 800.0);
-        let layout = compute_layout(window, 0.0, 0.0);
+        let layout = compute_layout(window, 0.0, 0.0, true);
         let tableau_y = layout.pile_positions[&PileType::Tableau(0)].y;
         let card_h = layout.card_size.y;
         let h_gap = layout.card_size.x / 4.0;
@@ -485,7 +486,7 @@ mod tests {
     /// existing worst-case-fits-vertically invariant is preserved.
     #[test]
     fn desktop_tableau_fan_frac_is_minimum() {
-        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         assert!(
             (layout.tableau_fan_frac - TABLEAU_FAN_FRAC).abs() < 1e-3,
             "desktop fan_frac should stay at minimum {TABLEAU_FAN_FRAC}, got {:.4}",
@@ -500,7 +501,7 @@ mod tests {
             Vec2::new(1280.0, 800.0),
             Vec2::new(1920.0, 1080.0),
         ] {
-            let layout = compute_layout(window, 0.0, 0.0);
+            let layout = compute_layout(window, 0.0, 0.0, true);
             let half_w = window.x / 2.0;
             let half_card = layout.card_size.x / 2.0;
             for (pile, pos) in &layout.pile_positions {
@@ -526,8 +527,8 @@ mod tests {
     #[test]
     fn safe_area_top_shifts_top_row_downward() {
         let window = Vec2::new(360.0, 800.0);
-        let without = compute_layout(window, 0.0, 0.0);
-        let with_inset = compute_layout(window, 32.0, 0.0);
+        let without = compute_layout(window, 0.0, 0.0, true);
+        let with_inset = compute_layout(window, 32.0, 0.0, true);
         let stock_no_inset = without.pile_positions[&PileType::Stock].y;
         let stock_with_inset = with_inset.pile_positions[&PileType::Stock].y;
         assert!(
@@ -548,8 +549,8 @@ mod tests {
     #[test]
     fn safe_area_top_does_not_affect_horizontal_layout() {
         let window = Vec2::new(360.0, 800.0);
-        let without = compute_layout(window, 0.0, 0.0);
-        let with_inset = compute_layout(window, 32.0, 0.0);
+        let without = compute_layout(window, 0.0, 0.0, true);
+        let with_inset = compute_layout(window, 32.0, 0.0, true);
         for pile in [
             PileType::Stock,
             PileType::Waste,
@@ -568,8 +569,8 @@ mod tests {
     #[test]
     fn safe_area_bottom_reduces_tableau_fan() {
         let window = Vec2::new(360.0, 800.0);
-        let without = compute_layout(window, 0.0, 0.0);
-        let with_inset = compute_layout(window, 0.0, 48.0);
+        let without = compute_layout(window, 0.0, 0.0, true);
+        let with_inset = compute_layout(window, 0.0, 48.0, true);
         assert!(
             with_inset.tableau_fan_frac <= without.tableau_fan_frac,
             "safe_area_bottom=48 must not increase tableau_fan_frac: {:.4} → {:.4}",
@@ -591,8 +592,8 @@ mod tests {
     #[test]
     fn safe_area_bottom_does_not_affect_horizontal_layout() {
         let window = Vec2::new(360.0, 800.0);
-        let without = compute_layout(window, 0.0, 0.0);
-        let with_inset = compute_layout(window, 0.0, 48.0);
+        let without = compute_layout(window, 0.0, 0.0, true);
+        let with_inset = compute_layout(window, 0.0, 48.0, true);
         for pile in [PileType::Stock, PileType::Tableau(0), PileType::Tableau(6)] {
             assert!(
                 (without.pile_positions[&pile].x - with_inset.pile_positions[&pile].x).abs() < 1e-3,

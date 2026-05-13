@@ -1990,7 +1990,7 @@ mod tests {
         // At game start waste is empty, so all 52 cards are across stock + tableau.
         let g = GameState::new(42, solitaire_core::game_state::DrawMode::DrawOne);
         let layout =
-            crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+            crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         let positions = card_positions(&g, &layout);
         assert_eq!(positions.len(), 52);
     }
@@ -2010,7 +2010,7 @@ mod tests {
             .collect();
         assert_eq!(waste_ids.len(), 3);
 
-        let layout = crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         let positions = card_positions(&g, &layout);
 
         // Filter rendered positions to only waste cards (by card ID).
@@ -2041,7 +2041,7 @@ mod tests {
         let waste_ids: std::collections::HashSet<u32> =
             waste_pile.iter().map(|c| c.id).collect();
 
-        let layout = crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         let positions = card_positions(&g, &layout);
 
         let mut waste_rendered: Vec<_> = positions
@@ -2084,7 +2084,7 @@ mod tests {
 
         let waste_ids: std::collections::HashSet<u32> =
             waste_pile.iter().map(|c| c.id).collect();
-        let layout = crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         let positions = card_positions(&g, &layout);
 
         let mut waste_rendered: Vec<_> = positions
@@ -2107,7 +2107,7 @@ mod tests {
     fn card_positions_tableau_cards_are_fanned_downward() {
         let g = GameState::new(42, solitaire_core::game_state::DrawMode::DrawOne);
         let layout =
-            crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+            crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         let positions = card_positions(&g, &layout);
 
         // Collect positions for Tableau(6) (should have 7 cards).
@@ -2419,7 +2419,7 @@ mod tests {
     #[test]
     fn facedown_cards_use_tighter_fan_than_uniform_faceup_fan() {
         let g = GameState::new(42, solitaire_core::game_state::DrawMode::DrawOne);
-        let layout = crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0);
+        let layout = crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         let positions = card_positions(&g, &layout);
 
         // Tableau(6) has 7 cards: 6 face-down + 1 face-up on top.
@@ -2580,7 +2580,7 @@ mod tests {
         // Sanity-check: the new font size matches FONT_SIZE_FRAC × the
         // post-resize card width, so the in-place path is using the
         // refreshed Layout.
-        let expected_layout = crate::layout::compute_layout(Vec2::new(800.0, 600.0), 0.0, 0.0);
+        let expected_layout = crate::layout::compute_layout(Vec2::new(800.0, 600.0), 0.0, 0.0, true);
         let expected = expected_layout.card_size.x * FONT_SIZE_FRAC;
         assert!(
             (after - expected).abs() < 1e-3,

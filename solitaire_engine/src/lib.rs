@@ -113,9 +113,9 @@ pub use game_plugin::{
 pub use help_plugin::{HelpPlugin, HelpScreen};
 pub use home_plugin::{HomePlugin, HomeScreen};
 pub use hud_plugin::{
-    streak_flourish_scale, ActionButton, HelpButton, HudAutoComplete, HudPlugin, MenuButton,
-    MenuOption, MenuPopover, ModeOption, ModesButton, ModesPopover, NewGameButton, PauseButton,
-    StreakFlourish, UndoButton,
+    streak_flourish_scale, ActionButton, HelpButton, HudAutoComplete, HudPlugin, HudVisibility,
+    MenuButton, MenuOption, MenuPopover, ModeOption, ModesButton, ModesPopover, NewGameButton,
+    PauseButton, StreakFlourish, UndoButton,
 };
 pub use leaderboard_plugin::{LeaderboardPlugin, LeaderboardResource, LeaderboardScreen};
 pub use input_plugin::InputPlugin;

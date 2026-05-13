@@ -801,7 +801,7 @@ mod tests {
 
     fn install_resources(app: &mut App, state: GameState, layout_window: Vec2, cursor: Vec2) {
         app.insert_resource(GameStateResource(state));
-        app.insert_resource(LayoutResource(compute_layout(layout_window, 0.0, 0.0)));
+        app.insert_resource(LayoutResource(compute_layout(layout_window, 0.0, 0.0, true)));
         app.world_mut().resource_mut::<RadialCursorOverride>().0 = Some(cursor);
     }
 
@@ -913,7 +913,7 @@ mod tests {
     fn right_click_press_on_face_up_card_opens_radial() {
         let mut app = radial_test_app();
         let layout_window = Vec2::new(1280.0, 800.0);
-        let layout = compute_layout(layout_window, 0.0, 0.0);
+        let layout = compute_layout(layout_window, 0.0, 0.0, true);
         let ace_pos = layout.pile_positions[&PileType::Tableau(0)];
 
         install_resources(&mut app, ace_only_state(), layout_window, ace_pos);
@@ -950,7 +950,7 @@ mod tests {
     fn right_click_release_over_destination_fires_move_request() {
         let mut app = radial_test_app();
         let layout_window = Vec2::new(1280.0, 800.0);
-        let layout = compute_layout(layout_window, 0.0, 0.0);
+        let layout = compute_layout(layout_window, 0.0, 0.0, true);
         let ace_pos = layout.pile_positions[&PileType::Tableau(0)];
 
         install_resources(&mut app, ace_only_state(), layout_window, ace_pos);
@@ -989,7 +989,7 @@ mod tests {
     fn right_click_release_outside_any_destination_cancels() {
         let mut app = radial_test_app();
         let layout_window = Vec2::new(1280.0, 800.0);
-        let layout = compute_layout(layout_window, 0.0, 0.0);
+        let layout = compute_layout(layout_window, 0.0, 0.0, true);
         let ace_pos = layout.pile_positions[&PileType::Tableau(0)];
 
         install_resources(&mut app, ace_only_state(), layout_window, ace_pos);
@@ -1016,7 +1016,7 @@ mod tests {
     fn escape_cancels_active_radial() {
         let mut app = radial_test_app();
         let layout_window = Vec2::new(1280.0, 800.0);
-        let layout = compute_layout(layout_window, 0.0, 0.0);
+        let layout = compute_layout(layout_window, 0.0, 0.0, true);
         let ace_pos = layout.pile_positions[&PileType::Tableau(0)];
 
         install_resources(&mut app, ace_only_state(), layout_window, ace_pos);
@@ -1039,7 +1039,7 @@ mod tests {
     fn right_click_on_face_down_card_does_not_open_radial() {
         let mut app = radial_test_app();
         let layout_window = Vec2::new(1280.0, 800.0);
-        let layout = compute_layout(layout_window, 0.0, 0.0);
+        let layout = compute_layout(layout_window, 0.0, 0.0, true);
         let king_pos = layout.pile_positions[&PileType::Tableau(0)];
 
         install_resources(&mut app, face_down_only_state(), layout_window, king_pos);

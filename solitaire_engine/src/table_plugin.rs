@@ -10,6 +10,7 @@ use solitaire_core::card::Suit;
 use solitaire_core::pile::PileType;
 
 use crate::events::{HintVisualEvent, StateChangedEvent};
+use crate::hud_plugin::HudVisibility;
 use crate::layout::{compute_layout, Layout, LayoutResource, LayoutSystem};
 use crate::safe_area::SafeAreaInsets;
 use crate::resources::GameStateResource;
@@ -149,6 +150,7 @@ fn setup_table(
     settings: Option<Res<SettingsResource>>,
     bg_images: Option<Res<BackgroundImageSet>>,
     safe_area: Option<Res<SafeAreaInsets>>,
+    hud_vis: Option<Res<HudVisibility>>,
 ) {
     // Only spawn a camera if one does not already exist (e.g. a parent app
     // may have added one in tests). Use the felt-green clear colour so the
@@ -179,7 +181,8 @@ fn setup_table(
     let insets = safe_area.as_deref().copied().unwrap_or_default();
     let safe_area_top = insets.top / scale;
     let safe_area_bottom = insets.bottom / scale;
-    let layout = compute_layout(window_size, safe_area_top, safe_area_bottom);
+    let hud_visible = hud_vis.as_deref().copied().unwrap_or_default() == HudVisibility::Visible;
+    let layout = compute_layout(window_size, safe_area_top, safe_area_bottom, hud_visible);
 
     let selected_bg = settings.as_ref().map_or(0, |s| s.0.selected_background);
 
@@ -314,6 +317,7 @@ fn on_window_resized(
     mut events: MessageReader<WindowResized>,
     safe_area: Option<Res<SafeAreaInsets>>,
     windows: Query<&Window>,
+    hud_vis: Option<Res<HudVisibility>>,
     mut layout_res: Option<ResMut<LayoutResource>>,
     mut backgrounds: Query<
         (&mut Sprite, &mut Transform),
@@ -329,7 +333,8 @@ fn on_window_resized(
     let insets = safe_area.as_deref().copied().unwrap_or_default();
     let safe_area_top = insets.top / scale;
     let safe_area_bottom = insets.bottom / scale;
-    let new_layout = compute_layout(window_size, safe_area_top, safe_area_bottom);
+    let hud_visible = hud_vis.as_deref().copied().unwrap_or_default() == HudVisibility::Visible;
+    let new_layout = compute_layout(window_size, safe_area_top, safe_area_bottom, hud_visible);
 
     if let Some(layout_res) = layout_res.as_deref_mut() {
         layout_res.0 = new_layout.clone();
