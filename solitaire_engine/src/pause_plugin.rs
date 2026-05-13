@@ -35,6 +35,7 @@ use crate::resources::{DragState, GameStateResource};
 use crate::selection_plugin::{SelectionKeySet, SelectionState};
 use crate::settings_plugin::{SettingsChangedEvent, SettingsResource, SettingsStoragePath};
 use crate::stats_plugin::StatsResource;
+use crate::hud_plugin::HudPopoverOpen;
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_body_text, spawn_modal_button,
     spawn_modal_header, ButtonVariant, ModalScrim,
@@ -137,6 +138,7 @@ struct PauseModalQueries<'w, 's> {
     forfeit_screens: Query<'w, 's, Entity, With<ForfeitConfirmScreen>>,
     game_over_screens: Query<'w, 's, Entity, With<GameOverScreen>>,
     other_modal_scrims: Query<'w, 's, Entity, (With<ModalScrim>, Without<PauseScreen>)>,
+    open_hud_popovers: Query<'w, 's, Entity, With<HudPopoverOpen>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -162,6 +164,7 @@ fn toggle_pause(
         forfeit_screens,
         game_over_screens,
         other_modal_scrims,
+        open_hud_popovers,
     } = modal_queries;
 
     // Either Esc or a click on the HUD "Pause" button (which fires
@@ -184,6 +187,12 @@ fn toggle_pause(
     // (`button_clicked`) is gated too; clicking Pause while another
     // modal is up is almost always an accident.
     if !other_modal_scrims.is_empty() {
+        return;
+    }
+    // A HUD popover (Menu or Modes dropdown) is open — the popover's own
+    // Escape handler (in HudPlugin) will close it this frame. Don't also
+    // spawn the pause overlay on top of the closing popover.
+    if !open_hud_popovers.is_empty() {
         return;
     }
     // If a replay is currently playing, let `replay_overlay::handle_stop_keyboard`

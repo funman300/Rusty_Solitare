@@ -281,6 +281,13 @@ pub struct MenuButton;
 #[derive(Component, Debug)]
 pub struct MenuPopover;
 
+/// Shared marker placed on both [`MenuPopover`] and [`ModesPopover`] entities
+/// while they are open. External systems (e.g. `PausePlugin`) query this to
+/// determine whether a HUD popover is currently visible without importing the
+/// individual popover types.
+#[derive(Component, Debug)]
+pub struct HudPopoverOpen;
+
 /// Fullscreen transparent backdrop spawned behind the [`MenuPopover`].
 /// Pressing it (tap anywhere outside the popover) light-dismisses the menu.
 #[derive(Component, Debug)]
@@ -340,6 +347,9 @@ impl Plugin for HudPlugin {
             .add_message::<WinStreakMilestoneEvent>()
             .init_resource::<PreviousScore>()
             .init_resource::<HudActionFade>()
+            // Escape-close handlers for popovers read this; init defensively
+            // so HudPlugin works under MinimalPlugins in tests.
+            .init_resource::<ButtonInput<KeyCode>>()
             // WindowResized is registered by table_plugin; re-register
             // defensively so the HUD plugin works standalone in tests.
             .add_message::<WindowResized>()
@@ -376,9 +386,11 @@ impl Plugin for HudPlugin {
                     handle_modes_button,
                     handle_mode_option_click,
                     handle_modes_backdrop_click,
+                    close_modes_popover_on_escape,
                     handle_menu_button,
                     handle_menu_option_click,
                     handle_menu_backdrop_click,
+                    close_menu_popover_on_escape,
                     paint_action_buttons,
                 ),
             )
@@ -940,6 +952,7 @@ fn spawn_modes_popover(
     commands
         .spawn((
             ModesPopover,
+            HudPopoverOpen,
             Node {
                 position_type: PositionType::Absolute,
                 right: VAL_SPACE_3,
@@ -1120,6 +1133,7 @@ fn spawn_menu_popover(commands: &mut Commands, font_res: Option<&FontResource>) 
     commands
         .spawn((
             MenuPopover,
+            HudPopoverOpen,
             Node {
                 position_type: PositionType::Absolute,
                 right: VAL_SPACE_3,
@@ -1221,6 +1235,39 @@ fn handle_menu_option_click(
                 commands.entity(e).despawn();
             }
         }
+}
+
+/// Despawns the [`ModesPopover`] and its backdrop when Escape / Android back
+/// is pressed while the popover is open. Runs so `PausePlugin`'s guard (which
+/// checks [`HudPopoverOpen`]) sees an empty world and stays idle.
+fn close_modes_popover_on_escape(
+    keys: Res<ButtonInput<KeyCode>>,
+    popovers: Query<Entity, With<ModesPopover>>,
+    backdrops: Query<Entity, With<ModesPopoverBackdrop>>,
+    mut commands: Commands,
+) {
+    if !keys.just_pressed(KeyCode::Escape) || popovers.is_empty() {
+        return;
+    }
+    for e in popovers.iter().chain(backdrops.iter()) {
+        commands.entity(e).despawn();
+    }
+}
+
+/// Despawns the [`MenuPopover`] and its backdrop when Escape / Android back
+/// is pressed while the popover is open.
+fn close_menu_popover_on_escape(
+    keys: Res<ButtonInput<KeyCode>>,
+    popovers: Query<Entity, With<MenuPopover>>,
+    backdrops: Query<Entity, With<MenuPopoverBackdrop>>,
+    mut commands: Commands,
+) {
+    if !keys.just_pressed(KeyCode::Escape) || popovers.is_empty() {
+        return;
+    }
+    for e in popovers.iter().chain(backdrops.iter()) {
+        commands.entity(e).despawn();
+    }
 }
 
 /// Despawns the [`ModesPopover`] and its backdrop when the player taps
