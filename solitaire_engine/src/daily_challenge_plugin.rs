@@ -581,6 +581,12 @@ mod tests {
         app.world_mut()
             .resource_mut::<DailyExpiryWarningShown>()
             .0 = Some(today);
+        // Flush any stale events from headless_app()'s initial update (the
+        // double-buffer keeps them visible for one extra frame).
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<WarningToastEvent>>()
+            .clear();
         app.update();
         let events = app.world().resource::<Messages<WarningToastEvent>>();
         let mut cursor = events.get_cursor();
@@ -597,6 +603,9 @@ mod tests {
             .resource_mut::<ProgressResource>()
             .0
             .daily_challenge_last_completed = Some(today);
+        app.world_mut()
+            .resource_mut::<Messages<WarningToastEvent>>()
+            .clear();
         app.update();
         let events = app.world().resource::<Messages<WarningToastEvent>>();
         let mut cursor = events.get_cursor();

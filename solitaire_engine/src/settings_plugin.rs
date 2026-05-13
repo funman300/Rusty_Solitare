@@ -1481,6 +1481,7 @@ fn spawn_settings_panel(
                 row_gap: VAL_SPACE_3,
                 max_height: Val::Vh(60.0),
                 overflow: Overflow::scroll_y(),
+                padding: UiRect::bottom(Val::Px(96.0)),
                 ..default()
             },
         ))
