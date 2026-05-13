@@ -35,6 +35,10 @@ body {
 /* ── Header / HUD ────────────────────────────────────────────────────── */
 
 header {
+    position: sticky;
+    top: 0;
+    z-index: 500;
+    background: var(--bg);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -84,6 +88,7 @@ main {
     align-items: flex-start;
     padding: 20px;
     overflow-x: auto;
+    min-width: 0;
 }
 
 #board {
@@ -154,7 +159,8 @@ main {
     text-align: center;
 }
 .card .corner.top    { top: 4px; left: 6px; }
-.card .corner.bottom { bottom: 4px; right: 6px; transform: rotate(180deg); }
+/* No rotation — ♠ rotated 180° is indistinguishable from ♥ */
+.card .corner.bottom { bottom: 4px; right: 6px; text-align: right; }
 
 .card.red   { color: var(--red); }
 .card.black { color: var(--black); }

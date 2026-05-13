@@ -196,7 +196,7 @@ function render(s) {
 
     hudScore.textContent = `Score: ${s.score}`;
     hudMoves.textContent = `Moves: ${s.move_count}`;
-    hudStock.textContent = `Stock: ${s.stock.length}`;
+    if (hudStock) hudStock.textContent = `Stock: ${s.stock.length}`;
     btnUndo.disabled     = s.undo_stack_len === 0;
 
     const visible = new Map();
