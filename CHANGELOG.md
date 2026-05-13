@@ -6,6 +6,27 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **BUG-3: Multi-modal stacking** (`hud_plugin.rs`). `handle_menu_button`
+  now checks `scrims.is_empty()` — a `Query<(), With<ModalScrim>>` guard —
+  before calling `spawn_menu_popover`. Tapping ≡ while any modal (Stats,
+  Settings, Profile, Help) is open is now a no-op. Previously Stats + Profile
+  could be open simultaneously.
+- **UX-7: Help text single-line overflow** (`help_plugin.rs`). The HUD menu
+  button description "Menu: Stats, Settings, Profile, Achievements" wrapped to
+  two lines on Android. Shortened to "Open menu (Stats, Settings, Profile...)"
+  which fits on one line. Verified on device.
+- **UX-5b: Home mode glyph corruption** (`home_plugin.rs`). Mode selector icons
+  were using Geometric Shapes block (U+25xx) absent from the bundled FiraMono
+  font — rendered as missing-glyph rectangles on Android. Replaced with card
+  suits (U+2660–2666) which FiraMono covers: ♦ Daily, ♥ Zen, ♠ Challenge.
+- **UX-1: Modal Done button in gesture zone** (`safe_area.rs`). New
+  `apply_safe_area_to_modal_scrims` Bevy system pads every `ModalScrim` bottom
+  by `SafeAreaInsets.bottom / scale_factor`. Modal cards are now centred over
+  the safe area, not the full physical screen. The Settings / Help / Stats Done
+  buttons are reachable on gesture-nav Android devices. Verified on device.
+
 ---
 
 ## [0.23.0] — 2026-05-12

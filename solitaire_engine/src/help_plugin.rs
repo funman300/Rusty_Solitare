@@ -159,7 +159,7 @@ const CONTROL_SECTIONS: &[ControlSection] = &[
             ControlRow { keys: "||", description: "Pause / resume" },
             ControlRow { keys: "?", description: "This help screen" },
             ControlRow { keys: "→", description: "Show a hint" },
-            ControlRow { keys: "≡", description: "Menu: Stats, Settings, Profile, Achievements" },
+            ControlRow { keys: "≡", description: "Open menu (Stats, Settings, Profile...)" },
         ],
     },
 ];

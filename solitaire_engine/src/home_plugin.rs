@@ -150,32 +150,24 @@ impl HomeMode {
     /// readability rather than visual fidelity. Swap to `Image` nodes
     /// when art lands; the rest of the tile layout doesn't change.
     ///
-    /// Picks are constrained to **card suits** (U+2660-2666) and basic
-    /// **Geometric Shapes** (U+25xx) — the two ranges the bundled
-    /// FiraMono-Medium face actually covers. Earlier choices in
-    /// Dingbats (★ ❀ ✦) and Misc Symbols (⌚) rendered as
-    /// missing-glyph rectangles because FiraMono's coverage there is
-    /// minimal.
+    /// Picks are constrained to **card suits** (U+2660-2666), the
+    /// **Arrows** block (U+2190-21FF), and ASCII — ranges confirmed
+    /// present in the bundled FiraMono-Medium face. The Geometric
+    /// Shapes block (U+25xx) is NOT covered by FiraMono; glyphs in
+    /// that range render as missing-glyph rectangles on Android.
     fn glyph(self) -> &'static str {
         match self {
-            // Black club — card suit, the obvious solitaire mark.
+            // Black club — card suit; the obvious solitaire mark.
             HomeMode::Classic => "\u{2663}",
-            // Black diamond — Geometric Shapes; reads as the day's gem.
-            HomeMode::Daily => "\u{25C6}",
-            // White circle — Geometric Shapes; reads as the Zen enso.
-            HomeMode::Zen => "\u{25CB}",
-            // Black up-pointing triangle — Geometric Shapes; reads as
-            // a mountain / a step up in difficulty.
-            HomeMode::Challenge => "\u{25B2}",
-            // Rightwards arrow — Arrows block (U+2190-21FF), a core
-            // range every dev-oriented monospace font (FiraMono
-            // included) ships. Reads as "go / fast-forward" for the
-            // timed mode. Earlier ▶ (U+25B6) did not render; FiraMono
-            // ships ▲ (up triangle) but evidently not the sideways
-            // siblings.
+            // Black diamond suit — "gem of the day" reading.
+            HomeMode::Daily => "\u{2666}",
+            // Black heart suit — calm/warm; conveys the Zen mood.
+            HomeMode::Zen => "\u{2665}",
+            // Black spade suit — sharp/high-stakes; signals difficulty.
+            HomeMode::Challenge => "\u{2660}",
+            // Rightwards arrow — "go / fast-forward" for the timed mode.
             HomeMode::TimeAttack => "\u{2192}",
-            // Number sign — ASCII, universally available. Reads as
-            // "a specific number / seed ID".
+            // Number sign — ASCII; "a specific seed ID".
             HomeMode::PlayBySeed => "#",
         }
     }

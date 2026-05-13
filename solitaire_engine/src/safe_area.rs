@@ -19,6 +19,8 @@
 
 use bevy::prelude::*;
 
+use crate::ui_modal::ModalScrim;
+
 /// Pixel sizes of the system-reserved regions on each edge of the
 /// surface. Zero on desktop.
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
@@ -54,7 +56,7 @@ pub struct SafeAreaInsetsPlugin;
 impl Plugin for SafeAreaInsetsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SafeAreaInsets>()
-            .add_systems(Update, apply_safe_area_anchors);
+            .add_systems(Update, (apply_safe_area_anchors, apply_safe_area_to_modal_scrims));
 
         #[cfg(target_os = "android")]
         app.add_systems(Update, android::refresh_insets);
@@ -84,6 +86,29 @@ fn apply_safe_area_anchors(
     let top_logical = insets.top / scale;
     for (anchor, mut node) in &mut q {
         node.top = Val::Px(anchor.base_top + top_logical);
+    }
+}
+
+/// Pads the bottom of every [`ModalScrim`] by the logical bottom inset so
+/// modal cards don't extend into the Android gesture-navigation zone.
+///
+/// Fires when [`SafeAreaInsets`] changes (covers the common case of insets
+/// arriving a few frames after app start) AND when a new `ModalScrim` is
+/// spawned (covers modals opened after insets have already settled).
+fn apply_safe_area_to_modal_scrims(
+    insets: Res<SafeAreaInsets>,
+    windows: Query<&Window>,
+    mut scrims: Query<&mut Node, With<ModalScrim>>,
+    new_scrims: Query<(), (With<ModalScrim>, Added<ModalScrim>)>,
+) {
+    let has_new = !new_scrims.is_empty();
+    if !insets.is_changed() && !has_new {
+        return;
+    }
+    let scale = windows.iter().next().map_or(1.0, |w| w.scale_factor());
+    let bottom_logical = insets.bottom / scale;
+    for mut node in &mut scrims {
+        node.padding.bottom = Val::Px(bottom_logical);
     }
 }
 

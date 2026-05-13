@@ -40,6 +40,7 @@ use crate::resources::GameStateResource;
 use crate::selection_plugin::SelectionState;
 use crate::time_attack_plugin::TimeAttackResource;
 use crate::ui_focus::{FocusGroup, Focusable};
+use crate::ui_modal::ModalScrim;
 use crate::ui_tooltip::Tooltip;
 
 /// Marker on the score text node.
@@ -1074,6 +1075,7 @@ fn handle_menu_button(
     interaction_query: Query<&Interaction, (With<MenuButton>, Changed<Interaction>)>,
     popovers: Query<Entity, With<MenuPopover>>,
     backdrops: Query<Entity, With<MenuPopoverBackdrop>>,
+    scrims: Query<(), With<ModalScrim>>,
     font_res: Option<Res<FontResource>>,
     mut commands: Commands,
 ) {
@@ -1088,7 +1090,7 @@ fn handle_menu_button(
         for e in &backdrops {
             commands.entity(e).despawn();
         }
-    } else {
+    } else if scrims.is_empty() {
         spawn_menu_popover(&mut commands, font_res.as_deref());
     }
 }
