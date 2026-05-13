@@ -1,19 +1,21 @@
-/* Solitaire Quest replay viewer — palette mirrors the desktop client's
-   midnight-purple Balatro tone (BG_BASE = #1A0F2E) and the dark felt
-   from the engine's TABLE_COLOUR. */
+/* Solitaire Quest replay viewer — Terminal (base16-eighties) palette,
+   matching the Bevy desktop/Android app's ui_theme.rs tokens exactly. */
 
 :root {
-    --bg: #0f0a1f;
-    --felt: #0f4c30;
-    --panel: #1a0f2e;
-    --panel-hi: #2d1b69;
-    --text: #f5f0ff;
-    --text-muted: #b5a8d5;
-    --accent: #ffd23f;
-    --red: #cc3344;
-    --black: #1a0f2e;
-    --card-bg: #ffffff;
-    --card-border: #ccc;
+    --bg: #151515;
+    --felt: #0f5232;
+    --panel: #202020;
+    --panel-hi: #2a2a2a;
+    --text: #d0d0d0;
+    --text-muted: #a0a0a0;
+    --accent: #a54242;
+    --accent-hi: #c25e5e;
+    --red: #fb9fb1;
+    --black: #151515;
+    --success: #acc267;
+    --warning: #ddb26f;
+    --card-bg: #f8f5f0;
+    --card-border: #c8b8a0;
     --card-w: 80px;
     --card-h: 112px;
     --gap: 12px;
@@ -114,13 +116,13 @@ main {
     background:
         repeating-linear-gradient(
             45deg,
-            #482f97 0,
-            #482f97 6px,
-            #2d1b69 6px,
-            #2d1b69 12px
+            #2a2a2a 0,
+            #2a2a2a 6px,
+            #202020 6px,
+            #202020 12px
         );
     color: transparent;
-    border-color: #4a3a8a;
+    border-color: #353535;
 }
 
 .card .corner {
@@ -162,8 +164,8 @@ main {
 }
 
 #controls button:hover:not(:disabled) {
-    background: var(--accent);
-    color: var(--black);
+    background: var(--accent-hi);
+    color: var(--text);
 }
 
 #controls button:disabled {
@@ -178,6 +180,6 @@ main {
 }
 
 #status #result.win {
-    color: var(--accent);
+    color: var(--success);
     font-weight: 600;
 }
