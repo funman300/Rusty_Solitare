@@ -44,13 +44,19 @@ pub struct HelpPlugin;
 impl Plugin for HelpPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<HelpRequestEvent>()
-            // `MouseWheel` is emitted by Bevy's input plugin under
-            // `DefaultPlugins`; register it explicitly so the help-scroll
-            // system also runs cleanly under `MinimalPlugins` in tests.
+            // `MouseWheel` and `TouchInput` are emitted by Bevy's input
+            // plugin under `DefaultPlugins`; register them explicitly so
+            // scroll systems run cleanly under `MinimalPlugins` in tests.
             .add_message::<MouseWheel>()
+            .add_message::<bevy::input::touch::TouchInput>()
             .add_systems(
                 Update,
-                (toggle_help_screen, handle_help_close_button, scroll_help_panel),
+                (
+                    toggle_help_screen,
+                    handle_help_close_button,
+                    scroll_help_panel,
+                    crate::ui_modal::touch_scroll_panel::<HelpScrollable>,
+                ),
             );
     }
 }
@@ -229,6 +235,7 @@ fn spawn_help_screen(commands: &mut Commands, font_res: Option<&FontResource>) {
                 row_gap: VAL_SPACE_2,
                 max_height: Val::Vh(70.0),
                 overflow: Overflow::scroll_y(),
+                padding: UiRect::bottom(Val::Px(96.0)),
                 ..default()
             },
         ))
