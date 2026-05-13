@@ -135,6 +135,36 @@ struct ControlSection {
     rows: &'static [ControlRow],
 }
 
+#[cfg(target_os = "android")]
+const CONTROL_SECTIONS: &[ControlSection] = &[
+    ControlSection {
+        title: "Touch",
+        rows: &[
+            ControlRow { keys: "Tap stock", description: "Draw from stock" },
+            ControlRow { keys: "Drag card", description: "Move cards between piles" },
+            ControlRow { keys: "Tap foundation area", description: "Auto-move top card to foundation" },
+        ],
+    },
+    ControlSection {
+        title: "New Game",
+        rows: &[
+            ControlRow { keys: "New+", description: "Start a new Classic game" },
+            ControlRow { keys: "Modes↓", description: "Pick Daily, Zen, Challenge, or Time Attack" },
+        ],
+    },
+    ControlSection {
+        title: "HUD buttons",
+        rows: &[
+            ControlRow { keys: "←", description: "Undo last move" },
+            ControlRow { keys: "||", description: "Pause / resume" },
+            ControlRow { keys: "?", description: "This help screen" },
+            ControlRow { keys: "→", description: "Show a hint" },
+            ControlRow { keys: "≡", description: "Menu: Stats, Settings, Profile, Achievements" },
+        ],
+    },
+];
+
+#[cfg(not(target_os = "android"))]
 const CONTROL_SECTIONS: &[ControlSection] = &[
     ControlSection {
         title: "Gameplay",

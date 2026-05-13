@@ -53,9 +53,13 @@ pub struct PausedResource(pub bool);
 #[derive(Component, Debug)]
 pub struct PauseScreen;
 
-/// Marker on the draw-mode toggle button inside the pause overlay.
+/// Marker on the "Draw 1" option button inside the pause overlay.
 #[derive(Component, Debug)]
-struct PauseDrawToggle;
+struct PauseDrawOneButton;
+
+/// Marker on the "Draw 3" option button inside the pause overlay.
+#[derive(Component, Debug)]
+struct PauseDrawThreeButton;
 
 /// Marker on the Resume primary button on the pause modal.
 #[derive(Component, Debug)]
@@ -118,12 +122,13 @@ impl Plugin for PausePlugin {
                     toggle_pause
                         .before(SelectionKeySet)
                         .before(handle_forfeit_keyboard),
-                    handle_pause_draw_toggle,
+                    handle_pause_draw_buttons,
                     handle_pause_resume_button,
                     handle_pause_forfeit_button,
                     handle_forfeit_request,
                     handle_forfeit_confirm_buttons,
                     handle_forfeit_keyboard,
+                    auto_resume_on_overlay,
                 ),
             );
     }
@@ -249,12 +254,14 @@ fn toggle_pause(
     }
 }
 
-/// Handles the draw-mode toggle button on the pause overlay.
+/// Handles the draw-mode segmented control on the pause overlay.
 ///
-/// Toggling flips the draw mode in `SettingsResource`, persists settings, and
-/// fires `SettingsChangedEvent`. The change takes effect on the next new game.
-fn handle_pause_draw_toggle(
-    interaction_query: Query<&Interaction, (Changed<Interaction>, With<PauseDrawToggle>)>,
+/// Two explicit buttons replace the old cycle-toggle: pressing "Draw 1" sets
+/// `DrawOne`, pressing "Draw 3" sets `DrawThree`. Fires `SettingsChangedEvent`
+/// so the rest of the engine sees the update. Change takes effect next game.
+fn handle_pause_draw_buttons(
+    draw_one_q: Query<&Interaction, (Changed<Interaction>, With<PauseDrawOneButton>)>,
+    draw_three_q: Query<&Interaction, (Changed<Interaction>, With<PauseDrawThreeButton>)>,
     paused: Res<PausedResource>,
     settings: Option<ResMut<SettingsResource>>,
     path: Option<Res<SettingsStoragePath>>,
@@ -263,22 +270,23 @@ fn handle_pause_draw_toggle(
     if !paused.0 {
         return;
     }
-    let Some(mut settings) = settings else { return };
-    for interaction in &interaction_query {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
-        settings.0.draw_mode = match settings.0.draw_mode {
-            DrawMode::DrawOne => DrawMode::DrawThree,
-            DrawMode::DrawThree => DrawMode::DrawOne,
-        };
-        if let Some(p) = &path
-            && let Some(target) = &p.0
-                && let Err(e) = solitaire_data::save_settings_to(target, &settings.0) {
-                    warn!("failed to save settings after draw-mode toggle: {e}");
-                }
-        changed.write(SettingsChangedEvent(settings.0.clone()));
+    let pressed_one = draw_one_q.iter().any(|i| *i == Interaction::Pressed);
+    let pressed_three = draw_three_q.iter().any(|i| *i == Interaction::Pressed);
+    if !pressed_one && !pressed_three {
+        return;
     }
+    let Some(mut settings) = settings else { return };
+    let new_mode = if pressed_one { DrawMode::DrawOne } else { DrawMode::DrawThree };
+    if settings.0.draw_mode == new_mode {
+        return;
+    }
+    settings.0.draw_mode = new_mode;
+    if let Some(p) = &path
+        && let Some(target) = &p.0
+            && let Err(e) = solitaire_data::save_settings_to(target, &settings.0) {
+                warn!("failed to save settings after draw-mode change: {e}");
+            }
+    changed.write(SettingsChangedEvent(settings.0.clone()));
 }
 
 /// Closes the pause modal when the player clicks the Resume button.
@@ -423,6 +431,27 @@ fn close_forfeit_modal(
     }
 }
 
+/// Automatically closes the pause modal when any non-pause overlay opens
+/// on top of it (Stats, Settings, Help, Achievements, Profile, etc.).
+///
+/// The player reaches these overlays via the HUD menu while paused, which
+/// causes both the pause modal and the overlay to be live simultaneously.
+/// That is always unintentional — the overlay should own the screen.
+fn auto_resume_on_overlay(
+    mut commands: Commands,
+    pause_screens: Query<Entity, With<PauseScreen>>,
+    other_modal_scrims: Query<Entity, (With<ModalScrim>, Without<PauseScreen>)>,
+    mut paused: ResMut<PausedResource>,
+) {
+    if pause_screens.is_empty() || other_modal_scrims.is_empty() {
+        return;
+    }
+    for entity in &pause_screens {
+        commands.entity(entity).despawn();
+    }
+    paused.0 = false;
+}
+
 /// Spawns the pause modal using the standard `ui_modal` scaffold —
 /// uniform scrim, centred card, `Resume` primary + `Forfeit` tertiary
 /// action buttons, plus a Draw Mode toggle row when settings are
@@ -469,8 +498,10 @@ fn spawn_pause_screen(
     });
 }
 
-/// Inline "Draw Mode  [Draw 1]" row + a caption explaining the change
-/// applies to the next game. Spawned inside the modal body.
+/// Inline "Draw Mode  [Draw 1] [Draw 3]" segmented control + caption.
+///
+/// The active option renders as `Secondary` (elevated), the inactive one as
+/// `Tertiary` (recessed), giving an obvious selection state at a glance.
 fn spawn_draw_mode_row(
     parent: &mut ChildSpawnerCommands,
     mode: DrawMode,
@@ -486,6 +517,10 @@ fn spawn_draw_mode_row(
         font_size: TYPE_CAPTION,
         ..default()
     };
+    let (one_variant, three_variant) = match mode {
+        DrawMode::DrawOne => (ButtonVariant::Secondary, ButtonVariant::Tertiary),
+        DrawMode::DrawThree => (ButtonVariant::Tertiary, ButtonVariant::Secondary),
+    };
     parent
         .spawn(Node {
             flex_direction: FlexDirection::Row,
@@ -499,14 +534,8 @@ fn spawn_draw_mode_row(
                 label_font,
                 TextColor(TEXT_PRIMARY),
             ));
-            spawn_modal_button(
-                row,
-                PauseDrawToggle,
-                draw_mode_label(mode),
-                None,
-                ButtonVariant::Secondary,
-                font_res,
-            );
+            spawn_modal_button(row, PauseDrawOneButton, "Draw 1", None, one_variant, font_res);
+            spawn_modal_button(row, PauseDrawThreeButton, "Draw 3", None, three_variant, font_res);
         });
     parent.spawn((
         Text::new("Takes effect next game"),
@@ -790,9 +819,9 @@ mod tests {
         // Set paused so handle_pause_draw_toggle acts.
         app.world_mut().resource_mut::<PausedResource>().0 = true;
 
-        // Spawn a PauseDrawToggle button with Pressed interaction.
+        // Pressing "Draw 3" while DrawOne is active should switch to DrawThree.
         app.world_mut().spawn((
-            PauseDrawToggle,
+            PauseDrawThreeButton,
             Button,
             Interaction::Pressed,
         ));
@@ -807,18 +836,16 @@ mod tests {
         assert_eq!(
             *mode,
             DrawMode::DrawThree,
-            "draw mode must flip from DrawOne to DrawThree when toggle is pressed"
+            "pressing Draw 3 must set mode to DrawThree"
         );
 
-        // A second press should flip back.
-        {
-            let mut interaction_query = app
-                .world_mut()
-                .query::<&mut Interaction>();
-            for mut i in interaction_query.iter_mut(app.world_mut()) {
-                *i = Interaction::Pressed;
-            }
-        }
+        // Pressing "Draw 1" while DrawThree is active should switch back.
+        app.world_mut().spawn((
+            PauseDrawOneButton,
+            Button,
+            Interaction::Pressed,
+        ));
+
         app.update();
 
         let mode2 = &app
@@ -829,7 +856,7 @@ mod tests {
         assert_eq!(
             *mode2,
             DrawMode::DrawOne,
-            "draw mode must flip back from DrawThree to DrawOne on second press"
+            "pressing Draw 1 must set mode to DrawOne"
         );
 
         // Verify a SettingsChangedEvent was fired.
@@ -1090,6 +1117,35 @@ mod tests {
         assert!(
             !app.world().resource::<PausedResource>().0,
             "Esc that closes the forfeit modal must not also open pause"
+        );
+    }
+
+    /// When a non-pause modal scrim appears (e.g. Settings overlay opens
+    /// from the menu while game is paused), `auto_resume_on_overlay` must
+    /// despawn the pause modal and clear `PausedResource`.
+    #[test]
+    fn auto_resume_closes_pause_when_overlay_opens() {
+        let mut app = headless_app();
+        press_esc(&mut app);
+        app.update();
+        assert!(app.world().resource::<PausedResource>().0);
+        assert_eq!(
+            app.world_mut().query::<&PauseScreen>().iter(app.world()).count(),
+            1
+        );
+
+        // Simulate another overlay opening (e.g. Stats) by spawning a bare ModalScrim.
+        app.world_mut().spawn(ModalScrim);
+        app.update();
+
+        assert!(
+            !app.world().resource::<PausedResource>().0,
+            "auto_resume_on_overlay must clear PausedResource when another modal opens"
+        );
+        assert_eq!(
+            app.world_mut().query::<&PauseScreen>().iter(app.world()).count(),
+            0,
+            "auto_resume_on_overlay must despawn PauseScreen when another modal opens"
         );
     }
 

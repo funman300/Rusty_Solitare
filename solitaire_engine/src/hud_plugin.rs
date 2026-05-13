@@ -302,6 +302,8 @@ struct ModesPopoverBackdrop;
 /// `Toggle*RequestEvent` the click handler fires.
 #[derive(Component, Debug, Clone, Copy)]
 pub enum MenuOption {
+    Help,
+    Modes,
     Stats,
     Achievements,
     Profile,
@@ -698,13 +700,15 @@ fn spawn_action_buttons(
         .with_children(|row| {
             // The trailing `order` argument feeds `Focusable { group: Hud, order }`
             // so Tab cycles the action bar in visual reading order.
-            spawn_action_button(row, MenuButton,   labels.0, None,         "Open Stats, Achievements, Profile, Settings, or Leaderboard.", &font, 0);
-            spawn_action_button(row, UndoButton,   labels.1, Some("U"),    "Take back your last move. Costs points and blocks No Undo.", &font, 1);
-            spawn_action_button(row, PauseButton,  labels.2, Some("Esc"),  "Pause the game and freeze the timer.", &font, 2);
-            spawn_action_button(row, HelpButton,   labels.3, Some("F1"),   "Show controls, rules, and keyboard shortcuts.", &font, 3);
-            spawn_action_button(row, HintButton,   labels.4, Some("H"),    "Highlight a suggested move. Cycles through alternatives on repeat taps.", &font, 4);
-            spawn_action_button(row, ModesButton,  labels.5, None,         "Switch modes: Classic, Daily, Zen, Challenge, Time Attack.", &font, 5);
-            spawn_action_button(row, NewGameButton,labels.6, Some("N"),    "Start a fresh deal. Confirms first if a game is in progress.", &font, 6);
+            // Undo and Pause are the primary gameplay actions — full brightness.
+            // Menu, Help, Hint, Modes, New are navigation/utility — dimmed.
+            spawn_action_button(row, MenuButton,   labels.0, None,         "Open Stats, Achievements, Profile, Settings, or Leaderboard.", &font, 0, TEXT_SECONDARY);
+            spawn_action_button(row, UndoButton,   labels.1, Some("U"),    "Take back your last move. Costs points and blocks No Undo.", &font, 1, TEXT_PRIMARY);
+            spawn_action_button(row, PauseButton,  labels.2, Some("Esc"),  "Pause the game and freeze the timer.", &font, 2, TEXT_PRIMARY);
+            spawn_action_button(row, HelpButton,   labels.3, Some("F1"),   "Show controls, rules, and keyboard shortcuts.", &font, 3, TEXT_SECONDARY);
+            spawn_action_button(row, HintButton,   labels.4, Some("H"),    "Highlight a suggested move. Cycles through alternatives on repeat taps.", &font, 4, TEXT_SECONDARY);
+            spawn_action_button(row, ModesButton,  labels.5, None,         "Switch modes: Classic, Daily, Zen, Challenge, Time Attack.", &font, 5, TEXT_SECONDARY);
+            spawn_action_button(row, NewGameButton,labels.6, Some("N"),    "Start a fresh deal. Confirms first if a game is in progress.", &font, 6, TEXT_SECONDARY);
         });
 }
 
@@ -729,6 +733,7 @@ fn spawn_action_button<M: Component>(
     tooltip: &'static str,
     font: &TextFont,
     order: i32,
+    text_color: Color,
 ) {
     // Hotkey hint chips ("U", "Esc", "F1", "N") are meaningless on a
     // touch device — the button itself is the affordance — and they
@@ -777,7 +782,7 @@ fn spawn_action_button<M: Component>(
         HighContrastBorder::with_default(BORDER_SUBTLE),
     ))
     .with_children(|b| {
-        b.spawn((Text::new(label), font.clone(), TextColor(TEXT_PRIMARY)));
+        b.spawn((Text::new(label), font.clone(), TextColor(text_color)));
         if let Some(key) = hotkey {
             // Hotkey hint rendered as a dim caption next to the label —
             // keeps the keyboard accelerator discoverable without
@@ -1102,7 +1107,17 @@ fn spawn_menu_popover(commands: &mut Commands, font_res: Option<&FontResource>) 
     // Each row carries a tooltip alongside its label so hover reveals
     // a one-line description of what each overlay shows — mirroring
     // the tooltips on the action-bar buttons that opened this popover.
-    let rows: [(MenuOption, &'static str, &'static str); 5] = [
+    let rows: [(MenuOption, &'static str, &'static str); 7] = [
+        (
+            MenuOption::Help,
+            "Help",
+            "Show controls, rules, and keyboard shortcuts.",
+        ),
+        (
+            MenuOption::Modes,
+            "Game Modes",
+            "Switch modes: Classic, Daily, Zen, Challenge, Time Attack.",
+        ),
         (
             MenuOption::Stats,
             "Stats",
@@ -1202,15 +1217,26 @@ fn handle_menu_option_click(
     mut profile: MessageWriter<ToggleProfileRequestEvent>,
     mut settings: MessageWriter<ToggleSettingsRequestEvent>,
     mut leaderboard: MessageWriter<ToggleLeaderboardRequestEvent>,
+    mut help: MessageWriter<HelpRequestEvent>,
+    progress: Option<Res<ProgressResource>>,
+    daily: Option<Res<DailyChallengeResource>>,
+    font_res: Option<Res<FontResource>>,
     mut commands: Commands,
 ) {
     let mut clicked_any = false;
+    let mut open_modes = false;
     for (interaction, option) in &interaction_query {
         if *interaction != Interaction::Pressed {
             continue;
         }
         clicked_any = true;
         match option {
+            MenuOption::Help => {
+                help.write(HelpRequestEvent);
+            }
+            MenuOption::Modes => {
+                open_modes = true;
+            }
             MenuOption::Stats => {
                 stats.write(ToggleStatsRequestEvent);
             }
@@ -1235,6 +1261,14 @@ fn handle_menu_option_click(
                 commands.entity(e).despawn();
             }
         }
+    if open_modes {
+        spawn_modes_popover(
+            &mut commands,
+            progress.as_deref(),
+            daily.as_deref(),
+            font_res.as_deref(),
+        );
+    }
 }
 
 /// Despawns the [`ModesPopover`] and its backdrop when Escape / Android back
@@ -2891,7 +2925,7 @@ mod tests {
             );
         }
 
-        // Same contract for MenuOption rows: five entries, each with a
+        // Same contract for MenuOption rows: seven entries, each with a
         // tooltip, exact strings matching the approved microcopy.
         let mut menu_q = app
             .world_mut()
@@ -2902,11 +2936,13 @@ mod tests {
             .collect();
         assert_eq!(
             menu_tooltips.len(),
-            5,
-            "expected a tooltip on each of the 5 menu rows, got {}",
+            7,
+            "expected a tooltip on each of the 7 menu rows, got {}",
             menu_tooltips.len()
         );
         for expected in [
+            "Show controls, rules, and keyboard shortcuts.",
+            "Switch modes: Classic, Daily, Zen, Challenge, Time Attack.",
             "Lifetime totals: wins, streaks, fastest time, best score.",
             "Browse unlocked achievements and the rewards still ahead.",
             "Your level, XP progress, and sync status.",

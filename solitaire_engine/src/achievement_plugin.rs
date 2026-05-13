@@ -533,9 +533,9 @@ fn spawn_achievements_screen(
                 }
 
                 let (name_color, desc_color, prefix) = if record.unlocked {
-                    (ACCENT_PRIMARY, TEXT_PRIMARY, "\u{2713} ")
+                    (ACCENT_PRIMARY, TEXT_PRIMARY, "+ ")
                 } else {
-                    (TEXT_DISABLED, TEXT_DISABLED, "\u{25CB} ")
+                    (TEXT_DISABLED, TEXT_DISABLED, "- ")
                 };
 
                 let tooltip_text = tooltip_for_row(record.unlocked, def);

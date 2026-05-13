@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
 use bevy::tasks::{futures_lite::future, AsyncComputeTaskPool, Task};
+use bevy::window::AppLifecycle;
 use chrono::Utc;
 use solitaire_core::game_state::{DrawMode, GameMode, GameState};
 use solitaire_core::pile::PileType;
@@ -200,6 +201,7 @@ impl Plugin for GamePlugin {
             .add_message::<crate::events::AchievementUnlockedEvent>()
             .add_message::<FoundationCompletedEvent>()
             .add_message::<InfoToastEvent>()
+            .add_message::<AppLifecycle>()
             .add_systems(
                 Update,
                 poll_pending_new_game_seed.before(GameMutation),
@@ -259,18 +261,35 @@ pub fn advance_elapsed(
 /// timer doesn't tick before the player commits to a deal; stops while
 /// the onboarding modal is visible so a new player's first-game time
 /// isn't inflated by reading the tutorial.
+///
+/// On Android the first frame after the app is resumed from background
+/// can carry a very large `delta_secs` equal to the entire suspension
+/// period. `skip_next_delta` is set to `true` on `WillSuspend` /
+/// `Suspended` so that frame's delta is dropped instead of applied.
+#[allow(clippy::too_many_arguments)]
 fn tick_elapsed_time(
     time: Res<Time>,
     mut game: ResMut<GameStateResource>,
     mut accumulator: Local<f32>,
+    mut skip_next_delta: Local<bool>,
     paused: Option<Res<crate::pause_plugin::PausedResource>>,
     home_screens: Query<(), With<crate::home_plugin::HomeScreen>>,
     onboarding_screens: Query<(), With<crate::onboarding_plugin::OnboardingScreen>>,
+    mut lifecycle: MessageReader<AppLifecycle>,
 ) {
+    for event in lifecycle.read() {
+        if matches!(event, AppLifecycle::WillSuspend | AppLifecycle::Suspended) {
+            *skip_next_delta = true;
+        }
+    }
     if paused.is_some_and(|p| p.0)
         || !home_screens.is_empty()
         || !onboarding_screens.is_empty()
     {
+        return;
+    }
+    if *skip_next_delta {
+        *skip_next_delta = false;
         return;
     }
     let is_won = game.0.is_won;

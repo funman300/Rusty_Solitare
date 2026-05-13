@@ -1484,7 +1484,7 @@ fn update_stock_empty_indicator(
 // ---------------------------------------------------------------------------
 // Stock-pile remaining-count badge
 //
-// Shows a small "·N" chip pinned to the top-right corner of the stock pile so
+// Shows a small "N" chip pinned to the top-right corner of the stock pile so
 // the player can see how many cards remain before the next recycle. The
 // existing `StockEmptyLabel` (`↺` overlay) covers the empty-stock case, so
 // the badge hides itself when the stock has zero cards — the two indicators
@@ -1562,7 +1562,7 @@ fn spawn_stock_count_badge(
         .with_children(|b| {
             b.spawn((
                 StockCountBadgeText,
-                Text2d::new(format!("·{count}")),
+                Text2d::new(format!("{count}")),
                 text_font,
                 TextColor(STOCK_BADGE_FG),
                 // Slightly above the chip background so the digits aren't
@@ -1624,7 +1624,7 @@ fn update_stock_count_badge(
         if let Ok(badge_children) = children.get(entity) {
             for child in badge_children.iter() {
                 if let Ok(mut text) = texts.get_mut(child) {
-                    let new = format!("·{count}");
+                    let new = format!("{count}");
                     if text.0 != new {
                         text.0 = new;
                     }
@@ -2811,7 +2811,7 @@ mod tests {
         // First update inside `app()` runs the spawn path; run one more to
         // confirm the in-place update path is also stable.
         app.update();
-        assert_eq!(stock_badge_text(&mut app), "·24");
+        assert_eq!(stock_badge_text(&mut app), "24");
         assert!(matches!(stock_badge_visibility(&mut app), Visibility::Inherited));
     }
 
@@ -2837,7 +2837,7 @@ mod tests {
         // initial 24) and assert the badge text follows.
         let mut app = app();
         // Sanity-check the starting count.
-        assert_eq!(stock_badge_text(&mut app), "·24");
+        assert_eq!(stock_badge_text(&mut app), "24");
         {
             let mut game = app.world_mut().resource_mut::<GameStateResource>();
             if let Some(stock) = game.0.piles.get_mut(&PileType::Stock) {
@@ -2845,7 +2845,7 @@ mod tests {
             }
         }
         app.update();
-        assert_eq!(stock_badge_text(&mut app), "·23");
+        assert_eq!(stock_badge_text(&mut app), "23");
         assert!(matches!(stock_badge_visibility(&mut app), Visibility::Inherited));
     }
 
