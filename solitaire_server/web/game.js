@@ -12,22 +12,20 @@
 
 import init, { SolitaireGame } from "/web/pkg/solitaire_wasm.js";
 
-// ── Layout constants (must match game.css --card-w / --card-h / --gap) ──────
-const CARD_W  = 80;
-const CARD_H  = 112;
-const GAP     = 12;
-const PAD     = 20;   // board padding
-const FAN     = 28;   // vertical offset per fanned tableau card
-const WASTE_FAN = 18; // horizontal offset for draw-3 waste fan
+// ── Layout constants (must match game.css --card-w / --card-h / --gap / --pad)
+const CARD_W    = 80;
+const CARD_H    = 112;
+const GAP       = 12;
+const PAD       = 20;   // board inner padding — cards start at (PAD, PAD)
+const FAN       = 28;   // vertical offset per fanned tableau card
+const WASTE_FAN = 18;   // horizontal offset for draw-3 waste fan
 
-// Top-row Y origin (relative to board interior = after padding).
-const TOP_Y    = 0;
-const BOTTOM_Y = CARD_H + 28;   // tableau row
+// Pile origins in board-element coordinates (include PAD so (0,0) = board edge).
+const TOP_Y    = PAD;
+const BOTTOM_Y = PAD + CARD_H + 28;
 
-const colX = (c) => c * (CARD_W + GAP);
+const colX = (c) => PAD + c * (CARD_W + GAP);
 
-// Absolute position of each pile's origin (top-left of its slot),
-// relative to the board's padded interior (0, 0).
 const PILE_ORIGIN = {
     stock:          { x: colX(0), y: TOP_Y },
     waste:          { x: colX(1), y: TOP_Y },
@@ -44,35 +42,43 @@ const PILE_ORIGIN = {
     "tableau-6":    { x: colX(6), y: BOTTOM_Y },
 };
 
+// Foundation suit hints shown when the slot is empty.
+const FOUND_SUIT_HINT = ["♠", "♥", "♦", "♣"];
+
 const SUIT_GLYPH  = { clubs: "♣", diamonds: "♦", hearts: "♥", spades: "♠" };
 const RANK_LABELS = ["","A","2","3","4","5","6","7","8","9","10","J","Q","K"];
 const RED_SUITS   = new Set(["diamonds", "hearts"]);
 
 // ── State ────────────────────────────────────────────────────────────────────
-let game   = null;
-let snap   = null;   // last rendered GameSnapshot
+let game      = null;
+let snap      = null;   // last rendered GameSnapshot
 let drawThree = false;
 
-// Persistent card → DOM element map (keyed by card.id).
+// Persistent card-id → DOM element map.
 const cardEls = new Map();
 
 // Drag state
 let drag = null;
 // drag = {
 //   fromPile: string,
-//   fromIndex: number,       // index of bottom card of the dragged run in its pile
-//   cardIds: number[],       // ids of cards being dragged (bottom → top)
-//   startX: number, startY: number,   // pointer start (board-relative)
-//   offsetX: number, offsetY: number, // cursor offset within the grabbed card
+//   fromIndex: number,       // index of bottom dragged card in its pile
+//   cardIds: number[],       // ids bottom→top
+//   startX: number, startY: number,   // board-relative pointer start
 // }
 
-// Auto-complete timer handle
+// Timer
+let timerInterval = null;
+let elapsedSecs   = 0;
+
+// Auto-complete
 let acTimer = null;
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const board      = document.getElementById("board");
 const hudScore   = document.getElementById("hud-score");
 const hudMoves   = document.getElementById("hud-moves");
+const hudTimer   = document.getElementById("hud-timer");
+const hudStock   = document.getElementById("hud-stock");
 const hudSeed    = document.getElementById("hud-seed");
 const btnUndo    = document.getElementById("btn-undo");
 const btnNew     = document.getElementById("btn-new");
@@ -80,16 +86,16 @@ const chkDraw3   = document.getElementById("chk-draw3");
 const winOverlay = document.getElementById("win-overlay");
 const winScore   = document.getElementById("win-score");
 const winMoves   = document.getElementById("win-moves");
+const winTime    = document.getElementById("win-time");
 const btnWinNew  = document.getElementById("btn-win-new");
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 async function bootstrap() {
     await init();
 
-    // Seed from URL param ?seed=N, otherwise random.
-    const params = new URLSearchParams(window.location.search);
+    const params  = new URLSearchParams(window.location.search);
     const urlSeed = params.has("seed") ? Number(params.get("seed")) : randomSeed();
-    drawThree = params.has("draw3");
+    drawThree     = params.has("draw3");
     chkDraw3.checked = drawThree;
 
     buildSlots();
@@ -98,107 +104,135 @@ async function bootstrap() {
 }
 
 function randomSeed() {
-    // Math.random gives a float in [0,1); multiply to get a large integer.
     return Math.floor(Math.random() * 9007199254740991);
 }
 
 function startGame(seed) {
-    if (acTimer) { clearInterval(acTimer); acTimer = null; }
+    if (acTimer)    { clearInterval(acTimer);    acTimer    = null; }
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+    elapsedSecs = 0;
+    updateTimerDisplay();
+
     game = new SolitaireGame(seed, drawThree);
     snap = game.state();
-    hudSeed.textContent = `seed ${Math.round(game.seed())}`;
+
+    const displaySeed = Math.round(game.seed());
+    hudSeed.textContent = `seed ${displaySeed}`;
     winOverlay.classList.add("hidden");
     cardEls.clear();
-    board.querySelectorAll(".card").forEach(el => el.remove());
+    board.querySelectorAll(".card, .recycle-label").forEach(el => el.remove());
+
+    // Persist seed in URL so the game can be shared / refreshed.
+    const url = new URL(window.location);
+    url.searchParams.set("seed", displaySeed);
+    if (drawThree) url.searchParams.set("draw3", "");
+    else           url.searchParams.delete("draw3");
+    history.replaceState(null, "", url);
+
     render(snap);
+    startTimer();
 }
 
-// ── Slot placeholders ────────────────────────────────────────────────────────
+// ── Timer ────────────────────────────────────────────────────────────────────
+function startTimer() {
+    timerInterval = setInterval(() => {
+        elapsedSecs++;
+        updateTimerDisplay();
+    }, 1000);
+}
+
+function stopTimer() {
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+}
+
+function updateTimerDisplay() {
+    const m = Math.floor(elapsedSecs / 60);
+    const s = elapsedSecs % 60;
+    if (hudTimer) hudTimer.textContent = `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+// ── Slot placeholders ─────────────────────────────────────────────────────────
 function buildSlots() {
     for (const [pile, origin] of Object.entries(PILE_ORIGIN)) {
         const el = document.createElement("div");
         el.className = "slot";
         el.dataset.pile = pile;
         el.style.transform = `translate(${origin.x}px, ${origin.y}px)`;
+
+        if (pile.startsWith("foundation-")) {
+            const slot = parseInt(pile.split("-")[1]);
+            const hint = document.createElement("div");
+            hint.className = "slot-hint";
+            hint.textContent = FOUND_SUIT_HINT[slot];
+            el.appendChild(hint);
+        }
         board.appendChild(el);
     }
 }
 
 // ── Card position math ────────────────────────────────────────────────────────
-function cardPos(pileName, indexInPile, pileLength, pileCards) {
+function cardPos(pileName, indexInPile, pileLength) {
     const origin = PILE_ORIGIN[pileName];
     let x = origin.x;
     let y = origin.y;
 
     if (pileName === "waste" && drawThree && pileLength >= 2) {
-        // Show top-3 of waste fanned horizontally.
         const fanStart = Math.max(0, pileLength - 3);
         const fanPos   = indexInPile - fanStart;
-        if (fanPos >= 0) {
-            x += fanPos * WASTE_FAN;
-        } else {
-            // Cards below the fan window are stacked at origin.
-        }
+        if (fanPos > 0) x += fanPos * WASTE_FAN;
     } else if (pileName.startsWith("tableau-")) {
         y += indexInPile * FAN;
     }
-    // Stock, foundations: stack (no offset).
     return { x, y };
 }
 
-// Z-index: higher index in pile = drawn on top.
-function cardZ(pileName, indexInPile, total) {
-    if (pileName === "stock")          return 10 + indexInPile;
-    if (pileName === "waste")          return 10 + indexInPile;
-    if (pileName.startsWith("found"))  return 10 + indexInPile;
+function cardZ(pileName, indexInPile) {
     return 10 + indexInPile;
 }
 
-// ── Renderer ─────────────────────────────────────────────────────────────────
+// ── Renderer ──────────────────────────────────────────────────────────────────
 function render(s) {
     snap = s;
 
-    // Update HUD
     hudScore.textContent = `Score: ${s.score}`;
     hudMoves.textContent = `Moves: ${s.move_count}`;
-    btnUndo.disabled = s.move_count === 0;
+    hudStock.textContent = `Stock: ${s.stock.length}`;
+    btnUndo.disabled     = s.undo_stack_len === 0;
 
-    // Collect all cards visible in this snapshot, keyed by id → {pile, idx}.
     const visible = new Map();
-    const addPile = (pileName, cards) => {
-        cards.forEach((c, i) => visible.set(c.id, { pile: pileName, idx: i, card: c, total: cards.length }));
-    };
-    addPile("stock", s.stock);
-    addPile("waste", s.waste);
+    const addPile = (name, cards) =>
+        cards.forEach((c, i) => visible.set(c.id, { pile: name, idx: i, card: c, total: cards.length }));
+
+    addPile("stock",  s.stock);
+    addPile("waste",  s.waste);
     s.foundations.forEach((f, i) => addPile(`foundation-${i}`, f));
     s.tableaus.forEach((t, i)    => addPile(`tableau-${i}`, t));
 
-    // Create or update card elements.
     for (const [id, info] of visible) {
         let el = cardEls.get(id);
         if (!el) {
-            el = createCardEl(info.card);
+            el = document.createElement("div");
+            el.dataset.cardId = id;
             cardEls.set(id, el);
             board.appendChild(el);
         }
-
-        updateCardEl(el, info.card, info.pile, info.idx, info.total, s);
+        updateCardEl(el, info.card, info.pile, info.idx, info.total);
     }
 
-    // Remove cards no longer in the snapshot (shouldn't happen in solitaire
-    // but guards against stale state after undo).
     for (const [id, el] of cardEls) {
-        if (!visible.has(id)) {
-            el.remove();
-            cardEls.delete(id);
-        }
+        if (!visible.has(id)) { el.remove(); cardEls.delete(id); }
     }
 
-    // Update slot drop-active highlights (cleared on every render).
-    board.querySelectorAll(".slot.drop-active").forEach(el => el.classList.remove("drop-active"));
-    board.querySelectorAll(".card.drop-target").forEach(el => el.classList.remove("drop-target"));
+    // Foundation suit hints: hide when pile has cards.
+    s.foundations.forEach((f, i) => {
+        const slotEl = board.querySelector(`.slot[data-pile="foundation-${i}"]`);
+        if (slotEl) {
+            const hint = slotEl.querySelector(".slot-hint");
+            if (hint) hint.style.visibility = f.length > 0 ? "hidden" : "";
+        }
+    });
 
-    // Show recycle indicator on empty stock.
+    // Recycle indicator on empty stock.
     let recycleEl = board.querySelector(".recycle-label");
     if (s.stock.length === 0 && s.waste.length > 0) {
         if (!recycleEl) {
@@ -208,52 +242,41 @@ function render(s) {
             board.appendChild(recycleEl);
         }
         const o = PILE_ORIGIN.stock;
-        recycleEl.style.left = `${o.x + CARD_W / 2}px`;
-        recycleEl.style.top  = `${o.y + CARD_H / 2}px`;
+        recycleEl.style.transform = `translate(${o.x + CARD_W / 2}px, ${o.y + CARD_H / 2}px)`;
     } else if (recycleEl) {
         recycleEl.remove();
     }
 
-    // Trigger auto-complete if applicable.
+    // Clear drag highlights left from pointer-move.
+    board.querySelectorAll(".slot.drop-active").forEach(e => e.classList.remove("drop-active"));
+    board.querySelectorAll(".card.drop-target").forEach(e => e.classList.remove("drop-target"));
+
     if (s.is_auto_completable && !s.is_won && !acTimer) {
-        acTimer = setInterval(doAutoCompleteStep, 400);
+        acTimer = setInterval(doAutoCompleteStep, 380);
     }
     if (s.is_won) {
+        stopTimer();
         if (acTimer) { clearInterval(acTimer); acTimer = null; }
         showWin(s);
     }
 }
 
-function createCardEl(card) {
-    const el = document.createElement("div");
-    el.dataset.cardId = card.id;
-    return el;
-}
-
-function updateCardEl(el, card, pileName, idx, total, s) {
-    const pos = cardPos(pileName, idx, total, null);
-    const z   = cardZ(pileName, idx, total);
-
+function updateCardEl(el, card, pileName, idx, total) {
+    const pos = cardPos(pileName, idx, total);
     el.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
-    el.style.zIndex    = z;
-
-    const isTop = idx === total - 1;
+    el.style.zIndex    = cardZ(pileName, idx);
 
     if (!card.face_up) {
         el.className = "card face-down";
-        if (pileName === "stock") el.classList.add("stock-card");
-        el.innerHTML = "";
+        el.innerHTML  = "";
     } else {
         const isRed = RED_SUITS.has(card.suit);
         el.className = `card ${isRed ? "red" : "black"}`;
-        if (pileName === "stock") el.classList.add("stock-card");
-
-        const rankLabel = RANK_LABELS[card.rank];
-        const suit      = SUIT_GLYPH[card.suit];
-        el.innerHTML = `
-            <div class="corner top">${rankLabel}<br>${suit}</div>
-            <div class="center">${suit}</div>
-            <div class="corner bottom">${rankLabel}<br>${suit}</div>`;
+        const r = RANK_LABELS[card.rank];
+        const s = SUIT_GLYPH[card.suit];
+        el.innerHTML = `<div class="corner top">${r}<br>${s}</div>
+                        <div class="center">${s}</div>
+                        <div class="corner bottom">${r}<br>${s}</div>`;
     }
 }
 
@@ -261,28 +284,39 @@ function updateCardEl(el, card, pileName, idx, total, s) {
 function showWin(s) {
     winScore.textContent = `Score: ${s.score}`;
     winMoves.textContent = `${s.move_count} moves`;
+    const m = Math.floor(elapsedSecs / 60);
+    const sec = elapsedSecs % 60;
+    if (winTime) winTime.textContent = `${m}:${sec.toString().padStart(2, "0")}`;
     winOverlay.classList.remove("hidden");
 }
 
 // ── Auto-complete ─────────────────────────────────────────────────────────────
 function doAutoCompleteStep() {
-    if (!game || !snap || !snap.is_auto_completable) {
-        clearInterval(acTimer);
-        acTimer = null;
-        return;
+    if (!game || !snap?.is_auto_completable) {
+        clearInterval(acTimer); acTimer = null; return;
     }
     const result = game.auto_complete_step();
-    if (result && result.ok) {
-        render(result.snapshot);
-    } else {
-        clearInterval(acTimer);
-        acTimer = null;
+    if (result?.ok) render(result.snapshot);
+    else { clearInterval(acTimer); acTimer = null; }
+}
+
+// ── Illegal move flash ────────────────────────────────────────────────────────
+function flashIllegal(cardIds) {
+    for (const id of cardIds) {
+        const el = cardEls.get(id);
+        if (!el) continue;
+        // Store current translate so the shake keyframe can reference it.
+        el.style.setProperty("--card-tx", el.style.transform || "translate(0,0)");
+        el.classList.add("illegal");
+        el.addEventListener("animationend", () => {
+            el.classList.remove("illegal");
+            el.style.removeProperty("--card-tx");
+        }, { once: true });
     }
 }
 
-// ── Input handling ────────────────────────────────────────────────────────────
+// ── Input ─────────────────────────────────────────────────────────────────────
 function attachHandlers() {
-    // Buttons
     btnUndo.addEventListener("click", () => {
         const r = game.undo();
         if (r.ok) render(r.snapshot);
@@ -294,39 +328,29 @@ function attachHandlers() {
         startGame(randomSeed());
     });
 
-    // Keyboard shortcuts
     document.addEventListener("keydown", (e) => {
-        if (e.key === "z" || e.key === "Z") {
-            const r = game.undo();
-            if (r.ok) render(r.snapshot);
-        }
-        if (e.key === "n" || e.key === "N") {
-            startGame(randomSeed());
-        }
+        if (e.target.tagName === "INPUT") return;
+        if (e.key === "z" || e.key === "Z") { const r = game.undo(); if (r.ok) render(r.snapshot); }
+        if (e.key === "n" || e.key === "N") startGame(randomSeed());
     });
 
-    // Board pointer events (handles both mouse and touch via PointerEvents API)
-    board.addEventListener("pointerdown", onPointerDown);
-    board.addEventListener("pointermove", onPointerMove);
-    board.addEventListener("pointerup",   onPointerUp);
+    board.addEventListener("pointerdown",   onPointerDown);
+    board.addEventListener("pointermove",   onPointerMove);
+    board.addEventListener("pointerup",     onPointerUp);
     board.addEventListener("pointercancel", onPointerCancel);
-    board.addEventListener("click", onBoardClick);
-    board.addEventListener("dblclick", onBoardDblClick);
+    board.addEventListener("click",         onBoardClick);
+    board.addEventListener("dblclick",      onBoardDblClick);
 }
 
 // ── Coordinate helpers ────────────────────────────────────────────────────────
+// Returns cursor position in board-element coordinates
+// (0,0 = board element top-left corner, which is the padding edge).
 function boardRelative(clientX, clientY) {
     const rect = board.getBoundingClientRect();
-    // Subtract board padding to get interior coordinates.
-    return {
-        x: clientX - rect.left - PAD,
-        y: clientY - rect.top  - PAD,
-    };
+    return { x: clientX - rect.left, y: clientY - rect.top };
 }
 
 function hitTestCard(bx, by) {
-    // Walk all visible piles, find the topmost card at (bx, by).
-    // Returns { pileName, cardIndex, cardId } or null.
     const pileOrder = [
         "waste",
         "foundation-0","foundation-1","foundation-2","foundation-3",
@@ -334,21 +358,19 @@ function hitTestCard(bx, by) {
         "stock",
     ];
 
-    let best = null;
-    let bestZ = -1;
+    let best = null, bestZ = -1;
 
     for (const pileName of pileOrder) {
         const cards = getPileCards(pileName);
         if (!cards) continue;
-
         for (let i = 0; i < cards.length; i++) {
-            const pos = cardPos(pileName, i, cards.length, cards);
+            const pos = cardPos(pileName, i, cards.length);
             if (bx >= pos.x && bx <= pos.x + CARD_W &&
                 by >= pos.y && by <= pos.y + CARD_H) {
-                const z = cardZ(pileName, i, cards.length);
+                const z = cardZ(pileName, i);
                 if (z > bestZ) {
                     bestZ = z;
-                    best  = { pileName, cardIndex: i, cardId: cards[i].id, card: cards[i] };
+                    best  = { pileName, cardIndex: i, card: cards[i] };
                 }
             }
         }
@@ -360,83 +382,53 @@ function getPileCards(pileName) {
     if (!snap) return null;
     if (pileName === "stock") return snap.stock;
     if (pileName === "waste") return snap.waste;
-    if (pileName.startsWith("foundation-")) {
-        const slot = parseInt(pileName.split("-")[1]);
-        return snap.foundations[slot];
-    }
-    if (pileName.startsWith("tableau-")) {
-        const col = parseInt(pileName.split("-")[1]);
-        return snap.tableaus[col];
-    }
+    if (pileName.startsWith("foundation-")) return snap.foundations[parseInt(pileName.split("-")[1])];
+    if (pileName.startsWith("tableau-"))    return snap.tableaus   [parseInt(pileName.split("-")[1])];
     return null;
 }
 
-function hitTestSlot(bx, by) {
-    // Returns the pile name whose slot rect contains (bx, by), favouring
-    // tableau column slots over top-row slots when both overlap.
-    for (const [pile, origin] of Object.entries(PILE_ORIGIN)) {
-        if (bx >= origin.x && bx <= origin.x + CARD_W &&
-            by >= origin.y && by <= origin.y + CARD_H) {
-            return pile;
-        }
-    }
-    return null;
-}
-
-// For a tableau pile, hit-test for drop: the drop zone extends to the last
-// card's bottom edge (or the slot if empty).
+// Drop-target: tableau has tall hit areas; foundations use their slot box.
 function findDropTarget(bx, by) {
-    // Check tableau columns first (they have tall hit areas).
     for (let c = 0; c < 7; c++) {
-        const pile = `tableau-${c}`;
-        const cards = snap.tableaus[c];
-        const origin = PILE_ORIGIN[pile];
-        // Top boundary: origin.y. Bottom boundary: last card bottom or empty slot.
+        const pile    = `tableau-${c}`;
+        const cards   = snap.tableaus[c];
+        const origin  = PILE_ORIGIN[pile];
         const bottomY = cards.length > 0
             ? origin.y + (cards.length - 1) * FAN + CARD_H
             : origin.y + CARD_H;
-        if (bx >= origin.x && bx <= origin.x + CARD_W &&
-            by >= origin.y && by <= bottomY) {
+        if (bx >= origin.x && bx <= origin.x + CARD_W && by >= origin.y && by <= bottomY)
             return pile;
-        }
     }
-    // Foundation slots (top row).
     for (let s = 0; s < 4; s++) {
-        const pile = `foundation-${s}`;
+        const pile   = `foundation-${s}`;
         const origin = PILE_ORIGIN[pile];
         if (bx >= origin.x && bx <= origin.x + CARD_W &&
-            by >= origin.y && by <= origin.y + CARD_H) {
+            by >= origin.y && by <= origin.y + CARD_H)
             return pile;
-        }
     }
     return null;
 }
 
-// ── Pointer event handlers ────────────────────────────────────────────────────
+// ── Pointer handlers ──────────────────────────────────────────────────────────
 function onPointerDown(e) {
     if (e.button !== 0 && e.pointerType === "mouse") return;
-    if (drag) return; // ignore second finger
+    if (drag) return;
 
     const { x: bx, y: by } = boardRelative(e.clientX, e.clientY);
     const hit = hitTestCard(bx, by);
-    if (!hit) return;
-    if (!hit.card.face_up) return; // can't drag face-down cards
+    if (!hit || !hit.card.face_up) return;
 
     const cards = getPileCards(hit.pileName);
     if (!cards) return;
 
-    // For tableau, allow dragging a run from any face-up card.
-    // For waste/foundation, only the top card.
     let fromIndex = hit.cardIndex;
     if (!hit.pileName.startsWith("tableau-")) {
-        fromIndex = cards.length - 1; // only top card
+        fromIndex = cards.length - 1;
         if (hit.cardIndex !== fromIndex) return;
     }
 
     const draggedCards = cards.slice(fromIndex);
-    if (draggedCards.some(c => !c.face_up)) return; // face-down in run — blocked
-
-    const cardOriginPos = cardPos(hit.pileName, fromIndex, cards.length, cards);
+    if (draggedCards.some(c => !c.face_up)) return;
 
     drag = {
         fromPile:  hit.pileName,
@@ -444,17 +436,11 @@ function onPointerDown(e) {
         cardIds:   draggedCards.map(c => c.id),
         startX: bx,
         startY: by,
-        offsetX: bx - cardOriginPos.x,
-        offsetY: by - cardOriginPos.y,
     };
 
-    // Lift the dragged cards visually.
     drag.cardIds.forEach((id, i) => {
         const el = cardEls.get(id);
-        if (el) {
-            el.classList.add("selected");
-            el.style.zIndex = 500 + i;
-        }
+        if (el) { el.classList.add("selected"); el.style.zIndex = 500 + i; }
     });
 
     board.setPointerCapture(e.pointerId);
@@ -471,21 +457,21 @@ function onPointerMove(e) {
     drag.cardIds.forEach((id, i) => {
         const el = cardEls.get(id);
         if (!el) return;
-        const basePos = cardPos(drag.fromPile, drag.fromIndex + i, (cards ? cards.length : 1), null);
-        el.style.transform = `translate(${basePos.x + dx}px, ${basePos.y + dy}px)`;
+        const base = cardPos(drag.fromPile, drag.fromIndex + i, cards ? cards.length : 1);
+        el.style.transform = `translate(${base.x + dx}px, ${base.y + dy}px)`;
     });
 
     // Highlight drop target.
-    board.querySelectorAll(".slot.drop-active").forEach(el => el.classList.remove("drop-active"));
-    board.querySelectorAll(".card.drop-target").forEach(el => el.classList.remove("drop-target"));
+    board.querySelectorAll(".slot.drop-active").forEach(e => e.classList.remove("drop-active"));
+    board.querySelectorAll(".card.drop-target").forEach(e => e.classList.remove("drop-target"));
     const targetPile = findDropTarget(bx, by);
     if (targetPile) {
         const slotEl = board.querySelector(`.slot[data-pile="${targetPile}"]`);
         if (slotEl) slotEl.classList.add("drop-active");
         const targetCards = getPileCards(targetPile);
-        if (targetCards && targetCards.length > 0) {
-            const topCard = cardEls.get(targetCards[targetCards.length - 1].id);
-            if (topCard) topCard.classList.add("drop-target");
+        if (targetCards?.length > 0) {
+            const topEl = cardEls.get(targetCards[targetCards.length - 1].id);
+            if (topEl) topEl.classList.add("drop-target");
         }
     }
 
@@ -494,58 +480,47 @@ function onPointerMove(e) {
 
 function onPointerUp(e) {
     if (!drag) return;
-    board.querySelectorAll(".slot.drop-active").forEach(el => el.classList.remove("drop-active"));
-    board.querySelectorAll(".card.drop-target").forEach(el => el.classList.remove("drop-target"));
+    board.querySelectorAll(".slot.drop-active").forEach(e => e.classList.remove("drop-active"));
+    board.querySelectorAll(".card.drop-target").forEach(e => e.classList.remove("drop-target"));
 
     const { x: bx, y: by } = boardRelative(e.clientX, e.clientY);
     const targetPile = findDropTarget(bx, by);
 
     let moved = false;
     if (targetPile && targetPile !== drag.fromPile) {
-        const count = drag.cardIds.length;
-        const r = game.move_cards(drag.fromPile, targetPile, count);
+        const r = game.move_cards(drag.fromPile, targetPile, drag.cardIds.length);
         if (r.ok) {
-            render(r.snapshot);
             moved = true;
+            drag.cardIds.forEach(id => cardEls.get(id)?.classList.remove("selected"));
+            render(r.snapshot);
+        } else {
+            flashIllegal(drag.cardIds);
         }
     }
 
     if (!moved) {
-        // Snap cards back to their original positions.
-        drag.cardIds.forEach(id => {
-            const el = cardEls.get(id);
-            if (el) el.classList.remove("selected");
-        });
-        render(snap); // re-render restores transforms
+        drag.cardIds.forEach(id => cardEls.get(id)?.classList.remove("selected"));
+        render(snap); // snap cards back to their pre-drag positions
     }
 
     drag = null;
 }
 
 function onPointerCancel() {
-    if (drag) {
-        drag.cardIds.forEach(id => {
-            const el = cardEls.get(id);
-            if (el) el.classList.remove("selected");
-        });
-        render(snap);
-        drag = null;
-    }
+    if (!drag) return;
+    drag.cardIds.forEach(id => cardEls.get(id)?.classList.remove("selected"));
+    render(snap);
+    drag = null;
 }
 
-// ── Click handlers ────────────────────────────────────────────────────────────
+// ── Click / dblclick ──────────────────────────────────────────────────────────
 function onBoardClick(e) {
-    if (drag) return; // swallowed by pointer-up
-
+    if (drag) return;
     const { x: bx, y: by } = boardRelative(e.clientX, e.clientY);
-
-    // Stock click → draw.
-    const stockOrigin = PILE_ORIGIN.stock;
-    if (bx >= stockOrigin.x && bx <= stockOrigin.x + CARD_W &&
-        by >= stockOrigin.y && by <= stockOrigin.y + CARD_H) {
+    const stock = PILE_ORIGIN.stock;
+    if (bx >= stock.x && bx <= stock.x + CARD_W && by >= stock.y && by <= stock.y + CARD_H) {
         const r = game.draw();
         if (r.ok) render(r.snapshot);
-        return;
     }
 }
 
@@ -554,11 +529,9 @@ function onBoardDblClick(e) {
     const hit = hitTestCard(bx, by);
     if (!hit || !hit.card.face_up) return;
 
-    // Only try to move the top card of its pile.
     const cards = getPileCards(hit.pileName);
     if (!cards || hit.cardIndex !== cards.length - 1) return;
 
-    // Try each foundation slot.
     for (let s = 0; s < 4; s++) {
         const r = game.move_cards(hit.pileName, `foundation-${s}`, 1);
         if (r.ok) { render(r.snapshot); return; }

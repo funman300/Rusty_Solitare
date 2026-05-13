@@ -234,6 +234,8 @@ pub struct GameSnapshot {
     pub is_won: bool,
     pub is_auto_completable: bool,
     pub undo_count: u32,
+    /// Number of snapshots currently on the undo stack; 0 means undo is unavailable.
+    pub undo_stack_len: usize,
     pub stock: Vec<CardSnapshot>,
     pub waste: Vec<CardSnapshot>,
     pub foundations: [Vec<CardSnapshot>; 4],
@@ -275,6 +277,7 @@ impl SolitaireGame {
             is_won: self.game.is_won,
             is_auto_completable: self.game.is_auto_completable,
             undo_count: self.game.undo_count,
+            undo_stack_len: self.game.undo_stack_len(),
             stock: cards(PileType::Stock),
             waste: cards(PileType::Waste),
             foundations: [

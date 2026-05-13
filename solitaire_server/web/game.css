@@ -83,6 +83,7 @@ main {
     justify-content: center;
     align-items: flex-start;
     padding: 20px;
+    overflow-x: auto;
 }
 
 #board {
@@ -237,3 +238,30 @@ main {
     padding: 12px 32px;
     font-size: 16px;
 }
+
+/* ── Illegal-move shake ──────────────────────────────────────────────────── */
+
+@keyframes illegal-shake {
+    0%   { transform: var(--card-tx) translateX(0); }
+    20%  { transform: var(--card-tx) translateX(-6px); }
+    40%  { transform: var(--card-tx) translateX(6px); }
+    60%  { transform: var(--card-tx) translateX(-4px); }
+    80%  { transform: var(--card-tx) translateX(4px); }
+    100% { transform: var(--card-tx) translateX(0); }
+}
+
+.card.illegal {
+    animation: illegal-shake 320ms ease;
+}
+
+/* ── Foundation slot suit hints ──────────────────────────────────────────── */
+
+.slot-hint {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 26px;
+    color: rgba(255,255,255,0.18);
+    pointer-events: none;
+}
+
