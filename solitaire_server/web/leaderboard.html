@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solitaire Quest — Leaderboard</title>
+    <style>
+        @font-face {
+            font-family: "FiraMono";
+            src: url("/assets/fonts/main.ttf") format("truetype");
+        }
+        :root {
+            --bg: #151515; --panel: #202020; --panel-hi: #2a2a2a;
+            --border: #353535; --text: #d0d0d0; --text-muted: #a0a0a0;
+            --accent: #a54242; --accent-hi: #c25e5e; --success: #acc267;
+            --warning: #ddb26f;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: "FiraMono", "Fira Mono", monospace;
+            background: var(--bg); color: var(--text);
+            min-height: 100vh; display: flex; flex-direction: column;
+        }
+        header {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
+            position: sticky; top: 0; background: var(--bg); z-index: 10;
+        }
+        .home-link {
+            color: var(--text-muted); text-decoration: none;
+            font-size: 18px; padding: 2px 4px; border-radius: 4px;
+            transition: color 120ms, background 120ms;
+        }
+        .home-link:hover { color: var(--text); background: var(--panel-hi); }
+        h1 { font-size: 16px; font-weight: 700; }
+        main { flex: 1; padding: 24px 20px; max-width: 720px; width: 100%; margin: 0 auto; }
+        #status { color: var(--text-muted); font-size: 13px; margin-bottom: 20px; }
+        #login-prompt {
+            background: var(--panel); border: 1px solid var(--border);
+            border-radius: 10px; padding: 24px; max-width: 360px;
+            display: flex; flex-direction: column; gap: 12px;
+        }
+        #login-prompt p { font-size: 13px; color: var(--text-muted); }
+        #login-prompt input {
+            background: var(--panel-hi); border: 1px solid var(--border);
+            border-radius: 6px; padding: 8px 12px; color: var(--text);
+            font-family: inherit; font-size: 14px; width: 100%;
+        }
+        #login-prompt input:focus { outline: none; border-color: var(--accent); }
+        #login-prompt button {
+            background: var(--accent); color: var(--text); border: none;
+            border-radius: 6px; padding: 9px 16px; font-family: inherit;
+            font-size: 14px; font-weight: 700; cursor: pointer;
+            transition: background 120ms;
+        }
+        #login-prompt button:hover { background: var(--accent-hi); }
+        #error-msg { color: var(--accent-hi); font-size: 12px; display: none; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        thead th {
+            text-align: left; padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-muted); font-weight: 600; font-size: 12px;
+            text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        tbody tr { border-bottom: 1px solid var(--border); }
+        tbody tr:last-child { border-bottom: none; }
+        tbody td { padding: 10px 12px; }
+        .rank { color: var(--text-muted); width: 40px; }
+        .rank-1 { color: var(--warning); font-weight: 700; }
+        .rank-2 { color: var(--text-muted); }
+        .rank-3 { color: var(--accent); }
+        .score { font-weight: 700; color: var(--success); }
+        .time { color: var(--text-muted); }
+    </style>
+</head>
+<body>
+    <header>
+        <a href="/" class="home-link">&#8592;</a>
+        <h1>Leaderboard</h1>
+    </header>
+    <main>
+        <div id="status">Loading…</div>
+        <div id="login-prompt" style="display:none">
+            <p>Sign in to view the leaderboard.</p>
+            <input type="text" id="inp-user" placeholder="Username" autocomplete="username">
+            <input type="password" id="inp-pass" placeholder="Password" autocomplete="current-password">
+            <div id="error-msg"></div>
+            <button id="btn-login">Sign In</button>
+        </div>
+        <table id="table" style="display:none">
+            <thead><tr>
+                <th class="rank">#</th>
+                <th>Player</th>
+                <th>Best Score</th>
+                <th>Best Time</th>
+            </tr></thead>
+            <tbody id="tbody"></tbody>
+        </table>
+    </main>
+    <script>
+        const TOKEN_KEY = 'sq_token';
+        function fmtTime(secs) {
+            if (!secs) return '—';
+            const m = Math.floor(secs / 60), s = secs % 60;
+            return `${m}:${String(s).padStart(2,'0')}`;
+        }
+        async function load(token) {
+            const res = await fetch('/api/leaderboard', {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.status === 401 || res.status === 403) { showLogin(); return; }
+            if (!res.ok) { document.getElementById('status').textContent = 'Failed to load leaderboard.'; return; }
+            const rows = await res.json();
+            document.getElementById('status').style.display = 'none';
+            const table = document.getElementById('table');
+            const tbody = document.getElementById('tbody');
+            if (!rows.length) {
+                document.getElementById('status').textContent = 'No entries yet.';
+                document.getElementById('status').style.display = 'block';
+                return;
+            }
+            tbody.innerHTML = rows.map((r, i) => `
+                <tr>
+                    <td class="rank rank-${i+1}">${i+1}</td>
+                    <td>${r.display_name ?? '—'}</td>
+                    <td class="score">${r.best_score?.toLocaleString() ?? '—'}</td>
+                    <td class="time">${fmtTime(r.best_time_secs)}</td>
+                </tr>`).join('');
+            table.style.display = 'table';
+        }
+        function showLogin() {
+            document.getElementById('status').style.display = 'none';
+            document.getElementById('login-prompt').style.display = 'flex';
+        }
+        document.getElementById('btn-login').addEventListener('click', async () => {
+            const user = document.getElementById('inp-user').value.trim();
+            const pass = document.getElementById('inp-pass').value;
+            const err = document.getElementById('error-msg');
+            err.style.display = 'none';
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: user, password: pass })
+            });
+            if (!res.ok) { err.textContent = 'Invalid username or password.'; err.style.display = 'block'; return; }
+            const { access_token } = await res.json();
+            localStorage.setItem(TOKEN_KEY, access_token);
+            document.getElementById('login-prompt').style.display = 'none';
+            document.getElementById('status').textContent = 'Loading…';
+            document.getElementById('status').style.display = 'block';
+            load(access_token);
+        });
+        const token = localStorage.getItem(TOKEN_KEY);
+        if (token) { load(token); } else { showLogin(); }
+    </script>
+</body>
+</html>

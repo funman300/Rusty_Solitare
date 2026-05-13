@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solitaire Quest — Recent Replays</title>
+    <style>
+        @font-face {
+            font-family: "FiraMono";
+            src: url("/assets/fonts/main.ttf") format("truetype");
+        }
+        :root {
+            --bg: #151515; --panel: #202020; --panel-hi: #2a2a2a;
+            --border: #353535; --text: #d0d0d0; --text-muted: #a0a0a0;
+            --accent: #a54242; --accent-hi: #c25e5e; --success: #acc267;
+            --warning: #ddb26f;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: "FiraMono", "Fira Mono", monospace;
+            background: var(--bg); color: var(--text);
+            min-height: 100vh; display: flex; flex-direction: column;
+        }
+        header {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
+            position: sticky; top: 0; background: var(--bg); z-index: 10;
+        }
+        .home-link {
+            color: var(--text-muted); text-decoration: none;
+            font-size: 18px; padding: 2px 4px; border-radius: 4px;
+            transition: color 120ms, background 120ms;
+        }
+        .home-link:hover { color: var(--text); background: var(--panel-hi); }
+        h1 { font-size: 16px; font-weight: 700; }
+        main { flex: 1; padding: 24px 20px; max-width: 860px; width: 100%; margin: 0 auto; }
+        #status { color: var(--text-muted); font-size: 13px; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        thead th {
+            text-align: left; padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-muted); font-weight: 600; font-size: 12px;
+            text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        tbody tr {
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background 100ms;
+        }
+        tbody tr:last-child { border-bottom: none; }
+        tbody tr:hover { background: var(--panel); }
+        tbody td { padding: 10px 12px; }
+        .player { font-weight: 600; }
+        .score { font-weight: 700; color: var(--success); }
+        .time { color: var(--text-muted); }
+        .meta { color: var(--text-muted); font-size: 12px; }
+        .draw-badge {
+            display: inline-block; padding: 1px 6px;
+            border-radius: 4px; font-size: 11px; font-weight: 700;
+            background: var(--panel-hi); color: var(--text-muted);
+        }
+        .watch-link {
+            color: var(--accent); text-decoration: none; font-size: 13px;
+        }
+        .watch-link:hover { color: var(--accent-hi); }
+    </style>
+</head>
+<body>
+    <header>
+        <a href="/" class="home-link">&#8592;</a>
+        <h1>Recent Replays</h1>
+    </header>
+    <main>
+        <div id="status">Loading…</div>
+        <table id="table" style="display:none">
+            <thead><tr>
+                <th>Player</th>
+                <th>Score</th>
+                <th>Time</th>
+                <th>Seed</th>
+                <th>Mode</th>
+                <th></th>
+            </tr></thead>
+            <tbody id="tbody"></tbody>
+        </table>
+    </main>
+    <script>
+        function fmtTime(secs) {
+            if (!secs) return '—';
+            const m = Math.floor(secs / 60), s = secs % 60;
+            return `${m}:${String(s).padStart(2,'0')}`;
+        }
+        function fmtDate(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        }
+        async function load() {
+            const res = await fetch('/api/replays/recent');
+            if (!res.ok) {
+                document.getElementById('status').textContent = 'Failed to load replays.';
+                return;
+            }
+            const rows = await res.json();
+            const status = document.getElementById('status');
+            if (!rows.length) {
+                status.textContent = 'No replays yet — finish a game to record one.';
+                return;
+            }
+            status.style.display = 'none';
+            const tbody = document.getElementById('tbody');
+            tbody.innerHTML = rows.map(r => `
+                <tr onclick="location.href='/replays/${r.id}'">
+                    <td class="player">${r.username ?? '—'}</td>
+                    <td class="score">${r.final_score?.toLocaleString() ?? '—'}</td>
+                    <td class="time">${fmtTime(r.time_seconds)}</td>
+                    <td class="meta">${r.seed ?? '—'}</td>
+                    <td><span class="draw-badge">Draw ${r.draw_mode ?? '1'}</span></td>
+                    <td><a class="watch-link" href="/replays/${r.id}">Watch &#9654;</a></td>
+                </tr>`).join('');
+            document.getElementById('table').style.display = 'table';
+        }
+        load();
+    </script>
+</body>
+</html>
