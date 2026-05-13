@@ -38,6 +38,7 @@ RUN cargo fetch --locked
 COPY solitaire_core/src ./solitaire_core/src
 COPY solitaire_sync/src  ./solitaire_sync/src
 COPY solitaire_server/src ./solitaire_server/src
+COPY solitaire_server/web ./solitaire_server/web
 COPY solitaire_server/migrations ./solitaire_server/migrations
 # sqlx offline query cache — required when SQLX_OFFLINE=true so the
 # compile-time macros don't need a live database.
