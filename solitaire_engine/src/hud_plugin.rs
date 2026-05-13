@@ -626,16 +626,11 @@ fn spawn_action_buttons(
     mut commands: Commands,
 ) {
     let top_inset = insets.as_deref().copied().unwrap_or_default().top;
-    #[cfg(not(target_os = "android"))]
     let font = TextFont {
         font: font_res.as_ref().map(|f| f.0.clone()).unwrap_or_default(),
         font_size: TYPE_BODY,
         ..default()
     };
-    // Android labels use only FiraMono-safe glyphs (≡ ← ‖ → ▾), so the same
-    // embedded font works — no system font fallback required.
-    #[cfg(target_os = "android")]
-    let font = TextFont { font_size: TYPE_BODY, ..default() };
 
     // On Android, 7 text-labelled buttons at 48 dp each wrap to two rows on
     // a 411 dp phone. Use compact Unicode symbols and tighter gaps so all 7
@@ -650,12 +645,13 @@ fn spawn_action_buttons(
 
     #[cfg(target_os = "android")]
     let labels = (
-        /* menu */  "\u{2261}",  // ≡  identical-to (hamburger look-alike, in FiraMono)
-        /* undo */  "\u{2190}",  // ←  leftwards arrow (in FiraMono)
-        /* pause */ "\u{2016}",  // ‖  double vertical line (in FiraMono general-punct)
+        /* menu */  "\u{2261}",  // ≡  identical-to  (Arrows/Math-Op, confirmed FiraMono)
+        /* undo */  "\u{2190}",  // ←  leftwards arrow (Arrows block, confirmed FiraMono)
+        /* pause */ "||",        // || ASCII double-pipe — ‖ (U+2016) absent from FiraMono
         /* help */  "?",
-        /* hint */  "\u{2192}",  // →  rightwards arrow (in FiraMono)
-        /* modes */ "\u{25BE}",  // ▾  small down-pointing triangle (in FiraMono)
+        /* hint */  "\u{2192}",  // →  rightwards arrow (Arrows block, confirmed FiraMono)
+        /* modes */ "\u{2193}",  // ↓  downwards arrow (Arrows block, confirmed FiraMono)
+                                 //    replaces ▾ (U+25BE) which is absent from FiraMono
         /* new */   "+",
     );
     #[cfg(not(target_os = "android"))]

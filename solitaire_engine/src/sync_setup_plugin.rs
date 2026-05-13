@@ -673,7 +673,8 @@ fn spawn_sync_setup_modal(commands: &mut Commands, font_res: Option<&FontResourc
                 ));
             });
 
-            // Tab hint.
+            // Tab hint — desktop only; no Tab key on Android.
+            #[cfg(not(target_os = "android"))]
             body.spawn((
                 Text::new("Tab  =  next field"),
                 make_font(font_res, TYPE_CAPTION),
