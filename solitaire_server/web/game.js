@@ -14,11 +14,15 @@ import init, { SolitaireGame } from "/web/pkg/solitaire_wasm.js";
 
 // ── Layout constants (must match game.css --card-w / --card-h / --gap / --pad)
 const CARD_W    = 80;
-const CARD_H    = 112;
+const CARD_H    = 120;   // 2:3 ratio matching 256×384 card PNGs
 const GAP       = 12;
 const PAD       = 20;   // board inner padding — cards start at (PAD, PAD)
 const FAN       = 28;   // vertical offset per fanned tableau card
 const WASTE_FAN = 18;   // horizontal offset for draw-3 waste fan
+
+// Natural board dimensions — used for scale-to-fit calculation.
+const BOARD_W = PAD * 2 + 7 * CARD_W + 6 * GAP;            // 672
+const BOARD_H = PAD * 2 + CARD_H + 28 + CARD_H + 12 * FAN; // 644
 
 // Pile origins in board-element coordinates (include PAD so (0,0) = board edge).
 const TOP_Y    = PAD;
@@ -45,7 +49,7 @@ const PILE_ORIGIN = {
 // Foundation suit hints shown when the slot is empty.
 const FOUND_SUIT_HINT = ["♠", "♥", "♦", "♣"];
 
-const SUIT_GLYPH  = { clubs: "♣", diamonds: "♦", hearts: "♥", spades: "♠" };
+const SUIT_CODE   = { clubs: "C", diamonds: "D", hearts: "H", spades: "S" };
 const RANK_LABELS = ["","A","2","3","4","5","6","7","8","9","10","J","Q","K"];
 const RED_SUITS   = new Set(["diamonds", "hearts"]);
 
@@ -73,8 +77,11 @@ let elapsedSecs   = 0;
 // Auto-complete
 let acTimer = null;
 
+// Current scale factor applied to #board.
+let boardScale = 1.0;
+
 // ── DOM refs ─────────────────────────────────────────────────────────────────
-const board      = document.getElementById("board");
+const board      = document.getElementById("card-area");
 const hudScore   = document.getElementById("hud-score");
 const hudMoves   = document.getElementById("hud-moves");
 const hudTimer   = document.getElementById("hud-timer");
@@ -89,6 +96,21 @@ const winMoves   = document.getElementById("win-moves");
 const winTime    = document.getElementById("win-time");
 const btnWinNew  = document.getElementById("btn-win-new");
 
+// ── Scale to fit ─────────────────────────────────────────────────────────────
+// Scales #card-area to fill #board without overflowing either dimension.
+// boardRelative() divides by boardScale to keep hit-testing correct.
+function scaleBoard() {
+    // Measure the actual rendered #board element — more reliable than
+    // computing window.innerHeight minus estimated header height, which
+    // breaks under different browser chrome / OS scaling factors.
+    const outerBoard = document.getElementById("board");
+    const bw = outerBoard.clientWidth;
+    const bh = outerBoard.clientHeight;
+    boardScale = Math.min(bw / BOARD_W, bh / BOARD_H, 2.0);
+    board.style.transform       = `scale(${boardScale})`;
+    board.style.transformOrigin = "center center";
+}
+
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 async function bootstrap() {
     await init();
@@ -99,6 +121,8 @@ async function bootstrap() {
     chkDraw3.checked = drawThree;
 
     buildSlots();
+    scaleBoard();
+    window.addEventListener("resize", scaleBoard);
     startGame(urlSeed);
     attachHandlers();
 }
@@ -242,7 +266,7 @@ function render(s) {
             board.appendChild(recycleEl);
         }
         const o = PILE_ORIGIN.stock;
-        recycleEl.style.transform = `translate(${o.x + CARD_W / 2}px, ${o.y + CARD_H / 2}px)`;
+        recycleEl.style.transform = `translate(${o.x}px, ${o.y}px)`;
     } else if (recycleEl) {
         recycleEl.remove();
     }
@@ -268,15 +292,13 @@ function updateCardEl(el, card, pileName, idx, total) {
 
     if (!card.face_up) {
         el.className = "card face-down";
-        el.innerHTML  = "";
+        el.style.backgroundImage = "url('/assets/cards/backs/back_0.png')";
+        el.innerHTML = "";
     } else {
         const isRed = RED_SUITS.has(card.suit);
         el.className = `card ${isRed ? "red" : "black"}`;
-        const r = RANK_LABELS[card.rank];
-        const s = SUIT_GLYPH[card.suit];
-        el.innerHTML = `<div class="corner top">${r}<br>${s}</div>
-                        <div class="center">${s}</div>
-                        <div class="corner bottom">${r}<br>${s}</div>`;
+        el.style.backgroundImage = `url('/assets/cards/faces/${RANK_LABELS[card.rank]}${SUIT_CODE[card.suit]}.png')`;
+        el.innerHTML = "";
     }
 }
 
@@ -345,9 +367,14 @@ function attachHandlers() {
 // ── Coordinate helpers ────────────────────────────────────────────────────────
 // Returns cursor position in board-element coordinates
 // (0,0 = board element top-left corner, which is the padding edge).
+// Divides by boardScale because getBoundingClientRect() returns the SCALED
+// visual rect; we need coordinates in the natural (pre-scale) system.
 function boardRelative(clientX, clientY) {
     const rect = board.getBoundingClientRect();
-    return { x: clientX - rect.left, y: clientY - rect.top };
+    return {
+        x: (clientX - rect.left) / boardScale,
+        y: (clientY - rect.top)  / boardScale,
+    };
 }
 
 function hitTestCard(bx, by) {
@@ -487,6 +514,8 @@ function onPointerUp(e) {
     const targetPile = findDropTarget(bx, by);
 
     let moved = false;
+    let illegalAttempt = false;
+
     if (targetPile && targetPile !== drag.fromPile) {
         const r = game.move_cards(drag.fromPile, targetPile, drag.cardIds.length);
         if (r.ok) {
@@ -494,13 +523,14 @@ function onPointerUp(e) {
             drag.cardIds.forEach(id => cardEls.get(id)?.classList.remove("selected"));
             render(r.snapshot);
         } else {
-            flashIllegal(drag.cardIds);
+            illegalAttempt = true;
         }
     }
 
     if (!moved) {
         drag.cardIds.forEach(id => cardEls.get(id)?.classList.remove("selected"));
-        render(snap); // snap cards back to their pre-drag positions
+        render(snap); // snap cards back first — then animate so shake plays on settled positions
+        if (illegalAttempt) flashIllegal(drag.cardIds);
     }
 
     drag = null;
