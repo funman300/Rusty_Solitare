@@ -32,9 +32,10 @@
 //! ```
 
 use solitaire_server::{build_router, AppState};
-use sqlx::SqlitePool;
+use sqlx::{sqlite::SqliteConnectOptions, SqlitePool};
 use std::{
     io::{self, BufRead},
+    str::FromStr,
     net::SocketAddr,
 };
 
@@ -64,9 +65,13 @@ async fn main() {
 async fn run_reset_password(username: &str) {
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
-    let pool = SqlitePool::connect(&db_url)
-        .await
-        .expect("failed to connect to database");
+    let pool = SqlitePool::connect_with(
+        SqliteConnectOptions::from_str(&db_url)
+            .expect("invalid DATABASE_URL")
+            .create_if_missing(true),
+    )
+    .await
+    .expect("failed to connect to database");
 
     sqlx::migrate!("./migrations")
         .run(&pool)
@@ -105,9 +110,13 @@ async fn run_server() {
         .parse()
         .expect("SERVER_PORT must be a valid port number");
 
-    let pool = SqlitePool::connect(&db_url)
-        .await
-        .expect("failed to connect to database");
+    let pool = SqlitePool::connect_with(
+        SqliteConnectOptions::from_str(&db_url)
+            .expect("invalid DATABASE_URL")
+            .create_if_missing(true),
+    )
+    .await
+    .expect("failed to connect to database");
 
     sqlx::migrate!("./migrations")
         .run(&pool)
