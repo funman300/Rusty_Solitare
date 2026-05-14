@@ -35,7 +35,7 @@ jobs:
         id: sdk-cache
         with:
           path: ${{ env.ANDROID_SDK_ROOT }}
-          key: android-sdk-ndk${{ env.NDK_VERSION }}-bt${{ env.BUILD_TOOLS_VERSION }}
+          key: v2-android-sdk-ndk${{ env.NDK_VERSION }}-bt${{ env.BUILD_TOOLS_VERSION }}
 
       - name: Install system dependencies
         run: |

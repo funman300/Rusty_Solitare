@@ -32,7 +32,7 @@ jobs:
         id: sdk-cache
         with:
           path: ${{ env.ANDROID_SDK_ROOT }}
-          key: android-sdk-ndk${{ env.NDK_VERSION }}-bt${{ env.BUILD_TOOLS_VERSION }}
+          key: v2-android-sdk-ndk${{ env.NDK_VERSION }}-bt${{ env.BUILD_TOOLS_VERSION }}
 
       # Java and jq are always needed (apksigner requires Java even on cache hits).
       - name: Install system dependencies
