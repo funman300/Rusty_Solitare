@@ -82,12 +82,12 @@ jobs:
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-registry-
 
-      - name: Cache cargo-apk binary
+      - name: Cache cargo-apk2 binary
         uses: actions/cache@v4
         id: apk-tool-cache
         with:
-          path: ~/.cargo/bin/cargo-apk
-          key: cargo-apk-${{ runner.os }}-stable
+          path: ~/.cargo/bin/cargo-apk2
+          key: apk2-${{ runner.os }}-stable
 
       - name: Cache build artifacts
         uses: actions/cache@v4
@@ -97,15 +97,15 @@ jobs:
           restore-keys: android-release-target-${{ hashFiles('**/Cargo.lock') }}-
 
       # ── Build ──────────────────────────────────────────────────────────
-      - name: Install cargo-apk
+      - name: Install cargo-apk2
         if: steps.apk-tool-cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-apk --locked
+        run: cargo install cargo-apk2 --locked
 
       - name: Build release APK
         run: |
           export ANDROID_HOME=${{ env.ANDROID_SDK }}
           export ANDROID_NDK_HOME=${{ env.ANDROID_SDK }}/ndk/${{ env.NDK_VERSION }}
-          cargo apk build --release --package solitaire_app --lib
+          cargo apk2 build --release --package solitaire_app --lib
 
       # ── Sign ───────────────────────────────────────────────────────────
       - name: Decode keystore
