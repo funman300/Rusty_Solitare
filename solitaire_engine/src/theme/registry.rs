@@ -25,7 +25,7 @@ use bevy::prelude::{App, Plugin, Resource, Startup};
 use serde::Deserialize;
 
 use super::ThemeMeta;
-use crate::assets::{user_theme_dir, DEFAULT_THEME_MANIFEST_URL};
+use crate::assets::{user_theme_dir, DARK_THEME_MANIFEST_URL};
 
 /// One entry in the [`ThemeRegistry`] — the data the picker UI needs
 /// to render a row and load the theme on selection.
@@ -100,24 +100,23 @@ fn build_registry_on_startup(mut registry: bevy::ecs::system::ResMut<ThemeRegist
 /// [`user_theme_dir`].
 pub fn build_registry(user_dir: &Path) -> ThemeRegistry {
     let mut entries = Vec::new();
-    entries.push(default_entry());
     entries.push(classic_entry());
+    entries.push(dark_entry());
     entries.extend(discover_user_themes(user_dir));
     ThemeRegistry { entries }
 }
 
-/// The bundled default theme entry — inserted unconditionally so the
-/// picker always has at least one option.
-fn default_entry() -> ThemeEntry {
+/// The always-present embedded Dark theme entry.
+fn dark_entry() -> ThemeEntry {
     ThemeEntry {
-        id: "default".to_string(),
-        display_name: "Default".to_string(),
-        manifest_url: DEFAULT_THEME_MANIFEST_URL.to_string(),
+        id: "dark".to_string(),
+        display_name: "Dark".to_string(),
+        manifest_url: DARK_THEME_MANIFEST_URL.to_string(),
         meta: ThemeMeta {
-            id: "default".to_string(),
-            name: "Default".to_string(),
+            id: "dark".to_string(),
+            name: "Dark".to_string(),
             author: "Ferrous Solitaire".to_string(),
-            version: "1.0".to_string(),
+            version: "1.0.0".to_string(),
             card_aspect: (2, 3),
         },
     }
@@ -265,8 +264,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let registry = build_registry(tmp.path());
         assert_eq!(registry.len(), BUNDLED_COUNT);
-        assert_eq!(registry.entries[0].id, "default");
-        assert_eq!(registry.entries[1].id, "classic");
+        assert_eq!(registry.entries[0].id, "classic");
+        assert_eq!(registry.entries[1].id, "dark");
     }
 
     #[test]
@@ -275,7 +274,8 @@ mod tests {
             "/definitely/not/a/real/path/should/not/panic",
         ));
         assert_eq!(registry.len(), BUNDLED_COUNT);
-        assert_eq!(registry.entries[0].id, "default");
+        assert!(registry.find("classic").is_some());
+        assert!(registry.find("dark").is_some());
     }
 
     #[test]
@@ -333,7 +333,7 @@ mod tests {
 
         let registry = build_registry(tmp.path());
         assert_eq!(registry.len(), BUNDLED_COUNT, "escape attempt must not register");
-        assert_eq!(registry.entries[0].id, "default");
+        assert!(registry.find("classic").is_some());
     }
 
     #[test]
@@ -373,15 +373,13 @@ mod tests {
         refresh_registry(&mut registry, tmp.path());
 
         assert_eq!(registry.len(), BUNDLED_COUNT);
-        assert_eq!(registry.entries[0].id, "default");
+        assert!(registry.find("classic").is_some());
         assert!(registry.find("stale").is_none());
     }
 
     #[test]
-    fn default_entry_url_matches_embedded_constant() {
-        // Ensures the picker always gets a URL it can hand to the
-        // asset server for the bundled theme.
-        let entry = default_entry();
-        assert_eq!(entry.manifest_url, DEFAULT_THEME_MANIFEST_URL);
+    fn dark_entry_url_matches_embedded_constant() {
+        let entry = dark_entry();
+        assert_eq!(entry.manifest_url, DARK_THEME_MANIFEST_URL);
     }
 }

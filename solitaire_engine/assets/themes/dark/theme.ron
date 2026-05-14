@@ -13,9 +13,9 @@
 //   ranks: ace, 2, 3, 4, 5, 6, 7, 8, 9, 10, jack, queen, king
 (
     meta: (
-        id: "default",
-        name: "Default",
-        author: "Solitaire Quest",
+        id: "dark",
+        name: "Dark",
+        author: "Ferrous Solitaire",
         version: "0.1.0",
         card_aspect: (2, 3),
     ),

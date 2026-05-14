@@ -15,7 +15,7 @@ use bevy::prelude::*;
 use solitaire_core::card::{Rank, Suit};
 
 use crate::assets::{
-    default_theme_svg_bytes, rasterize_svg, user_theme_dir, DEFAULT_THEME_MANIFEST_URL,
+    bundled_theme_url, dark_theme_svg_bytes, rasterize_svg, user_theme_dir,
 };
 use crate::card_plugin::CardImageSet;
 use crate::events::StateChangedEvent;
@@ -126,12 +126,13 @@ fn load_initial_theme(
     settings: Option<Res<crate::settings_plugin::SettingsResource>>,
     mut commands: Commands,
 ) {
-    let url = match settings.as_deref() {
-        Some(s) if s.0.selected_theme_id != "default" => {
-            format!("themes://{}/theme.ron", s.0.selected_theme_id)
-        }
-        _ => DEFAULT_THEME_MANIFEST_URL.to_string(),
-    };
+    let id = settings
+        .as_deref()
+        .map(|s| s.0.selected_theme_id.as_str())
+        .unwrap_or("dark");
+    let url = bundled_theme_url(id)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("themes://{id}/theme.ron"));
     let handle: Handle<CardTheme> = asset_server.load(url);
     commands.insert_resource(ActiveTheme(handle));
 }
@@ -161,11 +162,9 @@ fn react_to_settings_theme_change(
         return;
     }
 
-    let url = if new_id == "default" {
-        DEFAULT_THEME_MANIFEST_URL.to_string()
-    } else {
-        format!("themes://{new_id}/theme.ron")
-    };
+    let url = bundled_theme_url(new_id)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("themes://{new_id}/theme.ron"));
     let handle: Handle<CardTheme> = asset_server.load(url);
     commands.insert_resource(ActiveTheme(handle));
 }
@@ -305,16 +304,24 @@ const PREVIEW_BACK_FILENAME: &str = "back.svg";
 /// Resolves the SVG bytes for one preview file (`back.svg` or
 /// `spades_ace.svg`) belonging to the named theme.
 ///
-/// - For the bundled `default` theme, reads from the embedded
-///   `DEFAULT_THEME_SVGS` table via [`default_theme_svg_bytes`]. No
-///   filesystem I/O.
-/// - For any user theme, reads from `<user_theme_dir>/<id>/<filename>`.
-///   Returns `None` for any I/O failure (file missing, permission
-///   denied, etc.) — the caller treats `None` as "render placeholder".
+/// - For the embedded `dark` theme, reads from the in-binary table via
+///   [`dark_theme_svg_bytes`]. No filesystem I/O.
+/// - For bundled non-embedded themes (e.g. `classic`), reads from the
+///   `assets/themes/<id>/` directory.
+/// - For user themes, reads from `<user_theme_dir>/<id>/<filename>`.
+///   Returns `None` for any I/O failure.
 fn read_theme_preview_svg_bytes(theme_id: &str, filename: &str) -> Option<Vec<u8>> {
-    if theme_id == "default" {
-        return default_theme_svg_bytes(filename).map(|b| b.to_vec());
+    if theme_id == "dark" {
+        return dark_theme_svg_bytes(filename).map(|b| b.to_vec());
     }
+    // Bundled non-embedded themes live alongside the binary in assets/.
+    let bundled_path = std::path::Path::new("assets/themes")
+        .join(theme_id)
+        .join(filename);
+    if let Ok(bytes) = std::fs::read(&bundled_path) {
+        return Some(bytes);
+    }
+    // Fall back to user theme dir.
     let path = user_theme_dir().join(theme_id).join(filename);
     std::fs::read(&path).ok()
 }
@@ -503,22 +510,20 @@ mod tests {
         // set_theme that doesn't require an App. We assert the URL
         // shape so a future refactor doesn't accidentally change the
         // path layout.
-        let url = format!("themes://{}/theme.ron", "default");
-        assert_eq!(url, "themes://default/theme.ron");
-        let url2 = format!("themes://{}/theme.ron", "user_uploaded");
-        assert_eq!(url2, "themes://user_uploaded/theme.ron");
+        let url = format!("themes://{}/theme.ron", "user_uploaded");
+        assert_eq!(url, "themes://user_uploaded/theme.ron");
     }
 
-    /// Test 1: the bundled default theme always has embedded SVG bytes
-    /// available, so calling `generate_thumbnail_pair_for("default", …)`
+    /// Test 1: the bundled dark theme always has embedded SVG bytes
+    /// available, so calling `generate_thumbnail_pair_for("dark", …)`
     /// must produce two non-default `Handle<Image>` slots.
     #[test]
-    fn theme_thumbnails_generated_for_default_theme() {
+    fn theme_thumbnails_generated_for_dark_theme() {
         let mut images = Assets::<Image>::default();
-        let pair = generate_thumbnail_pair_for("default", &mut images);
+        let pair = generate_thumbnail_pair_for("dark", &mut images);
         assert!(
             pair.is_fully_populated(),
-            "default theme must yield both ace + back thumbnail handles"
+            "dark theme must yield both ace + back thumbnail handles"
         );
         // And the underlying images must actually exist in the assets
         // collection — the handles are real, not dangling.
@@ -558,18 +563,17 @@ mod tests {
         );
     }
 
-    /// `read_theme_preview_svg_bytes` for the default theme always
-    /// returns embedded bytes for the canonical preview pair —
-    /// covering the happy-path branch of the helper.
+    /// `read_theme_preview_svg_bytes` for the dark theme always returns
+    /// embedded bytes for the canonical preview pair.
     #[test]
-    fn read_default_theme_preview_returns_some_for_canonical_files() {
+    fn read_dark_theme_preview_returns_some_for_canonical_files() {
         assert!(
-            read_theme_preview_svg_bytes("default", PREVIEW_BACK_FILENAME).is_some(),
-            "default theme back.svg must be embedded"
+            read_theme_preview_svg_bytes("dark", PREVIEW_BACK_FILENAME).is_some(),
+            "dark theme back.svg must be embedded"
         );
         assert!(
-            read_theme_preview_svg_bytes("default", PREVIEW_FACE_FILENAME).is_some(),
-            "default theme spades_ace.svg must be embedded"
+            read_theme_preview_svg_bytes("dark", PREVIEW_FACE_FILENAME).is_some(),
+            "dark theme spades_ace.svg must be embedded"
         );
     }
 
@@ -586,12 +590,12 @@ mod tests {
         app.init_resource::<ThemeThumbnailCache>();
         app.insert_resource(ThemeRegistry {
             entries: vec![crate::theme::ThemeEntry {
-                id: "default".into(),
-                display_name: "Default".into(),
-                manifest_url: crate::assets::DEFAULT_THEME_MANIFEST_URL.into(),
+                id: "dark".into(),
+                display_name: "Dark".into(),
+                manifest_url: crate::assets::DARK_THEME_MANIFEST_URL.into(),
                 meta: ThemeMeta {
-                    id: "default".into(),
-                    name: "Default".into(),
+                    id: "dark".into(),
+                    name: "Dark".into(),
                     author: "x".into(),
                     version: "x".into(),
                     card_aspect: (2, 3),
@@ -605,18 +609,18 @@ mod tests {
         let first_ace = app
             .world()
             .resource::<ThemeThumbnailCache>()
-            .get("default")
+            .get("dark")
             .map(|p| p.ace.clone())
-            .expect("default theme thumbnail must exist after one tick");
+            .expect("dark theme thumbnail must exist after one tick");
 
         // Second tick must NOT replace the cached handle.
         app.update();
         let second_ace = app
             .world()
             .resource::<ThemeThumbnailCache>()
-            .get("default")
+            .get("dark")
             .map(|p| p.ace.clone())
-            .expect("default theme thumbnail must still exist");
+            .expect("dark theme thumbnail must still exist");
 
         assert_eq!(
             first_ace.id(),

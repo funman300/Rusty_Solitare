@@ -143,11 +143,10 @@ pub struct Settings {
     #[serde(default)]
     pub window_geometry: Option<WindowGeometry>,
     /// Identifier of the active card-art theme. Matches `meta.id` from
-    /// the theme's `theme.ron` manifest. `"default"` is the bundled
-    /// theme and is always present in the registry; user-supplied
-    /// themes register under their own ids when they're imported.
-    /// Older `settings.json` files default cleanly to `"default"` via
-    /// `#[serde(default = ...)]`.
+    /// the theme's `theme.ron` manifest. `"classic"` and `"dark"` are
+    /// always present; user-supplied themes register under their own ids.
+    /// Older `settings.json` files that stored `"default"` will fall
+    /// back to the dark embedded theme at runtime.
     #[serde(default = "default_theme_id")]
     pub selected_theme_id: String,
     /// Set to `true` once the achievement-onboarding info-toast has been
@@ -273,7 +272,7 @@ fn default_music_volume() -> f32 {
 }
 
 fn default_theme_id() -> String {
-    "default".to_string()
+    "classic".to_string()
 }
 
 /// Default tooltip-hover dwell delay in seconds. Mirrors

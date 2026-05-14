@@ -53,8 +53,8 @@ pub mod weekly_goals_plugin;
 pub mod win_summary_plugin;
 
 pub use assets::{
-    populate_embedded_default_theme, register_theme_asset_sources, AssetSourcesPlugin,
-    DEFAULT_THEME_MANIFEST_URL, USER_THEMES,
+    bundled_theme_url, populate_embedded_dark_theme, register_theme_asset_sources,
+    AssetSourcesPlugin, DARK_THEME_MANIFEST_URL, USER_THEMES,
 };
 pub use theme::{
     set_theme, ActiveTheme, CardTheme, CardThemeLoader, ThemeEntry, ThemePlugin, ThemeRegistry,
