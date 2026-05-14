@@ -119,8 +119,12 @@ jobs:
         run: ./scripts/build_android_apk.sh
 
       # ── Artifact ───────────────────────────────────────────────────────
+      # Pinned to v3 because Gitea Actions doesn't implement the github.com
+      # artifact service that upload-artifact@v4+ requires; v3 uses the
+      # older chunked HTTP API that Gitea's GHES-compatibility layer
+      # supports.
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: solitaire-quest-debug-${{ steps.meta.outputs.sha }}
           path: target/debug/apk/solitaire-quest.apk
