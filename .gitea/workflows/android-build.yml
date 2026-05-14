@@ -112,8 +112,12 @@ jobs:
 
       - name: Build debug APK
         run: |
+          echo "user: $(whoami)"
+          echo "ANDROID_HOME (env): $ANDROID_HOME"
+          ls -la ${{ env.ANDROID_SDK }}/platforms/
           export ANDROID_HOME=${{ env.ANDROID_SDK }}
           export ANDROID_NDK_HOME=${{ env.ANDROID_SDK }}/ndk/${{ env.NDK_VERSION }}
+          echo "ANDROID_HOME (exported): $ANDROID_HOME"
           cargo apk build --package solitaire_app --lib
 
       # ── Artifact ───────────────────────────────────────────────────────
