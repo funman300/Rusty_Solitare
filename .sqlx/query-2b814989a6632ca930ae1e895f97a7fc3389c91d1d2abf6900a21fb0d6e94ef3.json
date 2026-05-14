@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT l.display_name, l.best_score, l.best_time_secs, l.recorded_at\n           FROM leaderboard l\n           JOIN users u ON u.id = l.user_id\n           WHERE u.leaderboard_opt_in = 1\n           ORDER BY\n               CASE WHEN l.best_score IS NULL THEN 1 ELSE 0 END ASC,\n               l.best_score DESC,\n               CASE WHEN l.best_time_secs IS NULL THEN 1 ELSE 0 END ASC,\n               l.best_time_secs ASC",
+  "query": "SELECT l.display_name, l.best_score, l.best_time_secs, l.recorded_at\n           FROM leaderboard l\n           JOIN users u ON u.id = l.user_id\n           WHERE u.leaderboard_opt_in = 1\n           ORDER BY\n               CASE WHEN l.best_score IS NULL THEN 1 ELSE 0 END ASC,\n               l.best_score DESC,\n               CASE WHEN l.best_time_secs IS NULL THEN 1 ELSE 0 END ASC,\n               l.best_time_secs ASC\n           LIMIT 100",
   "describe": {
     "columns": [
       {
@@ -34,5 +34,5 @@
       false
     ]
   },
-  "hash": "57c93a6acd7eea44d00412e62f0d3fed7ffbe4cd759353d29f38a8eb37f69112"
+  "hash": "2b814989a6632ca930ae1e895f97a7fc3389c91d1d2abf6900a21fb0d6e94ef3"
 }

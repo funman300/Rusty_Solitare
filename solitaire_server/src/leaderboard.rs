@@ -54,7 +54,8 @@ pub async fn get_leaderboard(
                CASE WHEN l.best_score IS NULL THEN 1 ELSE 0 END ASC,
                l.best_score DESC,
                CASE WHEN l.best_time_secs IS NULL THEN 1 ELSE 0 END ASC,
-               l.best_time_secs ASC"#
+               l.best_time_secs ASC
+           LIMIT 100"#
     )
     .fetch_all(&state.pool)
     .await?;

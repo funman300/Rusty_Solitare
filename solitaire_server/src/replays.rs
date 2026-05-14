@@ -114,6 +114,32 @@ pub async fn upload(
     .execute(&state.pool)
     .await?;
 
+    // Update leaderboard best score/time for opted-in users when this replay
+    // beats their existing best. Only classic mode counts for the leaderboard.
+    if header.mode == "classic" {
+        sqlx::query!(
+            r#"UPDATE leaderboard
+               SET best_score      = ?,
+                   best_time_secs  = ?,
+                   recorded_at     = ?
+               WHERE user_id = ?
+                 AND (
+                     best_score IS NULL
+                     OR ? > best_score
+                     OR (? = best_score AND (best_time_secs IS NULL OR ? < best_time_secs))
+                 )"#,
+            header.final_score,
+            header.time_seconds,
+            header.recorded_at,
+            user.user_id,
+            header.final_score,
+            header.final_score,
+            header.time_seconds,
+        )
+        .execute(&state.pool)
+        .await?;
+    }
+
     Ok(Json(ReplayUploadResponse { id }))
 }
 

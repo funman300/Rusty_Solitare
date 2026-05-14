@@ -100,6 +100,9 @@
     </main>
     <script>
         const TOKEN_KEY = 'fs_token';
+        function esc(s) {
+            return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
         function fmtTime(secs) {
             if (!secs) return '—';
             const m = Math.floor(secs / 60), s = secs % 60;
@@ -123,7 +126,7 @@
             tbody.innerHTML = rows.map((r, i) => `
                 <tr>
                     <td class="rank rank-${i+1}">${i+1}</td>
-                    <td>${r.display_name ?? '—'}</td>
+                    <td>${esc(r.display_name) || '—'}</td>
                     <td class="score">${r.best_score?.toLocaleString() ?? '—'}</td>
                     <td class="time">${fmtTime(r.best_time_secs)}</td>
                 </tr>`).join('');

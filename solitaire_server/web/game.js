@@ -320,6 +320,30 @@ function showWin(s) {
     const sec = elapsedSecs % 60;
     if (winTime) winTime.textContent = `${m}:${sec.toString().padStart(2, "0")}`;
     winOverlay.classList.remove("hidden");
+    submitReplay(s);
+}
+
+async function submitReplay(s) {
+    const token = localStorage.getItem('fs_token');
+    if (!token) return;
+    const payload = {
+        schema_version: 1,
+        seed: Math.round(game.seed()),
+        draw_mode: drawThree ? "draw_three" : "draw_one",
+        mode: "classic",
+        time_seconds: elapsedSecs,
+        final_score: s.score,
+        move_count: s.move_count,
+        recorded_at: new Date().toISOString(),
+        moves: [],
+    };
+    try {
+        await fetch('/api/replays', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(payload),
+        });
+    } catch (_) { /* best-effort — never block the win screen */ }
 }
 
 // ── Auto-complete ─────────────────────────────────────────────────────────────

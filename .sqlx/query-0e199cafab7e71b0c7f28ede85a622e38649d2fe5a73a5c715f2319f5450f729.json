@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE leaderboard\n               SET best_score      = ?,\n                   best_time_secs  = ?,\n                   recorded_at     = ?\n               WHERE user_id = ?\n                 AND (\n                     best_score IS NULL\n                     OR ? > best_score\n                     OR (? = best_score AND (best_time_secs IS NULL OR ? < best_time_secs))\n                 )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "0e199cafab7e71b0c7f28ede85a622e38649d2fe5a73a5c715f2319f5450f729"
+}
