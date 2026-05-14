@@ -21,4 +21,4 @@ resources:
 images:
 - name: solitaire-server
   newName: git.aleshym.co/funman300/solitaire-server
-  newTag: 3cec200a
+  newTag: 3e006a1e
