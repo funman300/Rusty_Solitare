@@ -44,15 +44,15 @@ jobs:
       - name: Install Android SDK + NDK
         if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          sudo mkdir -p "$ANDROID_HOME/cmdline-tools"
           curl -sL \
             "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
             -o /tmp/cmdtools.zip
           unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
-          mv /tmp/cmdtools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --licenses \
+          sudo mv /tmp/cmdtools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+          yes | sudo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --licenses \
             > /dev/null 2>&1 || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" \
+          sudo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" \
             "build-tools;$BUILD_TOOLS_VERSION" \
             "platforms;android-34" \
             "ndk;$NDK_VERSION"
@@ -115,10 +115,10 @@ jobs:
           ALIGNED="/tmp/solitaire-quest-aligned.apk"
           SIGNED="ferrous-solitaire-${TAG}.apk"
 
-          "$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VERSION/zipalign" -v 4 \
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/zipalign" -v 4 \
             "$UNSIGNED" "$ALIGNED"
 
-          "$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VERSION/apksigner" sign \
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner" sign \
             --ks /tmp/solitaire-release.jks \
             --ks-pass "pass:${{ secrets.KEYSTORE_PASS }}" \
             --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
@@ -129,7 +129,7 @@ jobs:
       - name: Verify APK signature
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
-          "$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VERSION/apksigner" verify \
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner" verify \
             --verbose "ferrous-solitaire-${TAG}.apk"
 
       # ── Publish ────────────────────────────────────────────────────────
