@@ -116,7 +116,14 @@ jobs:
         run: cargo install cargo-apk --locked
 
       - name: Build debug APK
-        run: cargo apk build --package solitaire_app --lib
+        run: |
+          echo "=== env at build time ==="
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          printenv | grep -i android || true
+          ls "$ANDROID_HOME/platforms/" || echo "platforms dir missing at build time"
+          echo "========================="
+          cargo apk build --package solitaire_app --lib
 
       # ── Artifact ───────────────────────────────────────────────────────
       - name: Upload APK
