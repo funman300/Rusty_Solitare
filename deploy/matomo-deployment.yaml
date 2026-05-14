@@ -40,6 +40,13 @@ spec:
                 secretKeyRef:
                   name: matomo-secret
                   key: MYSQL_PASSWORD
+            # Traefik terminates SSL; tell Matomo to trust X-Forwarded-* headers
+            - name: MATOMO_GENERAL_ASSUME_SECURE_PROTOCOL
+              value: "1"
+            - name: MATOMO_GENERAL_PROXY_CLIENT_HEADERS
+              value: HTTP_X_FORWARDED_FOR
+            - name: MATOMO_GENERAL_PROXY_HOST_HEADERS
+              value: HTTP_X_FORWARDED_HOST
           ports:
             - containerPort: 80
           volumeMounts:
@@ -47,16 +54,18 @@ spec:
               mountPath: /var/www/html
           livenessProbe:
             httpGet:
-              path: /index.php
+              path: /matomo.php
               port: 80
             initialDelaySeconds: 60
             periodSeconds: 30
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
-              path: /index.php
+              path: /matomo.php
               port: 80
             initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
           resources:
             requests:
               cpu: 100m
