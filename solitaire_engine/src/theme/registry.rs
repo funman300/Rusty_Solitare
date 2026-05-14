@@ -100,8 +100,8 @@ fn build_registry_on_startup(mut registry: bevy::ecs::system::ResMut<ThemeRegist
 /// [`user_theme_dir`].
 pub fn build_registry(user_dir: &Path) -> ThemeRegistry {
     let mut entries = Vec::new();
-    entries.push(classic_entry());
     entries.push(dark_entry());
+    entries.push(classic_entry());
     entries.extend(discover_user_themes(user_dir));
     ThemeRegistry { entries }
 }
@@ -264,8 +264,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let registry = build_registry(tmp.path());
         assert_eq!(registry.len(), BUNDLED_COUNT);
-        assert_eq!(registry.entries[0].id, "classic");
-        assert_eq!(registry.entries[1].id, "dark");
+        assert_eq!(registry.entries[0].id, "dark");
+        assert_eq!(registry.entries[1].id, "classic");
     }
 
     #[test]
