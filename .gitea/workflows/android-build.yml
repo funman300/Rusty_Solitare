@@ -100,6 +100,16 @@ jobs:
           key: android-target-${{ hashFiles('**/Cargo.lock') }}-${{ github.sha }}
           restore-keys: android-target-${{ hashFiles('**/Cargo.lock') }}-
 
+      # ── Debug: verify SDK layout ───────────────────────────────────────
+      - name: Verify SDK layout
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+          ls "$ANDROID_HOME/" 2>/dev/null || echo "ANDROID_HOME dir missing"
+          ls "$ANDROID_HOME/platforms/" 2>/dev/null || echo "platforms/ missing"
+          ls "$ANDROID_HOME/ndk/" 2>/dev/null || echo "ndk/ missing"
+
       # ── Build ──────────────────────────────────────────────────────────
       - name: Install cargo-apk
         if: steps.apk-tool-cache.outputs.cache-hit != 'true'
