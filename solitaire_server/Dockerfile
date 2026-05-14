@@ -62,9 +62,9 @@ COPY --from=builder /build/target/release/solitaire_server ./server
 # Static web assets are served via ServeDir at runtime from these paths:
 #   /app/solitaire_server/web  →  /web route
 #   /app/assets                →  /assets route
+# Card themes (dark + classic) are embedded in the binary; no theme files needed here.
 COPY solitaire_server/web ./solitaire_server/web
 COPY assets ./assets
-COPY solitaire_engine/assets/themes/classic ./assets/themes/classic
 
 ENV SERVER_PORT=8080
 EXPOSE 8080

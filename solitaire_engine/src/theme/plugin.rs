@@ -15,7 +15,7 @@ use bevy::prelude::*;
 use solitaire_core::card::{Rank, Suit};
 
 use crate::assets::{
-    bundled_theme_url, dark_theme_svg_bytes, rasterize_svg, user_theme_dir,
+    bundled_theme_url, classic_theme_svg_bytes, dark_theme_svg_bytes, rasterize_svg, user_theme_dir,
 };
 use crate::card_plugin::CardImageSet;
 use crate::events::StateChangedEvent;
@@ -306,22 +306,18 @@ const PREVIEW_BACK_FILENAME: &str = "back.svg";
 ///
 /// - For the embedded `dark` theme, reads from the in-binary table via
 ///   [`dark_theme_svg_bytes`]. No filesystem I/O.
-/// - For bundled non-embedded themes (e.g. `classic`), reads from the
-///   `assets/themes/<id>/` directory.
+/// - For the embedded `classic` theme, reads from the in-binary table via
+///   [`classic_theme_svg_bytes`]. No filesystem I/O.
 /// - For user themes, reads from `<user_theme_dir>/<id>/<filename>`.
 ///   Returns `None` for any I/O failure.
 fn read_theme_preview_svg_bytes(theme_id: &str, filename: &str) -> Option<Vec<u8>> {
     if theme_id == "dark" {
         return dark_theme_svg_bytes(filename).map(|b| b.to_vec());
     }
-    // Bundled non-embedded themes live alongside the binary in assets/.
-    let bundled_path = std::path::Path::new("assets/themes")
-        .join(theme_id)
-        .join(filename);
-    if let Ok(bytes) = std::fs::read(&bundled_path) {
-        return Some(bytes);
+    if theme_id == "classic" {
+        return classic_theme_svg_bytes(filename).map(|b| b.to_vec());
     }
-    // Fall back to user theme dir.
+    // User themes live in the user theme dir.
     let path = user_theme_dir().join(theme_id).join(filename);
     std::fs::read(&path).ok()
 }
@@ -574,6 +570,20 @@ mod tests {
         assert!(
             read_theme_preview_svg_bytes("dark", PREVIEW_FACE_FILENAME).is_some(),
             "dark theme spades_ace.svg must be embedded"
+        );
+    }
+
+    /// `read_theme_preview_svg_bytes` for the classic theme always returns
+    /// embedded bytes for the canonical preview pair.
+    #[test]
+    fn read_classic_theme_preview_returns_some_for_canonical_files() {
+        assert!(
+            read_theme_preview_svg_bytes("classic", PREVIEW_BACK_FILENAME).is_some(),
+            "classic theme back.svg must be embedded"
+        );
+        assert!(
+            read_theme_preview_svg_bytes("classic", PREVIEW_FACE_FILENAME).is_some(),
+            "classic theme spades_ace.svg must be embedded"
         );
     }
 

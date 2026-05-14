@@ -78,12 +78,36 @@ const DARK_THEME_MANIFEST_PATH: &str = "solitaire_engine/assets/themes/dark/them
 const DARK_THEME_MANIFEST_BYTES: &[u8] =
     include_bytes!("../../assets/themes/dark/theme.ron");
 
+/// Stable embedded asset URL of the bundled Classic theme manifest.
+pub const CLASSIC_THEME_MANIFEST_URL: &str =
+    "embedded://solitaire_engine/assets/themes/classic/theme.ron";
+
+/// Path the embedded Classic-theme manifest registers under, relative
+/// to the `embedded://` source root. Kept in lockstep with
+/// [`CLASSIC_THEME_MANIFEST_URL`] by the unit test
+/// `classic_theme_url_constant_matches_embedded_path`.
+const CLASSIC_THEME_MANIFEST_PATH: &str = "solitaire_engine/assets/themes/classic/theme.ron";
+
+/// Bytes of the bundled Classic theme manifest, embedded at compile time.
+const CLASSIC_THEME_MANIFEST_BYTES: &[u8] =
+    include_bytes!("../../assets/themes/classic/theme.ron");
+
 /// Generates a `(stable_path, bytes)` entry for one Dark-theme SVG.
 macro_rules! embed_dark_svg {
     ($name:literal) => {
         (
             concat!("solitaire_engine/assets/themes/dark/", $name),
             include_bytes!(concat!("../../assets/themes/dark/", $name)) as &[u8],
+        )
+    };
+}
+
+/// Generates a `(stable_path, bytes)` entry for one Classic-theme SVG.
+macro_rules! embed_classic_svg {
+    ($name:literal) => {
+        (
+            concat!("solitaire_engine/assets/themes/classic/", $name),
+            include_bytes!(concat!("../../assets/themes/classic/", $name)) as &[u8],
         )
     };
 }
@@ -145,6 +169,63 @@ const DARK_THEME_SVGS: &[(&str, &[u8])] = &[
     embed_dark_svg!("spades_king.svg"),
 ];
 
+/// Every Classic-theme SVG file bundled into the binary.
+const CLASSIC_THEME_SVGS: &[(&str, &[u8])] = &[
+    embed_classic_svg!("back.svg"),
+    embed_classic_svg!("clubs_ace.svg"),
+    embed_classic_svg!("clubs_2.svg"),
+    embed_classic_svg!("clubs_3.svg"),
+    embed_classic_svg!("clubs_4.svg"),
+    embed_classic_svg!("clubs_5.svg"),
+    embed_classic_svg!("clubs_6.svg"),
+    embed_classic_svg!("clubs_7.svg"),
+    embed_classic_svg!("clubs_8.svg"),
+    embed_classic_svg!("clubs_9.svg"),
+    embed_classic_svg!("clubs_10.svg"),
+    embed_classic_svg!("clubs_jack.svg"),
+    embed_classic_svg!("clubs_queen.svg"),
+    embed_classic_svg!("clubs_king.svg"),
+    embed_classic_svg!("diamonds_ace.svg"),
+    embed_classic_svg!("diamonds_2.svg"),
+    embed_classic_svg!("diamonds_3.svg"),
+    embed_classic_svg!("diamonds_4.svg"),
+    embed_classic_svg!("diamonds_5.svg"),
+    embed_classic_svg!("diamonds_6.svg"),
+    embed_classic_svg!("diamonds_7.svg"),
+    embed_classic_svg!("diamonds_8.svg"),
+    embed_classic_svg!("diamonds_9.svg"),
+    embed_classic_svg!("diamonds_10.svg"),
+    embed_classic_svg!("diamonds_jack.svg"),
+    embed_classic_svg!("diamonds_queen.svg"),
+    embed_classic_svg!("diamonds_king.svg"),
+    embed_classic_svg!("hearts_ace.svg"),
+    embed_classic_svg!("hearts_2.svg"),
+    embed_classic_svg!("hearts_3.svg"),
+    embed_classic_svg!("hearts_4.svg"),
+    embed_classic_svg!("hearts_5.svg"),
+    embed_classic_svg!("hearts_6.svg"),
+    embed_classic_svg!("hearts_7.svg"),
+    embed_classic_svg!("hearts_8.svg"),
+    embed_classic_svg!("hearts_9.svg"),
+    embed_classic_svg!("hearts_10.svg"),
+    embed_classic_svg!("hearts_jack.svg"),
+    embed_classic_svg!("hearts_queen.svg"),
+    embed_classic_svg!("hearts_king.svg"),
+    embed_classic_svg!("spades_ace.svg"),
+    embed_classic_svg!("spades_2.svg"),
+    embed_classic_svg!("spades_3.svg"),
+    embed_classic_svg!("spades_4.svg"),
+    embed_classic_svg!("spades_5.svg"),
+    embed_classic_svg!("spades_6.svg"),
+    embed_classic_svg!("spades_7.svg"),
+    embed_classic_svg!("spades_8.svg"),
+    embed_classic_svg!("spades_9.svg"),
+    embed_classic_svg!("spades_10.svg"),
+    embed_classic_svg!("spades_jack.svg"),
+    embed_classic_svg!("spades_queen.svg"),
+    embed_classic_svg!("spades_king.svg"),
+];
+
 /// Registers asset sources that must be in place *before*
 /// `AssetPlugin` is built.
 ///
@@ -181,6 +262,7 @@ pub struct AssetSourcesPlugin;
 impl Plugin for AssetSourcesPlugin {
     fn build(&self, app: &mut App) {
         populate_embedded_dark_theme(app);
+        populate_embedded_classic_theme(app);
     }
 }
 
@@ -208,8 +290,41 @@ pub fn dark_theme_svg_bytes(filename: &str) -> Option<&'static [u8]> {
 pub fn bundled_theme_url(id: &str) -> Option<&'static str> {
     match id {
         "dark" => Some(DARK_THEME_MANIFEST_URL),
-        "classic" => Some("themes/classic/theme.ron"),
+        "classic" => Some(CLASSIC_THEME_MANIFEST_URL),
         _ => None,
+    }
+}
+
+/// Returns the embedded SVG bytes for a single Classic-theme file
+/// (e.g. `"back.svg"` or `"spades_ace.svg"`), or `None` when the
+/// filename is not bundled.
+pub fn classic_theme_svg_bytes(filename: &str) -> Option<&'static [u8]> {
+    let suffix = format!("/{filename}");
+    CLASSIC_THEME_SVGS
+        .iter()
+        .find(|(path, _)| path.ends_with(&suffix))
+        .map(|(_, bytes)| *bytes)
+}
+
+/// Pushes every bundled Classic-theme file into the
+/// [`EmbeddedAssetRegistry`] under its stable URL.
+pub fn populate_embedded_classic_theme(app: &mut App) {
+    let registry = app
+        .world_mut()
+        .get_resource_or_insert_with(EmbeddedAssetRegistry::default);
+
+    registry.insert_asset(
+        std::path::PathBuf::from(CLASSIC_THEME_MANIFEST_PATH),
+        std::path::Path::new(CLASSIC_THEME_MANIFEST_PATH),
+        CLASSIC_THEME_MANIFEST_BYTES,
+    );
+
+    for (path, bytes) in CLASSIC_THEME_SVGS {
+        registry.insert_asset(
+            std::path::PathBuf::from(*path),
+            std::path::Path::new(*path),
+            *bytes,
+        );
     }
 }
 
@@ -304,5 +419,53 @@ mod tests {
             .strip_prefix("embedded://")
             .expect("dark theme URL must use embedded:// scheme");
         assert_eq!(url_tail, DARK_THEME_MANIFEST_PATH);
+    }
+
+    #[test]
+    fn populate_embedded_classic_theme_runs_without_asset_plugin() {
+        let mut app = App::new();
+        populate_embedded_classic_theme(&mut app);
+        assert!(app
+            .world()
+            .get_resource::<EmbeddedAssetRegistry>()
+            .is_some());
+    }
+
+    #[test]
+    fn embedded_classic_theme_manifest_validates() {
+        use crate::theme::ThemeManifest;
+
+        let manifest: ThemeManifest = ron::de::from_bytes(CLASSIC_THEME_MANIFEST_BYTES)
+            .expect("classic manifest must parse as RON");
+        let faces = manifest
+            .validate()
+            .expect("classic manifest must list all 52 faces");
+        assert_eq!(faces.len(), 52);
+    }
+
+    #[test]
+    fn classic_theme_svg_bytes_finds_back_and_ace_of_spades() {
+        assert!(
+            classic_theme_svg_bytes("back.svg").is_some(),
+            "classic theme must bundle a back.svg"
+        );
+        assert!(
+            classic_theme_svg_bytes("spades_ace.svg").is_some(),
+            "classic theme must bundle a spades_ace.svg"
+        );
+    }
+
+    #[test]
+    fn classic_theme_svg_bytes_returns_none_for_unknown_file() {
+        assert!(classic_theme_svg_bytes("nope.svg").is_none());
+        assert!(classic_theme_svg_bytes("").is_none());
+    }
+
+    #[test]
+    fn classic_theme_url_constant_matches_embedded_path() {
+        let url_tail = CLASSIC_THEME_MANIFEST_URL
+            .strip_prefix("embedded://")
+            .expect("classic theme URL must use embedded:// scheme");
+        assert_eq!(url_tail, CLASSIC_THEME_MANIFEST_PATH);
     }
 }
