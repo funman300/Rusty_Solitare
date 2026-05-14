@@ -6,8 +6,7 @@ on:
       - 'v*.*.*'
 
 env:
-  ANDROID_HOME: /opt/android-sdk
-  ANDROID_NDK_HOME: /opt/android-sdk/ndk/25.2.9519653
+  ANDROID_SDK: /opt/android-sdk
   NDK_VERSION: "25.2.9519653"
   BUILD_TOOLS_VERSION: "34.0.0"
   GITEA_API: https://git.aleshym.co/api/v1
@@ -32,7 +31,7 @@ jobs:
         uses: actions/cache@v4
         id: sdk-cache
         with:
-          path: ${{ env.ANDROID_HOME }}
+          path: ${{ env.ANDROID_SDK }}
           key: v2-android-sdk-ndk${{ env.NDK_VERSION }}-bt${{ env.BUILD_TOOLS_VERSION }}
 
       # Java and jq are always needed (apksigner requires Java even on cache hits).
@@ -44,18 +43,19 @@ jobs:
       - name: Install Android SDK + NDK
         if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
-          sudo mkdir -p "$ANDROID_HOME/cmdline-tools"
+          sudo mkdir -p ${{ env.ANDROID_SDK }}/cmdline-tools
           curl -sL \
             "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
             -o /tmp/cmdtools.zip
           unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
-          sudo mv /tmp/cmdtools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
-          yes | sudo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --licenses \
-            > /dev/null 2>&1 || true
-          sudo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" \
-            "build-tools;$BUILD_TOOLS_VERSION" \
+          sudo mv /tmp/cmdtools/cmdline-tools ${{ env.ANDROID_SDK }}/cmdline-tools/latest
+          yes | sudo ${{ env.ANDROID_SDK }}/cmdline-tools/latest/bin/sdkmanager \
+            --sdk_root=${{ env.ANDROID_SDK }} --licenses > /dev/null 2>&1 || true
+          sudo ${{ env.ANDROID_SDK }}/cmdline-tools/latest/bin/sdkmanager \
+            --sdk_root=${{ env.ANDROID_SDK }} \
+            "build-tools;${{ env.BUILD_TOOLS_VERSION }}" \
             "platforms;android-34" \
-            "ndk;$NDK_VERSION"
+            "ndk;${{ env.NDK_VERSION }}"
 
 # ── Rust toolchain ─────────────────────────────────────────────────
       - name: Install Rust stable
@@ -102,7 +102,10 @@ jobs:
         run: cargo install cargo-apk --locked
 
       - name: Build release APK
-        run: cargo apk build --release --package solitaire_app --lib
+        run: |
+          export ANDROID_HOME=${{ env.ANDROID_SDK }}
+          export ANDROID_NDK_HOME=${{ env.ANDROID_SDK }}/ndk/${{ env.NDK_VERSION }}
+          cargo apk build --release --package solitaire_app --lib
 
       # ── Sign ───────────────────────────────────────────────────────────
       - name: Decode keystore
@@ -115,10 +118,10 @@ jobs:
           ALIGNED="/tmp/solitaire-quest-aligned.apk"
           SIGNED="ferrous-solitaire-${TAG}.apk"
 
-          "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/zipalign" -v 4 \
+          ${{ env.ANDROID_SDK }}/build-tools/${{ env.BUILD_TOOLS_VERSION }}/zipalign -v 4 \
             "$UNSIGNED" "$ALIGNED"
 
-          "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner" sign \
+          ${{ env.ANDROID_SDK }}/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner sign \
             --ks /tmp/solitaire-release.jks \
             --ks-pass "pass:${{ secrets.KEYSTORE_PASS }}" \
             --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
@@ -129,7 +132,7 @@ jobs:
       - name: Verify APK signature
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
-          "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner" verify \
+          ${{ env.ANDROID_SDK }}/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner verify \
             --verbose "ferrous-solitaire-${TAG}.apk"
 
       # ── Publish ────────────────────────────────────────────────────────
