@@ -426,10 +426,9 @@ impl GameState {
     /// Returns `true` when stock and waste are empty and all tableau cards are face-up.
     /// At that point the game can be completed without further player input.
     pub fn check_auto_complete(&self) -> bool {
+        // Stock must be empty; waste may still have cards (they are resolved
+        // by draw() calls inside next_auto_complete_move / auto_complete_step).
         if !self.piles[&PileType::Stock].cards.is_empty() {
-            return false;
-        }
-        if !self.piles[&PileType::Waste].cards.is_empty() {
             return false;
         }
         (0..7).all(|i| {
@@ -459,40 +458,51 @@ impl GameState {
         if !self.is_auto_completable || self.is_won {
             return None;
         }
+        // Check waste top first — when stock is exhausted the waste may still
+        // contain cards that can go directly to a foundation.
+        let waste = PileType::Waste;
+        if let Some((card, slot)) = self.piles[&waste].cards.last()
+            .and_then(|c| self.foundation_slot_for(c).map(|s| (c, s)))
+        {
+            let _ = card; // borrow ends here
+            return Some((waste, PileType::Foundation(slot)));
+        }
         for i in 0..7 {
             let tableau = PileType::Tableau(i);
-            if let Some(card) = self.piles[&tableau].cards.last() {
-                // Prefer the slot that already claims this card's suit so
-                // Aces don't sometimes land in slot 0 and then leave the
-                // matching suit-claimed slot empty.
-                let mut candidate: Option<u8> = None;
-                let mut empty_slot: Option<u8> = None;
-                for slot in 0..4_u8 {
-                    let foundation = PileType::Foundation(slot);
-                    let pile = &self.piles[&foundation];
-                    if pile.cards.is_empty() {
-                        if empty_slot.is_none() {
-                            empty_slot = Some(slot);
-                        }
-                    } else if pile.claimed_suit() == Some(card.suit) {
-                        candidate = Some(slot);
-                        break;
-                    }
-                }
-                let target_slot = candidate.or_else(|| {
-                    // Only fall back to an empty slot if the card is an Ace,
-                    // which is the only rank that can claim an empty slot.
-                    if card.rank.value() == 1 { empty_slot } else { None }
-                });
-                if let Some(slot) = target_slot {
-                    let foundation = PileType::Foundation(slot);
-                    if can_place_on_foundation(card, &self.piles[&foundation]) {
-                        return Some((tableau, foundation));
-                    }
-                }
+            if let Some(slot) = self.piles[&tableau].cards.last()
+                .and_then(|c| self.foundation_slot_for(c))
+            {
+                return Some((tableau, PileType::Foundation(slot)));
             }
         }
         None
+    }
+
+    /// Return the foundation slot index that `card` can legally move to, or
+    /// `None` if no such slot exists.
+    ///
+    /// Prefers the slot already claiming this card's suit so Aces always land
+    /// in a consistent column. Falls back to an empty slot only for Aces.
+    fn foundation_slot_for(&self, card: &crate::card::Card) -> Option<u8> {
+        let mut candidate: Option<u8> = None;
+        let mut empty_slot: Option<u8> = None;
+        for slot in 0..4_u8 {
+            let pile = &self.piles[&PileType::Foundation(slot)];
+            if pile.cards.is_empty() {
+                if empty_slot.is_none() {
+                    empty_slot = Some(slot);
+                }
+            } else if pile.claimed_suit() == Some(card.suit) {
+                candidate = Some(slot);
+                break;
+            }
+        }
+        let target = candidate.or_else(|| {
+            if card.rank.value() == 1 { empty_slot } else { None }
+        });
+        target.filter(|&slot| {
+            can_place_on_foundation(card, &self.piles[&PileType::Foundation(slot)])
+        })
     }
 
     /// Time bonus added to score on win: `700_000 / elapsed_seconds` (0 if elapsed is 0).
@@ -1022,24 +1032,24 @@ mod tests {
     }
 
     #[test]
-    fn auto_complete_false_when_waste_not_empty() {
+    fn auto_complete_true_when_stock_empty_waste_has_cards() {
+        // Waste no longer blocks auto-complete — draw() drains it during
+        // auto-complete steps. Only stock-not-empty and face-down tableau
+        // cards block the flag.
         let mut g = new_game();
         g.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
-        // Leave the waste pile untouched (it may be empty after clearing stock,
-        // so add a card explicitly to ensure the waste guard is exercised).
         g.piles.get_mut(&PileType::Waste).unwrap().cards.push(Card {
             id: 99,
             suit: Suit::Clubs,
             rank: Rank::Ace,
             face_up: true,
         });
-        // Make all tableau cards face-up so only the waste guard is the blocker.
         for i in 0..7 {
             for c in g.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.iter_mut() {
                 c.face_up = true;
             }
         }
-        assert!(!g.check_auto_complete());
+        assert!(g.check_auto_complete());
     }
 
     #[test]

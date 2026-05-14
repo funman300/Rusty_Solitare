@@ -1,3 +1,5 @@
+/* @ts-self-types="./solitaire_wasm.d.ts" */
+
 /**
  * Browser-side replay state machine. Owns a live `GameState` and the
  * replay's move list; each `step()` applies the next move.
@@ -92,7 +94,10 @@ export class SolitaireGame {
     }
     /**
      * Apply one auto-complete move (only valid when `is_auto_completable`).
-     * Returns the post-move snapshot or `null` when auto-complete is unavailable.
+     *
+     * If no card can go directly to a foundation this step, advances the
+     * waste by calling `draw()` so the next step can try again. Returns the
+     * post-move snapshot, or `null` when no progress is possible.
      * @returns {any}
      */
     auto_complete_step() {

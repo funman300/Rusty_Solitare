@@ -412,17 +412,22 @@ impl SolitaireGame {
     }
 
     /// Apply one auto-complete move (only valid when `is_auto_completable`).
-    /// Returns the post-move snapshot or `null` when auto-complete is unavailable.
+    ///
+    /// If no card can go directly to a foundation this step, advances the
+    /// waste by calling `draw()` so the next step can try again. Returns the
+    /// post-move snapshot, or `null` when no progress is possible.
     pub fn auto_complete_step(&mut self) -> JsValue {
         if !self.game.is_auto_completable {
             return JsValue::NULL;
         }
-        match self.game.next_auto_complete_move() {
-            Some((from, to)) => {
-                let _ = self.game.move_cards(from, to, 1);
-                self.ok_js()
-            }
-            None => JsValue::NULL,
+        if let Some((from, to)) = self.game.next_auto_complete_move() {
+            let _ = self.game.move_cards(from, to, 1);
+            return self.ok_js();
+        }
+        // No direct foundation move — advance through the waste.
+        match self.game.draw() {
+            Ok(()) => self.ok_js(),
+            Err(_) => JsValue::NULL,
         }
     }
 }
