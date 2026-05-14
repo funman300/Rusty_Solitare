@@ -102,10 +102,16 @@ jobs:
       # ── Build & sign with release keystore ─────────────────────────────
       - name: Decode keystore
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > /tmp/solitaire-release.jks
+          secret_len=$(echo -n "${{ secrets.KEYSTORE_BASE64 }}" | wc -c)
+          echo "KEYSTORE_BASE64 secret length: ${secret_len} chars"
+          set +e
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > /tmp/solitaire-release.jks 2>/tmp/b64_err.txt
+          b64_exit=$?
+          set -e
           size=$(wc -c < /tmp/solitaire-release.jks)
-          echo "Keystore size: ${size} bytes"
-          [ "$size" -gt 0 ] || { echo "ERROR: KEYSTORE_BASE64 secret is empty or unset"; exit 1; }
+          echo "base64 exit code: ${b64_exit}, keystore size: ${size} bytes"
+          [ -s /tmp/b64_err.txt ] && echo "base64 error: $(cat /tmp/b64_err.txt)" || true
+          [ "$size" -gt 0 ] || { echo "ERROR: KEYSTORE_BASE64 is empty or invalid base64"; exit 1; }
 
       - name: Build signed release APK
         env:
