@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO analytics_events\n               (id, user_id, session_id, event_type, payload, client_time, received_at)\n               VALUES (?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "f23630e78ae88e72d7930184f7cd8fc67e71f3930609f1cf14061d35d6de8ec3"
+}

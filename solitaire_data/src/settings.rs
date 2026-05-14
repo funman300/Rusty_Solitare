@@ -243,6 +243,13 @@ pub struct Settings {
     /// `false` via `#[serde(default)]`.
     #[serde(default)]
     pub take_from_foundation: bool,
+    /// When `true`, anonymous game-play events (game start, game won, etc.)
+    /// are sent to the configured sync server for aggregate analytics. Opt-in;
+    /// defaults to `false`. Only active when `sync_backend` is
+    /// `SolitaireServer`. Older `settings.json` files deserialize cleanly to
+    /// `false` via `#[serde(default)]`.
+    #[serde(default)]
+    pub analytics_enabled: bool,
 }
 
 fn default_draw_mode() -> DrawMode {
@@ -364,6 +371,7 @@ impl Default for Settings {
             last_difficulty: None,
             leaderboard_display_name: None,
             take_from_foundation: false,
+            analytics_enabled: false,
         }
     }
 }

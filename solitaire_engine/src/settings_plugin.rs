@@ -166,6 +166,11 @@ struct WinnableDealsOnlyText;
 #[derive(Component, Debug)]
 struct SmartDefaultSizeText;
 
+/// Marks the `Text` node showing the current "Share usage data" (analytics)
+/// state ("ON" / "OFF") in the Privacy section.
+#[derive(Component, Debug)]
+struct AnalyticsEnabledText;
+
 /// Marks the scrollable inner card so the mouse-wheel system can target it.
 #[derive(Component, Debug)]
 struct SettingsPanelScrollable;
@@ -236,6 +241,10 @@ enum SettingsButton {
     /// flag only affects launches without saved geometry — the
     /// player's last window size always wins.
     ToggleSmartDefaultSize,
+    /// Toggle [`Settings::analytics_enabled`]. Only rendered when a
+    /// sync server is configured — there is no server to send to in
+    /// local-only mode.
+    ToggleAnalytics,
     /// Scan `user_theme_dir()` for new `.zip` files and import each one.
     ScanThemes,
     SyncNow,
@@ -283,6 +292,8 @@ impl SettingsButton {
             SettingsButton::ReplayMoveIntervalUp => 49,
             // Smart-default-size toggle — sits at the end of Gameplay.
             SettingsButton::ToggleSmartDefaultSize => 50,
+            // Privacy section — just before Sync.
+            SettingsButton::ToggleAnalytics => 89,
             // Cosmetic section
             SettingsButton::ToggleTheme => 55,
             SettingsButton::ToggleColorBlind => 60,
@@ -398,10 +409,11 @@ impl Plugin for SettingsPlugin {
                     update_replay_move_interval_text,
                     update_winnable_deals_only_text,
                     update_smart_default_size_text,
+                    update_analytics_enabled_text,
                     attach_focusable_to_settings_buttons,
-                    scroll_focus_into_view,
                 ),
             );
+            app.add_systems(Update, scroll_focus_into_view);
         }
     }
 }
@@ -763,6 +775,20 @@ fn update_winnable_deals_only_text(
     }
 }
 
+/// Refreshes the live "Share usage data" toggle value in the Privacy section
+/// whenever `SettingsResource` changes.
+fn update_analytics_enabled_text(
+    settings: Res<SettingsResource>,
+    mut text_nodes: Query<&mut Text, With<AnalyticsEnabledText>>,
+) {
+    if !settings.is_changed() {
+        return;
+    }
+    for mut text in &mut text_nodes {
+        **text = on_off_label(settings.0.analytics_enabled);
+    }
+}
+
 /// Refreshes the live "Smart window size" toggle value whenever
 /// `SettingsResource` changes. The flag is stored negatively as
 /// `disable_smart_default_size`, so the label inverts.
@@ -1048,6 +1074,12 @@ fn handle_settings_buttons(
                 changed.write(SettingsChangedEvent(settings.0.clone()));
                 // The Text node is refreshed by `update_winnable_deals_only_text`
                 // on the next frame via `settings.is_changed()`.
+            }
+            SettingsButton::ToggleAnalytics => {
+                settings.0.analytics_enabled = !settings.0.analytics_enabled;
+                persist(&path, &settings.0);
+                changed.write(SettingsChangedEvent(settings.0.clone()));
+                // Text refreshed by `update_analytics_enabled_text` next frame.
             }
             SettingsButton::ToggleSmartDefaultSize => {
                 settings.0.disable_smart_default_size =
@@ -1649,6 +1681,20 @@ fn spawn_settings_panel(
                 );
             }
             import_themes_row(body, font_res);
+
+            // --- Privacy (only shown when a sync server is configured) ---
+            if matches!(settings.sync_backend, SyncBackend::SolitaireServer { .. }) {
+                section_label(body, "Privacy", font_res);
+                toggle_row(
+                    body,
+                    "Share usage data",
+                    AnalyticsEnabledText,
+                    on_off_label(settings.analytics_enabled),
+                    SettingsButton::ToggleAnalytics,
+                    "Sends anonymous game events to your server. No personal data is collected.",
+                    font_res,
+                );
+            }
 
             // --- Sync ---
             section_label(body, "Sync", font_res);

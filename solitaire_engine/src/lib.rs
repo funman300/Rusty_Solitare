@@ -5,6 +5,7 @@ pub mod android_clipboard;
 pub mod assets;
 pub mod card_animation;
 pub mod achievement_plugin;
+pub mod analytics_plugin;
 pub mod animation_plugin;
 pub mod auto_complete_plugin;
 pub mod audio_plugin;
@@ -60,6 +61,7 @@ pub use theme::{
     ThemeRegistryPlugin,
 };
 pub use achievement_plugin::{AchievementPlugin, AchievementsResource, AchievementsScreen};
+pub use analytics_plugin::{AnalyticsPlugin, AnalyticsResource};
 pub use challenge_plugin::{
     challenge_progress_label, ChallengeAdvancedEvent, ChallengePlugin, CHALLENGE_UNLOCK_LEVEL,
 };

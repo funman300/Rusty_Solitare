@@ -15,6 +15,7 @@ async-trait    = { workspace = true }
 dirs           = { workspace = true }
 reqwest        = { workspace = true }
 tokio          = { workspace = true }
+uuid           = { workspace = true }
 
 # `keyring-core` is the typed Entry/Error API used by
 # `auth_tokens`. The crate's own dependency tree pulls in

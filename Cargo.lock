@@ -7018,6 +7018,7 @@ dependencies = [
  "resvg",
  "ron",
  "serde",
+ "serde_json",
  "solitaire_core",
  "solitaire_data",
  "solitaire_sync",

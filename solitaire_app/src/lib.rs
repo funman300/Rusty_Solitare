@@ -25,7 +25,7 @@ use bevy::window::{Monitor, PrimaryMonitor, PrimaryWindow};
 use bevy::winit::WinitWindows;
 use solitaire_data::{load_settings_from, provider_for_backend, settings_file_path, Settings};
 use solitaire_engine::{
-    register_theme_asset_sources, AchievementPlugin, AnimationPlugin, AssetSourcesPlugin,
+    register_theme_asset_sources, AchievementPlugin, AnalyticsPlugin, AnimationPlugin, AssetSourcesPlugin,
     AudioPlugin, AutoCompletePlugin, CardAnimationPlugin, CardPlugin, ChallengePlugin,
     CursorPlugin, DailyChallengePlugin, DiagnosticsHudPlugin, DifficultyPlugin, FeedbackAnimPlugin,
     FontPlugin, GamePlugin, HelpPlugin, HomePlugin, HudPlugin, InputPlugin, LeaderboardPlugin,
@@ -194,6 +194,7 @@ pub fn run() {
         .add_plugins(OnboardingPlugin)
         .add_plugins(SyncPlugin::new(sync_provider))
         .add_plugins(SyncSetupPlugin)
+        .add_plugins(AnalyticsPlugin)
         .add_plugins(LeaderboardPlugin)
         .add_plugins(WinSummaryPlugin)
         .add_plugins(UiModalPlugin)
