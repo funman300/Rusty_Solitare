@@ -121,7 +121,9 @@ jobs:
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
           printenv | grep -i android || true
-          ls "$ANDROID_HOME/platforms/" || echo "platforms dir missing at build time"
+          ls "$ANDROID_HOME/platforms/" || echo "platforms dir missing"
+          ls "$ANDROID_HOME/platforms/android-34/" | head -10 || echo "android-34 dir missing"
+          ls "$ANDROID_HOME/platforms/android-34/android.jar" && echo "android.jar OK" || echo "android.jar MISSING"
           echo "========================="
           cargo apk build --package solitaire_app --lib
 
