@@ -6,7 +6,6 @@ on:
       - 'v*.*.*'
 
 env:
-  ANDROID_SDK_ROOT: /opt/android-sdk
   ANDROID_HOME: /opt/android-sdk
   ANDROID_NDK_HOME: /opt/android-sdk/ndk/25.2.9519653
   NDK_VERSION: "25.2.9519653"
@@ -33,7 +32,7 @@ jobs:
         uses: actions/cache@v4
         id: sdk-cache
         with:
-          path: ${{ env.ANDROID_SDK_ROOT }}
+          path: ${{ env.ANDROID_HOME }}
           key: v2-android-sdk-ndk${{ env.NDK_VERSION }}-bt${{ env.BUILD_TOOLS_VERSION }}
 
       # Java and jq are always needed (apksigner requires Java even on cache hits).
@@ -45,15 +44,15 @@ jobs:
       - name: Install Android SDK + NDK
         if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
           curl -sL \
             "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
             -o /tmp/cmdtools.zip
           unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
-          mv /tmp/cmdtools/cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses \
+          mv /tmp/cmdtools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --licenses \
             > /dev/null 2>&1 || true
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" \
             "build-tools;$BUILD_TOOLS_VERSION" \
             "platforms;android-34" \
             "ndk;$NDK_VERSION"
