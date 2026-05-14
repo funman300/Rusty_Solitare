@@ -36,7 +36,9 @@ jobs:
 
       # Java and jq are always needed (apksigner requires Java even on cache hits).
       - name: Install system dependencies
-        run: sudo apt-get install -y openjdk-17-jdk-headless unzip jq
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y openjdk-17-jdk-headless unzip jq
 
       - name: Install Android SDK + NDK
         if: steps.sdk-cache.outputs.cache-hit != 'true'
