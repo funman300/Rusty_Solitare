@@ -25,6 +25,18 @@ jobs:
         id: meta
         run: echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
+      # ── Free disk space ────────────────────────────────────────────────
+      # A 2-ABI release build (arm64 + armv7) generates ~15 GB of target/
+      # output. Remove pre-installed runner tooling that is never used
+      # during an Android build to reclaim ~10 GB before we start.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android   # runner pre-installed SDK
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          df -h /
+
       # ── System dependencies ────────────────────────────────────────────
       - name: Install system dependencies
         run: |
@@ -67,8 +79,7 @@ jobs:
         run: |
           rustup target add \
             aarch64-linux-android \
-            armv7-linux-androideabi \
-            x86_64-linux-android
+            armv7-linux-androideabi
 
       # ── Cargo caches ───────────────────────────────────────────────────
       - name: Cache Cargo registry
@@ -110,6 +121,10 @@ jobs:
           BUILD_TOOLS_VERSION: ${{ env.BUILD_TOOLS_VERSION }}
           PLATFORM: ${{ env.PLATFORM }}
           PROFILE: release
+          # arm64-v8a covers all modern Android phones; armeabi-v7a covers
+          # legacy ARM devices. x86_64 is emulator-only and dropped to
+          # stay within the runner's ~25 GB disk budget.
+          ABIS: arm64-v8a armeabi-v7a
           KEYSTORE: /tmp/solitaire-release.jks
           KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
