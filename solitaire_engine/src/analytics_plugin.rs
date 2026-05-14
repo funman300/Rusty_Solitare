@@ -1,16 +1,15 @@
-//! Analytics plugin — buffers game-play events and flushes them to the
-//! configured server in the background.
+//! Matomo analytics plugin — buffers game-play events and flushes them to
+//! the configured Matomo instance in the background.
 //!
 //! Disabled by default (opt-in via Settings → Privacy). Only active when
-//! `settings.analytics_enabled` is `true` AND `sync_backend` is a
-//! `SolitaireServer` with a URL to send to.
+//! `settings.analytics_enabled` is `true` AND `settings.matomo_url` is set.
 
 use std::sync::Arc;
 
 use bevy::prelude::*;
 use bevy::tasks::AsyncComputeTaskPool;
 use solitaire_core::game_state::GameMode;
-use solitaire_data::{analytics_client::AnalyticsClient, settings::SyncBackend, Settings};
+use solitaire_data::{matomo_client::MatomoClient, settings::SyncBackend, Settings};
 
 use crate::events::{AchievementUnlockedEvent, ForfeitEvent, GameWonEvent, NewGameRequestEvent};
 use crate::resources::GameStateResource;
@@ -20,10 +19,10 @@ use crate::settings_plugin::{SettingsChangedEvent, SettingsResource};
 // Resource
 // ---------------------------------------------------------------------------
 
-/// Holds the active analytics client. `None` when the feature is disabled.
+/// Holds the active Matomo client. `None` when the feature is disabled.
 #[derive(Resource)]
 pub struct AnalyticsResource {
-    pub client: Option<Arc<AnalyticsClient>>,
+    pub client: Option<Arc<MatomoClient>>,
     flush_timer: Timer,
 }
 
@@ -87,13 +86,7 @@ fn on_game_won(
         return;
     };
     for ev in wins.read() {
-        client.record(
-            "game_won",
-            serde_json::json!({
-                "score": ev.score,
-                "time_seconds": ev.time_seconds,
-            }),
-        );
+        client.event("Game", "Won", None, Some(ev.score as f64));
         fire_flush(client.clone(), &settings.0);
     }
 }
@@ -107,7 +100,7 @@ fn on_forfeit(
         return;
     };
     for _ev in forfeits.read() {
-        client.record("game_forfeit", serde_json::json!({}));
+        client.event("Game", "Forfeit", None, None);
         fire_flush(client.clone(), &settings.0);
     }
 }
@@ -121,19 +114,11 @@ fn on_new_game(
         return;
     };
     for ev in requests.read() {
-        // Only record confirmed starts — skip the first unconfirmed request
-        // that spawns the "abandon game?" modal.
         if !ev.confirmed {
             continue;
         }
-        // mode = None means "reuse current game mode". Reading from
-        // GameStateResource at this point gives the still-active game's mode,
-        // which is exactly what the new game will inherit.
         let mode = ev.mode.unwrap_or(game.0.mode);
-        client.record(
-            "game_start",
-            serde_json::json!({ "mode": mode_str(mode) }),
-        );
+        client.event("Game", "Start", Some(mode_str(mode)), None);
     }
 }
 
@@ -145,10 +130,7 @@ fn on_achievement_unlocked(
         return;
     };
     for ev in achievements.read() {
-        client.record(
-            "achievement_unlocked",
-            serde_json::json!({ "achievement_id": ev.0.id }),
-        );
+        client.event("Achievement", "Unlocked", Some(&ev.0.id), None);
     }
 }
 
@@ -170,30 +152,26 @@ fn tick_flush_timer(
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn client_for(settings: &Settings) -> Option<Arc<AnalyticsClient>> {
+fn client_for(settings: &Settings) -> Option<Arc<MatomoClient>> {
     if !settings.analytics_enabled {
         return None;
     }
-    match &settings.sync_backend {
-        SyncBackend::SolitaireServer { url, .. } => {
-            Some(Arc::new(AnalyticsClient::new(url.clone())))
-        }
-        SyncBackend::Local => None,
-    }
-}
-
-fn fire_flush(client: Arc<AnalyticsClient>, settings: &Settings) {
-    let user_id = match &settings.sync_backend {
+    let url = settings.matomo_url.as_deref()?;
+    let uid = match &settings.sync_backend {
         SyncBackend::SolitaireServer { username, .. } => Some(username.clone()),
         SyncBackend::Local => None,
     };
+    Some(Arc::new(MatomoClient::new(url, settings.matomo_site_id, uid)))
+}
+
+fn fire_flush(client: Arc<MatomoClient>, _settings: &Settings) {
     AsyncComputeTaskPool::get()
         .spawn(async move {
             if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
             {
-                rt.block_on(client.flush(user_id));
+                rt.block_on(client.flush());
             }
         })
         .detach();

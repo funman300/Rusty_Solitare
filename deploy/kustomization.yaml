@@ -7,8 +7,13 @@ resources:
 - deployment.yaml
 - service.yaml
 - ingress.yaml
-- middleware-analytics-auth.yaml
-- secret-analytics-auth.yaml
+- mariadb-pvc.yaml
+- mariadb-deployment.yaml
+- mariadb-service.yaml
+- matomo-pvc.yaml
+- matomo-secret.yaml
+- matomo-deployment.yaml
+- matomo-service.yaml
 - ingress-analytics.yaml
 
 # CI updates this block automatically via `kustomize edit set image`.

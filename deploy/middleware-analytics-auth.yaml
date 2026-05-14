@@ -1,8 +1,0 @@
-apiVersion: traefik.containo.us/v1alpha1
-kind: Middleware
-metadata:
-  name: analytics-auth
-  namespace: solitaire
-spec:
-  basicAuth:
-    secret: analytics-auth-secret

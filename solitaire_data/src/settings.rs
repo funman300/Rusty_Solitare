@@ -244,12 +244,20 @@ pub struct Settings {
     #[serde(default)]
     pub take_from_foundation: bool,
     /// When `true`, anonymous game-play events (game start, game won, etc.)
-    /// are sent to the configured sync server for aggregate analytics. Opt-in;
-    /// defaults to `false`. Only active when `sync_backend` is
-    /// `SolitaireServer`. Older `settings.json` files deserialize cleanly to
-    /// `false` via `#[serde(default)]`.
+    /// are sent to the configured Matomo instance. Opt-in; defaults to `false`.
+    /// Requires `matomo_url` to be set. Older `settings.json` files deserialize
+    /// cleanly to `false` via `#[serde(default)]`.
     #[serde(default)]
     pub analytics_enabled: bool,
+    /// Base URL of the Matomo instance to send events to, e.g.
+    /// `"https://analytics.example.com"`. When `None` the analytics toggle has
+    /// no effect. Older `settings.json` files deserialize cleanly to `None`.
+    #[serde(default)]
+    pub matomo_url: Option<String>,
+    /// Matomo site ID assigned when the tracked site was created in Matomo.
+    /// Defaults to `1` (the first site created in a fresh Matomo install).
+    #[serde(default = "default_matomo_site_id")]
+    pub matomo_site_id: u32,
 }
 
 fn default_draw_mode() -> DrawMode {
@@ -318,6 +326,10 @@ fn default_replay_move_interval_secs() -> f32 {
     0.45
 }
 
+fn default_matomo_site_id() -> u32 {
+    1
+}
+
 /// Lower bound of the player-tunable replay-playback per-move interval,
 /// in seconds. Below this the cards barely register visually before
 /// the next move fires; the cap keeps the playback legible.
@@ -372,6 +384,8 @@ impl Default for Settings {
             leaderboard_display_name: None,
             take_from_foundation: false,
             analytics_enabled: false,
+            matomo_url: None,
+            matomo_site_id: default_matomo_site_id(),
         }
     }
 }

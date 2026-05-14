@@ -6,7 +6,6 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    traefik.ingress.kubernetes.io/router.middlewares: solitaire-analytics-auth@kubernetescrd
 spec:
   ingressClassName: traefik
   rules:
@@ -17,9 +16,9 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: solitaire-server
+                name: matomo
                 port:
-                  name: analytics
+                  name: http
   tls:
     - hosts:
         - analytics.aleshym.co

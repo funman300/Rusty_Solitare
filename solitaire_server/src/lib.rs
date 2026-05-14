@@ -4,7 +4,6 @@
 //! application against an in-memory SQLite database without starting a real
 //! TCP listener.
 
-pub mod analytics;
 pub mod auth;
 pub mod challenge;
 pub mod error;
@@ -190,23 +189,6 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
         auth_routes
     };
 
-    // Analytics endpoint — public, but throttled at 5 batches/min per IP to
-    // limit abuse. Rate limiting is skipped in tests (same pattern as auth).
-    let analytics_route = Router::new().route("/api/analytics", post(analytics::ingest));
-    let analytics_route = if rate_limit {
-        let governor_conf = Arc::new(
-            GovernorConfigBuilder::default()
-                .key_extractor(SmartIpKeyExtractor)
-                .per_second(12) // 1 token / 12 s = 5 / min steady-state
-                .burst_size(5)
-                .finish()
-                .expect("invalid analytics governor config"),
-        );
-        analytics_route.layer(GovernorLayer::new(governor_conf))
-    } else {
-        analytics_route
-    };
-
     // Public endpoints (no auth, no rate limit beyond defaults).
     let public = Router::new()
         .route("/api/daily-challenge", get(challenge::daily_challenge))
@@ -251,7 +233,6 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
     Router::new()
         .merge(protected)
         .merge(auth_routes)
-        .merge(analytics_route)
         .merge(public)
         .merge(web)
         // Reject request bodies larger than 1 MB.

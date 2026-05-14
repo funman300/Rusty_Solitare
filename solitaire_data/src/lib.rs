@@ -163,8 +163,8 @@ pub use replay::{
     REPLAY_HISTORY_CAP, REPLAY_HISTORY_SCHEMA_VERSION, REPLAY_SCHEMA_VERSION,
 };
 
-pub mod analytics_client;
-pub use analytics_client::AnalyticsClient;
+pub mod matomo_client;
+pub use matomo_client::MatomoClient;
 
 pub mod platform;
 pub use platform::data_dir;

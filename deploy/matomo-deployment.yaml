@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matomo
+  namespace: solitaire
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: matomo
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: matomo
+    spec:
+      containers:
+        - name: matomo
+          image: bitnami/matomo:5
+          env:
+            - name: MATOMO_DATABASE_HOST
+              value: mariadb
+            - name: MATOMO_DATABASE_PORT_NUMBER
+              value: "3306"
+            - name: MATOMO_DATABASE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: matomo-secret
+                  key: MYSQL_DATABASE
+            - name: MATOMO_DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: matomo-secret
+                  key: MYSQL_USER
+            - name: MATOMO_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: matomo-secret
+                  key: MYSQL_PASSWORD
+            - name: MATOMO_USERNAME
+              value: admin
+            - name: MATOMO_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: matomo-secret
+                  key: MATOMO_ADMIN_PASSWORD
+            - name: MATOMO_EMAIL
+              value: funman300@gmail.com
+            - name: MATOMO_WEBSITE_NAME
+              value: "Solitaire Quest"
+            - name: MATOMO_WEBSITE_HOST
+              value: "https://klondike.aleshym.co"
+            - name: MATOMO_HOST
+              value: analytics.aleshym.co
+            - name: MATOMO_ENABLE_PROXY_URI_HEADER
+              value: "yes"
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: matomo-data
+              mountPath: /bitnami/matomo
+          livenessProbe:
+            httpGet:
+              path: /index.php
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /index.php
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: matomo-data
+          persistentVolumeClaim:
+            claimName: matomo-data

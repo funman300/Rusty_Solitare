@@ -1682,8 +1682,8 @@ fn spawn_settings_panel(
             }
             import_themes_row(body, font_res);
 
-            // --- Privacy (only shown when a sync server is configured) ---
-            if matches!(settings.sync_backend, SyncBackend::SolitaireServer { .. }) {
+            // --- Privacy (only shown when a Matomo URL is configured) ---
+            if settings.matomo_url.is_some() {
                 section_label(body, "Privacy", font_res);
                 toggle_row(
                     body,
@@ -1691,7 +1691,7 @@ fn spawn_settings_panel(
                     AnalyticsEnabledText,
                     on_off_label(settings.analytics_enabled),
                     SettingsButton::ToggleAnalytics,
-                    "Sends anonymous game events to your server. No personal data is collected.",
+                    "Sends anonymous game events to Matomo for aggregate analytics.",
                     font_res,
                 );
             }
