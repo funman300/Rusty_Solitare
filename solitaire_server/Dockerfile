@@ -64,6 +64,7 @@ COPY --from=builder /build/target/release/solitaire_server ./server
 #   /app/assets                →  /assets route
 COPY solitaire_server/web ./solitaire_server/web
 COPY assets ./assets
+COPY solitaire_engine/assets/themes/classic ./assets/themes/classic
 
 ENV SERVER_PORT=8080
 EXPOSE 8080
