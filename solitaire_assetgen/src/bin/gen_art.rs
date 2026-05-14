@@ -1,4 +1,4 @@
-//! Generates PNG assets for Solitaire Quest.
+//! Generates PNG assets for Ferrous Solitaire.
 //!
 //! Produces:
 //! - 52 card face PNGs (120×168) — one per card, with rank, suit symbol, and

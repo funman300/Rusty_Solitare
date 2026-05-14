@@ -84,7 +84,7 @@ mod tests {
         ThemeMeta {
             id: "default".into(),
             name: "Default".into(),
-            author: "Solitaire Quest".into(),
+            author: "Ferrous Solitaire".into(),
             version: "1.0.0".into(),
             card_aspect: (2, 3),
         }

@@ -1,4 +1,4 @@
-// Solitaire Quest replay viewer.
+// Ferrous Solitaire replay viewer.
 //
 // Pulls the replay JSON from `/api/replays/:id`, hands it to the
 // `solitaire_wasm` ReplayPlayer (which owns a real solitaire_core

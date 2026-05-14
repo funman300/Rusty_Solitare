@@ -1,4 +1,4 @@
-# Solitaire Quest — Session Handoff
+# Ferrous Solitaire — Session Handoff
 
 **Last updated:** 2026-05-12 — Leaderboard display name shipped (`03be4fc`). All commits pushed to origin.
 
@@ -150,7 +150,7 @@ Items missing from the doc:
 ## Resume prompt
 
 ```
-You are a senior Rust + Bevy developer working on Solitaire Quest.
+You are a senior Rust + Bevy developer working on Ferrous Solitaire.
 Working directory: <Rusty_Solitaire clone path>.
 Branch: master. v0.23.0 is the current version (HEAD: 03be4fc). Fully pushed.
 

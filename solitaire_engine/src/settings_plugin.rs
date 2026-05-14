@@ -2343,7 +2343,7 @@ fn sync_row(
                             row,
                             SettingsButton::ConnectSync,
                             "Connect",
-                            "Connect to a self-hosted Solitaire Quest sync server.".to_string(),
+                            "Connect to a self-hosted Ferrous Solitaire sync server.".to_string(),
                             button_font,
                         );
                     }
@@ -2920,7 +2920,7 @@ mod tests {
             .expect("Connect button should spawn with a Tooltip when backend is Local");
         assert_eq!(
             connect_tip.as_ref(),
-            "Connect to a self-hosted Solitaire Quest sync server.",
+            "Connect to a self-hosted Ferrous Solitaire sync server.",
             "ConnectSync tooltip must use the canonical microcopy"
         );
     }

@@ -3,7 +3,7 @@
 > **Why this exists.** The 24 mockups in this directory are mobile
 > (390 × 844 logical, iPhone 14 Pro frame) with one exception
 > (`home-menu-desktop.html`). The Stitch project that produced them
-> is named "Solitaire Quest *Mobile* Redesign" — the mobile-first
+> is named "Ferrous Solitaire *Mobile* Redesign" — the mobile-first
 > framing was deliberate when the new Android target opened, but
 > desktop is still the primary delivery surface. Porting the mobile
 > mockups 1:1 would land a 390-px-wide column floating in the middle

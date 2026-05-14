@@ -6,7 +6,7 @@
 //! | Struct | Backend |
 //! |---|---|
 //! | [`LocalOnlyProvider`] | No-op; used when sync is disabled |
-//! | [`SolitaireServerClient`] | Self-hosted Solitaire Quest server (JWT auth) |
+//! | [`SolitaireServerClient`] | Self-hosted Ferrous Solitaire server (JWT auth) |
 //!
 //! Use [`provider_for_backend`] to obtain a `Box<dyn SyncProvider + Send + Sync>`
 //! without matching on [`SyncBackend`] anywhere else in the codebase.
@@ -55,7 +55,7 @@ impl SyncProvider for LocalOnlyProvider {
 // SolitaireServerClient
 // ---------------------------------------------------------------------------
 
-/// HTTP sync client for the self-hosted Solitaire Quest server.
+/// HTTP sync client for the self-hosted Ferrous Solitaire server.
 ///
 /// Authenticates via JWT stored in the OS keychain. On a 401 response the
 /// client automatically attempts a token refresh and retries the request once

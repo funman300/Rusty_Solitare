@@ -1,4 +1,4 @@
-//! Solitaire Quest sync server entry point.
+//! Ferrous Solitaire sync server entry point.
 //!
 //! Reads configuration from environment variables (via `dotenvy`), initialises
 //! the SQLite database, runs migrations, then starts the Axum HTTP server.

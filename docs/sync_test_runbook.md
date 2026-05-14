@@ -11,7 +11,7 @@
 ### Infrastructure
 
 - Two machines (or VMs) referred to as **Machine A** and **Machine B** throughout this runbook. Both must be able to reach the sync server over the network.
-- A running Solitaire Quest sync server reachable at a known URL, e.g. `https://solitaire.example.com`. See `README_SERVER.md` for setup.
+- A running Ferrous Solitaire sync server reachable at a known URL, e.g. `https://solitaire.example.com`. See `README_SERVER.md` for setup.
 - Verify the server is live before starting:
 
   ```bash

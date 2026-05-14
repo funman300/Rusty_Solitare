@@ -1,4 +1,4 @@
-# Solitaire Quest — Architecture Document
+# Ferrous Solitaire — Architecture Document
 
 > **Version:** 1.3  
 > **Language:** Rust (Edition 2024)  
@@ -34,7 +34,7 @@
 
 ## 1. Project Overview
 
-Solitaire Quest is a cross-platform Klondike Solitaire game written in Rust, targeting macOS, Windows, and Linux desktops. It features a full progression system with XP, levels, achievements, daily challenges, and an optional self-hosted sync server so statistics and progress are available across all of a player's devices.
+Ferrous Solitaire is a cross-platform Klondike Solitaire game written in Rust, targeting macOS, Windows, and Linux desktops. It features a full progression system with XP, levels, achievements, daily challenges, and an optional self-hosted sync server so statistics and progress are available across all of a player's devices.
 
 ### Sync Backend by Platform
 

@@ -2,7 +2,7 @@
 
 > **Date:** 2026-04-28  
 > **Author:** Claude Code  
-> **Scope:** Feasibility analysis for porting Solitaire Quest to Android using cargo-mobile2
+> **Scope:** Feasibility analysis for porting Ferrous Solitaire to Android using cargo-mobile2
 
 ---
 

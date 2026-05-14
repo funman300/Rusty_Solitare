@@ -1,4 +1,4 @@
-//! Solitaire Quest sync server library.
+//! Ferrous Solitaire sync server library.
 //!
 //! Exposes [`build_router`] so integration tests can construct the full Axum
 //! application against an in-memory SQLite database without starting a real

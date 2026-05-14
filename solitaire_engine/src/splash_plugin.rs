@@ -2,7 +2,7 @@
 //!
 //! On app start the engine spawns a fullscreen, high-Z overlay that
 //! reads the Terminal-style "boot screen" — an accent-coloured cursor block, the
-//! "Solitaire Quest" wordmark, a short fixture boot log, a progress
+//! "Ferrous Solitaire" wordmark, a short fixture boot log, a progress
 //! bar, and a footer with the design-system palette swatches and the
 //! build version. The overlay fades in over 300 ms, holds for ~1 s,
 //! then fades out for 300 ms before despawning. The deal animation
@@ -383,7 +383,7 @@ fn spawn_header_section(parent: &mut ChildSpawnerCommands, font_handle: &Handle<
             ));
             hdr.spawn((
                 SplashFadable { base_color: TEXT_PRIMARY },
-                Text::new("Solitaire Quest"),
+                Text::new("Ferrous Solitaire"),
                 title_font,
                 TextColor(transparent(TEXT_PRIMARY)),
             ));
@@ -1170,7 +1170,7 @@ mod tests {
             "expected the cursor block (▌) on the splash, got: {texts:?}"
         );
         assert!(
-            texts.iter().any(|t| t == "Solitaire Quest"),
+            texts.iter().any(|t| t == "Ferrous Solitaire"),
             "expected the wordmark on the splash, got: {texts:?}"
         );
         assert!(

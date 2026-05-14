@@ -1,4 +1,4 @@
-# Solitaire Quest
+# Ferrous Solitaire
 
 A cross-platform Klondike Solitaire game written in Rust, with a card-theme
 system, full progression (XP / levels / achievements / daily challenges), and

@@ -1,4 +1,4 @@
-//! SVG builder for the Solitaire Quest application icon.
+//! SVG builder for the Ferrous Solitaire application icon.
 //!
 //! Renders the project's signature `▌RS` Terminal mark (the same
 //! cursor-block + monogram pair used on the splash boot-screen and

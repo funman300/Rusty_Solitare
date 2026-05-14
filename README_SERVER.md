@@ -1,4 +1,4 @@
-# Solitaire Quest — Self-Hosting Guide
+# Ferrous Solitaire — Self-Hosting Guide
 
 ## Prerequisites
 

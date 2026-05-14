@@ -106,7 +106,7 @@ pub fn run() {
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: Some(Window {
-                        title: "Solitaire Quest".into(),
+                        title: "Ferrous Solitaire".into(),
                         // X11/Wayland WM_CLASS so taskbar managers group
                         // multiple windows of this app correctly.
                         name: Some("solitaire-quest".into()),

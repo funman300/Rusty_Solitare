@@ -9,7 +9,7 @@
 //!
 //! Slides:
 //!
-//! 1. **Welcome** — brief introduction to Solitaire Quest.
+//! 1. **Welcome** — brief introduction to Ferrous Solitaire.
 //! 2. **How to play** — drag-and-drop, double-click, and right-click hints.
 //! 3. **Keyboard shortcuts** — a summary pulled from the same canonical list
 //!    used in `HelpScreen`. Accelerators: `Esc` anywhere in the flow skips
@@ -292,10 +292,10 @@ fn spawn_slide(commands: &mut Commands, index: u8, font_res: Option<&FontResourc
 /// Slide 1 — Welcome.
 fn spawn_slide_welcome(commands: &mut Commands, font_res: Option<&FontResource>) {
     spawn_modal(commands, OnboardingScreen, Z_ONBOARDING, |card| {
-        spawn_modal_header(card, "Welcome to Solitaire Quest", font_res);
+        spawn_modal_header(card, "Welcome to Ferrous Solitaire", font_res);
         spawn_modal_body_text(
             card,
-            "Solitaire Quest is a free, offline-first Klondike Solitaire game. \
+            "Ferrous Solitaire is a free, offline-first Klondike Solitaire game. \
              Play classic draw-1 or draw-3 Klondike, earn XP, unlock achievements, \
              and compete on the leaderboard. Your progress is saved locally — \
              optional sync to your own server keeps it in step across all your devices.",

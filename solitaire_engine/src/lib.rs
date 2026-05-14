@@ -1,4 +1,4 @@
-//! Bevy integration layer for Solitaire Quest.
+//! Bevy integration layer for Ferrous Solitaire.
 
 #[cfg(target_os = "android")]
 pub mod android_clipboard;

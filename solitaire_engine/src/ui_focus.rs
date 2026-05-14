@@ -1,6 +1,6 @@
 //! Keyboard focus ring for modal buttons (Phase 1).
 //!
-//! Solitaire Quest's 11 modals (Help, Stats, Achievements, Settings,
+//! Ferrous Solitaire's 11 modals (Help, Stats, Achievements, Settings,
 //! Profile, Leaderboard, Pause, Forfeit confirm, GameOver, Confirm new
 //! game, Onboarding) ship without any keyboard focus support. Phase 1
 //! gives every button spawned via [`crate::ui_modal::spawn_modal_button`]

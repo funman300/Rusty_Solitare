@@ -1,4 +1,4 @@
-# Solitaire Quest — Phase 1 + 2: Workspace & Core Game Engine
+# Ferrous Solitaire — Phase 1 + 2: Workspace & Core Game Engine
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -555,7 +555,7 @@ fn main() {
         .add_plugins(
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
-                    title: "Solitaire Quest".into(),
+                    title: "Ferrous Solitaire".into(),
                     resolution: (1280.0, 800.0).into(),
                     ..default()
                 }),
@@ -571,7 +571,7 @@ fn main() {
 ```bash
 cargo run -p solitaire_app --features bevy/dynamic_linking
 ```
-Expected: A blank Bevy window titled "Solitaire Quest" opens. Press Escape or close the window to exit. No panics or errors in the terminal.
+Expected: A blank Bevy window titled "Ferrous Solitaire" opens. Press Escape or close the window to exit. No panics or errors in the terminal.
 
 ---
 

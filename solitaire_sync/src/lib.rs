@@ -1,4 +1,4 @@
-//! Shared API types and merge logic for Solitaire Quest.
+//! Shared API types and merge logic for Ferrous Solitaire.
 //!
 //! This crate is the contract between the game client (`solitaire_data`) and
 //! the sync server (`solitaire_server`). Changing any public type here is a

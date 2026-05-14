@@ -49,7 +49,7 @@ pub enum SyncBackend {
     #[default]
     #[serde(rename = "local")]
     Local,
-    /// Sync with a self-hosted Solitaire Quest server.
+    /// Sync with a self-hosted Ferrous Solitaire server.
     #[serde(rename = "solitaire_server")]
     SolitaireServer {
         /// Base URL of the server, e.g. `"https://solitaire.example.com"`.

@@ -1,4 +1,4 @@
-// Solitaire Quest — interactive browser game.
+// Ferrous Solitaire — interactive browser game.
 //
 // Architecture:
 //   - `SolitaireGame` (Rust/WASM via solitaire_core) owns all rule logic.

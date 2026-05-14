@@ -1,4 +1,4 @@
-//! Backend-agnostic sync plugin for Solitaire Quest.
+//! Backend-agnostic sync plugin for Ferrous Solitaire.
 //!
 //! On startup, the plugin spawns an async pull task on [`AsyncComputeTaskPool`]
 //! that fetches the remote payload from the active [`SyncProvider`]. Once the

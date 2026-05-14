@@ -115,7 +115,7 @@ fn default_entry() -> ThemeEntry {
         meta: ThemeMeta {
             id: "default".to_string(),
             name: "Default".to_string(),
-            author: "Solitaire Quest".to_string(),
+            author: "Ferrous Solitaire".to_string(),
             version: "1.0".to_string(),
             card_aspect: (2, 3),
         },

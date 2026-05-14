@@ -87,7 +87,7 @@ required = true
 name = "android.permission.INTERNET"
 
 [package.metadata.android.application]
-label = "Solitaire Quest"
+label = "Ferrous Solitaire"
 # Launcher icon — references the density-bucketed mipmap resource above.
 icon = "@mipmap/ic_launcher"
 # `debuggable` defaults to false on release builds; cargo-apk flips it

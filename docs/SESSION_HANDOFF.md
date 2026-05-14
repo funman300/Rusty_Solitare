@@ -1,4 +1,4 @@
-# Solitaire Quest — Session Handoff (ARCHIVED)
+# Ferrous Solitaire — Session Handoff (ARCHIVED)
 
 > **This file is from Phase 2 (2026-04-25, 242 tests). It is kept for historical
 > reference only. The authoritative session handoff is at the repo root:
@@ -24,7 +24,7 @@ All seven Cargo crates created and compiling cleanly:
 | `solitaire_engine` | Stub | Bevy ECS systems — all plugins added in Phase 3 |
 | `solitaire_server` | Stub | Axum sync server — implemented in Phase 8C |
 | `solitaire_gpgs` | Compile-time stub | Google Play Games bridge — Android only, JNI in Phase: Android |
-| `solitaire_app` | Working | Opens blank Bevy window titled "Solitaire Quest" at 1280×800 |
+| `solitaire_app` | Working | Opens blank Bevy window titled "Ferrous Solitaire" at 1280×800 |
 
 Fast compile profiles, `assets/` directory structure, and `.env.example` are all in place.
 
