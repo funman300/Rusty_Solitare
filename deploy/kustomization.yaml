@@ -11,7 +11,6 @@ resources:
 - mariadb-deployment.yaml
 - mariadb-service.yaml
 - matomo-pvc.yaml
-- matomo-secret.yaml
 - matomo-deployment.yaml
 - matomo-service.yaml
 - ingress-analytics.yaml

@@ -12,6 +12,14 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: solitaire
+  # Secrets are applied manually and must not be pruned by ArgoCD.
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: matomo-secret
+      namespace: solitaire
+      jsonPointers:
+        - /data
   syncPolicy:
     automated:
       prune: true

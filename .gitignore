@@ -16,3 +16,8 @@ data/
 *.jks.bak
 *.jks.bak*
 *.keystore
+
+# Kubernetes secrets — apply manually, never commit
+deploy/matomo-secret.yaml
+deploy/*-secret.yaml
+deploy/*-auth-secret.yaml
