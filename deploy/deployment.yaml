@@ -19,6 +19,47 @@ spec:
       imagePullSecrets:
         - name: gitea-registry
       containers:
+        - name: analytics
+          image: datasetteproject/datasette:0.65.1
+          args:
+            - serve
+            - /data/sol.db
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8001"
+            - --readonly
+            - --setting
+            - sql_time_limit_ms
+            - "5000"
+            - --setting
+            - max_returned_rows
+            - "1000"
+          ports:
+            - containerPort: 8001
+          volumeMounts:
+            - name: db-data
+              mountPath: /data
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /-/alive
+              port: 8001
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /-/alive
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
         - name: server
           image: solitaire-server
           imagePullPolicy: Always

@@ -7,6 +7,9 @@ resources:
 - deployment.yaml
 - service.yaml
 - ingress.yaml
+- middleware-analytics-auth.yaml
+- secret-analytics-auth.yaml
+- ingress-analytics.yaml
 
 # CI updates this block automatically via `kustomize edit set image`.
 # The image name here matches the `image: solitaire-server` stub in deployment.yaml.
