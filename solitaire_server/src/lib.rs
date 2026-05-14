@@ -16,8 +16,9 @@ pub use auth::reset_password;
 
 use axum::{
     extract::DefaultBodyLimit,
+    http::{HeaderValue, Request},
     middleware as axum_middleware,
-    response::Html,
+    response::{Html, Response},
     routing::{delete, get, post},
     Router,
 };
@@ -226,7 +227,8 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
             get(|| async { Html(include_str!("../web/replays.html")) }),
         )
         .nest_service("/web", ServeDir::new("solitaire_server/web"))
-        .nest_service("/assets", ServeDir::new("assets"));
+        .nest_service("/assets", ServeDir::new("assets"))
+        .layer(axum_middleware::from_fn(security_headers));
 
     Router::new()
         .merge(protected)
@@ -236,6 +238,35 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
         // Reject request bodies larger than 1 MB.
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .with_state(state)
+}
+
+const CSP: &str = concat!(
+    "default-src 'self'; ",
+    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; ",
+    "style-src 'self' 'unsafe-inline'; ",
+    "font-src 'self'; ",
+    "img-src 'self' data:; ",
+    "connect-src 'self'; ",
+    "object-src 'none'; ",
+    "frame-ancestors 'none'",
+);
+
+async fn security_headers(req: Request<axum::body::Body>, next: axum_middleware::Next) -> Response {
+    let mut res = next.run(req).await;
+    let headers = res.headers_mut();
+    headers.insert(
+        "Content-Security-Policy",
+        HeaderValue::from_static(CSP),
+    );
+    headers.insert(
+        "X-Content-Type-Options",
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        "X-Frame-Options",
+        HeaderValue::from_static("DENY"),
+    );
+    res
 }
 
 /// `GET /health` — simple liveness probe, no auth required.

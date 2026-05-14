@@ -14,4 +14,5 @@ data/
 # Android signing keystores — never commit
 *.jks
 *.jks.bak
+*.jks.bak*
 *.keystore
