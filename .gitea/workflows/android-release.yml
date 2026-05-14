@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
 
 env:
   ANDROID_SDK: /opt/android-sdk
