@@ -113,6 +113,9 @@ jobs:
           [ -s /tmp/b64_err.txt ] && echo "base64 error: $(cat /tmp/b64_err.txt)" || true
           [ "$size" -gt 0 ] || { echo "ERROR: KEYSTORE_BASE64 is empty or invalid base64"; exit 1; }
 
+      - name: Disk space before build
+        run: df -h / && du -sh /opt/android-sdk target/ ~/.cargo 2>/dev/null || true
+
       - name: Build signed release APK
         env:
           ANDROID_HOME: ${{ env.ANDROID_SDK }}
