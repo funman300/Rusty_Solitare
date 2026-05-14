@@ -53,6 +53,16 @@ const SUIT_CODE   = { clubs: "C", diamonds: "D", hearts: "H", spades: "S" };
 const RANK_LABELS = ["","A","2","3","4","5","6","7","8","9","10","J","Q","K"];
 const RED_SUITS   = new Set(["diamonds", "hearts"]);
 
+// Preload all card images so face-up transitions never flash white.
+(function preloadCards() {
+    const suits = Object.values(SUIT_CODE);
+    const ranks = RANK_LABELS.slice(1); // skip empty index 0
+    for (const r of ranks) for (const s of suits) {
+        new Image().src = `/assets/cards/faces/${r}${s}.png`;
+    }
+    new Image().src = "/assets/cards/backs/back_0.png";
+}());
+
 // ── State ────────────────────────────────────────────────────────────────────
 let game      = null;
 let snap      = null;   // last rendered GameSnapshot
