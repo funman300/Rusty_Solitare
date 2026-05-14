@@ -12,6 +12,8 @@ on:
       - '**.md'
 
 env:
+  ANDROID_HOME: /opt/android-sdk
+  ANDROID_NDK_HOME: /opt/android-sdk/ndk/25.2.9519653
   NDK_VERSION: "25.2.9519653"
   BUILD_TOOLS_VERSION: "34.0.0"
 
@@ -27,59 +29,36 @@ jobs:
         id: meta
         run: echo "sha=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
 
-      # ── Probe the container's existing Android SDK ─────────────────────
-      - name: Detect Android SDK
-        id: sdk
-        run: |
-          # Gitea/GitHub ubuntu-latest runners may already have an Android
-          # SDK at /usr/local/lib/android/sdk. If it has the platform and
-          # NDK we need we use it directly; otherwise we install our own.
-          DEFAULT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          echo "container default ANDROID_HOME: $DEFAULT"
-          echo "sdk_path=$DEFAULT" >> "$GITHUB_OUTPUT"
-          ls "$DEFAULT/platforms/" 2>/dev/null || echo "(no platforms/ in default)"
-          ls "$DEFAULT/ndk/" 2>/dev/null || echo "(no ndk/ in default)"
-
-      # ── System dependencies (always needed for build tools + signing) ──
+      # ── System dependencies ────────────────────────────────────────────
       - name: Install system dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y openjdk-17-jdk-headless unzip jq
+          sudo apt-get install -y openjdk-17-jdk-headless unzip
 
-      # ── Install missing SDK components if needed ───────────────────────
-      - name: Install SDK platform and NDK
-        env:
-          ANDROID_SDK: ${{ steps.sdk.outputs.sdk_path }}
+      # ── Android SDK (shared cache key with release workflow) ──────────
+      - name: Cache Android SDK
+        uses: actions/cache@v4
+        id: sdk-cache
+        with:
+          path: ${{ env.ANDROID_HOME }}
+          key: v2-android-sdk-ndk${{ env.NDK_VERSION }}-bt${{ env.BUILD_TOOLS_VERSION }}
+
+      - name: Install Android SDK + NDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
-          # Ensure sdkmanager is on PATH
-          SDKMAN="$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -f "$SDKMAN" ]; then
-            echo "sdkmanager not found — installing cmdline-tools"
-            mkdir -p "$ANDROID_SDK/cmdline-tools"
-            curl -sL \
-              "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
-              -o /tmp/cmdtools.zip
-            unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
-            sudo mv /tmp/cmdtools/cmdline-tools "$ANDROID_SDK/cmdline-tools/latest"
-          fi
-
-          yes | sudo "$SDKMAN" --sdk_root="$ANDROID_SDK" --licenses \
-            > /dev/null 2>&1 || true
-
-          NEEDS=""
-          [ ! -f "$ANDROID_SDK/platforms/android-34/android.jar" ] && NEEDS="$NEEDS platforms;android-34"
-          [ ! -d "$ANDROID_SDK/ndk/$NDK_VERSION" ] && NEEDS="$NEEDS ndk;$NDK_VERSION"
-          [ ! -d "$ANDROID_SDK/build-tools/$BUILD_TOOLS_VERSION" ] && NEEDS="$NEEDS build-tools;$BUILD_TOOLS_VERSION"
-
-          if [ -n "$NEEDS" ]; then
-            echo "Installing:$NEEDS"
-            sudo "$SDKMAN" --sdk_root="$ANDROID_SDK" $NEEDS
-          else
-            echo "All SDK components already present"
-          fi
-
-          echo "ANDROID_HOME=$ANDROID_SDK"     >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          sudo mkdir -p "$ANDROID_HOME/cmdline-tools"
+          curl -sL \
+            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
+            -o /tmp/cmdtools.zip
+          unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
+          sudo mv /tmp/cmdtools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+          yes | sudo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            --sdk_root="$ANDROID_HOME" --licenses > /dev/null 2>&1 || true
+          sudo "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            --sdk_root="$ANDROID_HOME" \
+            "build-tools;$BUILD_TOOLS_VERSION" \
+            "platforms;android-34" \
+            "ndk;$NDK_VERSION"
 
       # ── Rust toolchain ─────────────────────────────────────────────────
       - name: Install Rust stable
