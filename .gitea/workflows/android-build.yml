@@ -15,6 +15,7 @@ env:
   ANDROID_SDK: /opt/android-sdk
   NDK_VERSION: "25.2.9519653"
   BUILD_TOOLS_VERSION: "34.0.0"
+  PLATFORM: "android-34"
 
 jobs:
   build-apk:
@@ -32,7 +33,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y openjdk-17-jdk-headless unzip
+          sudo apt-get install -y openjdk-17-jdk-headless unzip zip
 
       # ── Android SDK (shared cache key with release workflow) ──────────
       - name: Cache Android SDK
@@ -56,7 +57,7 @@ jobs:
           sudo ${{ env.ANDROID_SDK }}/cmdline-tools/latest/bin/sdkmanager \
             --sdk_root=${{ env.ANDROID_SDK }} \
             "build-tools;${{ env.BUILD_TOOLS_VERSION }}" \
-            "platforms;android-34" \
+            "platforms;${{ env.PLATFORM }}" \
             "ndk;${{ env.NDK_VERSION }}"
 
       # ── Rust toolchain ─────────────────────────────────────────────────
@@ -84,15 +85,12 @@ jobs:
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-registry-
 
-      # cargo-apk2 is the maintained fork of cargo-apk; reads the same
-      # `[package.metadata.android]` block. Cache key prefix `apk2-`
-      # so we don't restore an old cargo-apk binary from the previous key.
-      - name: Cache cargo-apk2 binary
+      - name: Cache cargo-ndk binary
         uses: actions/cache@v4
-        id: apk-tool-cache
+        id: ndk-tool-cache
         with:
-          path: ~/.cargo/bin/cargo-apk2
-          key: apk2-${{ runner.os }}-stable
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-${{ runner.os }}-stable
 
       - name: Cache build artifacts
         uses: actions/cache@v4
@@ -101,16 +99,19 @@ jobs:
           key: android-target-${{ hashFiles('**/Cargo.lock') }}-${{ github.sha }}
           restore-keys: android-target-${{ hashFiles('**/Cargo.lock') }}-
 
-      # ── Build ──────────────────────────────────────────────────────────
-      - name: Install cargo-apk2
-        if: steps.apk-tool-cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-apk2 --locked
+      - name: Install cargo-ndk
+        if: steps.ndk-tool-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-ndk --locked
 
+      # ── Build APK ──────────────────────────────────────────────────────
       - name: Build debug APK
-        run: |
-          export ANDROID_HOME=${{ env.ANDROID_SDK }}
-          export ANDROID_NDK_HOME=${{ env.ANDROID_SDK }}/ndk/${{ env.NDK_VERSION }}
-          cargo apk2 build --package solitaire_app --lib
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_SDK }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK }}/ndk/${{ env.NDK_VERSION }}
+          BUILD_TOOLS_VERSION: ${{ env.BUILD_TOOLS_VERSION }}
+          PLATFORM: ${{ env.PLATFORM }}
+          PROFILE: debug
+        run: ./scripts/build_android_apk.sh
 
       # ── Artifact ───────────────────────────────────────────────────────
       - name: Upload APK

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Mirrors what cargo-apk would generate from [package.metadata.android]
+  in solitaire_app/Cargo.toml. Kept in-tree so the CI workflow can drive
+  aapt2 directly without going through cargo-apk's brittle SDK discovery.
+
+  Keep in sync with:
+    * Cargo.toml: package, min_sdk_version, target_sdk_version,
+      uses_feature, uses_permission, application label/icon,
+      activity orientation
+    * [lib].name (currently "solitaire_app") — matches the
+      `android.app.lib_name` meta-data value below, which is the
+      shared object name without the `lib` prefix or `.so` suffix.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.solitairequest.app"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <uses-sdk
+        android:minSdkVersion="26"
+        android:targetSdkVersion="34" />
+
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="true" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:label="Ferrous Solitaire"
+        android:icon="@mipmap/ic_launcher"
+        android:hasCode="false">
+
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|keyboardHidden|screenSize|keyboard|navigation|screenLayout">
+
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="solitaire_app" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

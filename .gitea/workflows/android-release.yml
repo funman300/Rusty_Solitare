@@ -9,6 +9,7 @@ env:
   ANDROID_SDK: /opt/android-sdk
   NDK_VERSION: "25.2.9519653"
   BUILD_TOOLS_VERSION: "34.0.0"
+  PLATFORM: "android-34"
   GITEA_API: https://git.aleshym.co/api/v1
   REPO: funman300/Rusty_Solitare
 
@@ -24,21 +25,19 @@ jobs:
         id: meta
         run: echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
 
-      # ── Android SDK + NDK ──────────────────────────────────────────────
-      # Shared cache key with the debug workflow so a warm debug run
-      # saves the ~2 GB SDK download for the release run too.
+      # ── System dependencies ────────────────────────────────────────────
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y openjdk-17-jdk-headless unzip zip jq
+
+      # ── Android SDK (shared cache key with debug workflow) ─────────────
       - name: Cache Android SDK
         uses: actions/cache@v4
         id: sdk-cache
         with:
           path: ${{ env.ANDROID_SDK }}
           key: v2-android-sdk-ndk${{ env.NDK_VERSION }}-bt${{ env.BUILD_TOOLS_VERSION }}
-
-      # Java and jq are always needed (apksigner requires Java even on cache hits).
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y openjdk-17-jdk-headless unzip jq
 
       - name: Install Android SDK + NDK
         if: steps.sdk-cache.outputs.cache-hit != 'true'
@@ -54,10 +53,10 @@ jobs:
           sudo ${{ env.ANDROID_SDK }}/cmdline-tools/latest/bin/sdkmanager \
             --sdk_root=${{ env.ANDROID_SDK }} \
             "build-tools;${{ env.BUILD_TOOLS_VERSION }}" \
-            "platforms;android-34" \
+            "platforms;${{ env.PLATFORM }}" \
             "ndk;${{ env.NDK_VERSION }}"
 
-# ── Rust toolchain ─────────────────────────────────────────────────
+      # ── Rust toolchain ─────────────────────────────────────────────────
       - name: Install Rust stable
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
@@ -82,12 +81,12 @@ jobs:
           key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-registry-
 
-      - name: Cache cargo-apk2 binary
+      - name: Cache cargo-ndk binary
         uses: actions/cache@v4
-        id: apk-tool-cache
+        id: ndk-tool-cache
         with:
-          path: ~/.cargo/bin/cargo-apk2
-          key: apk2-${{ runner.os }}-stable
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-${{ runner.os }}-stable
 
       - name: Cache build artifacts
         uses: actions/cache@v4
@@ -96,51 +95,33 @@ jobs:
           key: android-release-target-${{ hashFiles('**/Cargo.lock') }}-${{ github.sha }}
           restore-keys: android-release-target-${{ hashFiles('**/Cargo.lock') }}-
 
-      # ── Build ──────────────────────────────────────────────────────────
-      - name: Install cargo-apk2
-        if: steps.apk-tool-cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-apk2 --locked
+      - name: Install cargo-ndk
+        if: steps.ndk-tool-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-ndk --locked
 
-      - name: Build release APK
-        run: |
-          export ANDROID_HOME=${{ env.ANDROID_SDK }}
-          export ANDROID_NDK_HOME=${{ env.ANDROID_SDK }}/ndk/${{ env.NDK_VERSION }}
-          cargo apk2 build --release --package solitaire_app --lib
-
-      # ── Sign ───────────────────────────────────────────────────────────
+      # ── Build & sign with release keystore ─────────────────────────────
       - name: Decode keystore
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > /tmp/solitaire-release.jks
 
-      - name: Align and sign APK
-        run: |
-          TAG="${{ steps.meta.outputs.tag }}"
-          UNSIGNED="target/release/apk/solitaire-quest.apk"
-          ALIGNED="/tmp/solitaire-quest-aligned.apk"
-          SIGNED="ferrous-solitaire-${TAG}.apk"
+      - name: Build signed release APK
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_SDK }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK }}/ndk/${{ env.NDK_VERSION }}
+          BUILD_TOOLS_VERSION: ${{ env.BUILD_TOOLS_VERSION }}
+          PLATFORM: ${{ env.PLATFORM }}
+          PROFILE: release
+          KEYSTORE: /tmp/solitaire-release.jks
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.KEY_PASS }}
+          APK_OUT: ferrous-solitaire-${{ steps.meta.outputs.tag }}.apk
+        run: ./scripts/build_android_apk.sh
 
-          ${{ env.ANDROID_SDK }}/build-tools/${{ env.BUILD_TOOLS_VERSION }}/zipalign -v 4 \
-            "$UNSIGNED" "$ALIGNED"
-
-          ${{ env.ANDROID_SDK }}/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner sign \
-            --ks /tmp/solitaire-release.jks \
-            --ks-pass "pass:${{ secrets.KEYSTORE_PASS }}" \
-            --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
-            --key-pass "pass:${{ secrets.KEY_PASS }}" \
-            --out "$SIGNED" \
-            "$ALIGNED"
-
-      - name: Verify APK signature
-        run: |
-          TAG="${{ steps.meta.outputs.tag }}"
-          ${{ env.ANDROID_SDK }}/build-tools/${{ env.BUILD_TOOLS_VERSION }}/apksigner verify \
-            --verbose "ferrous-solitaire-${TAG}.apk"
-
-      # ── Publish ────────────────────────────────────────────────────────
+      # ── Publish to Gitea release ───────────────────────────────────────
       - name: Create Gitea release
         id: release
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
-          # Try to create; fall back to fetching the existing release on 409.
           RESPONSE=$(curl -s -o /tmp/release.json -w "%{http_code}" \
             -X POST "$GITEA_API/repos/$REPO/releases" \
             -H "Authorization: token ${{ secrets.CI_TOKEN }}" \
