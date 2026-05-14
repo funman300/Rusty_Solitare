@@ -99,6 +99,15 @@ jobs:
           restore-keys: android-target-${{ hashFiles('**/Cargo.lock') }}-
 
       # ── Build ──────────────────────────────────────────────────────────
+      - name: Verify SDK structure
+        run: |
+          echo "=== /opt/android-sdk/ ==="
+          ls ${{ env.ANDROID_SDK }}/ || echo "MISSING"
+          echo "=== platforms/ ==="
+          ls ${{ env.ANDROID_SDK }}/platforms/ || echo "MISSING"
+          echo "=== android-34/ ==="
+          ls ${{ env.ANDROID_SDK }}/platforms/android-34/ 2>/dev/null | head -3 || echo "MISSING"
+
       - name: Install cargo-apk
         if: steps.apk-tool-cache.outputs.cache-hit != 'true'
         run: cargo install cargo-apk --locked
