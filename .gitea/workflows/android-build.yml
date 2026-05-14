@@ -1,0 +1,116 @@
+name: Android Build
+
+on:
+  push:
+    branches: [master]
+    # Rebuild whenever app/engine/asset code changes.
+    # Skip server-only, deploy, and doc changes.
+    paths-ignore:
+      - 'deploy/**'
+      - 'argocd/**'
+      - 'solitaire_server/**'
+      - '**.md'
+
+env:
+  ANDROID_SDK_ROOT: /opt/android-sdk
+  NDK_VERSION: "25.2.9519653"
+  BUILD_TOOLS_VERSION: "34.0.0"
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set short SHA
+        id: meta
+        run: echo "sha=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+
+      # ── Android SDK + NDK ──────────────────────────────────────────────
+      # Cache the entire SDK root so subsequent runs skip the ~2 GB download.
+      - name: Cache Android SDK
+        uses: actions/cache@v4
+        id: sdk-cache
+        with:
+          path: ${{ env.ANDROID_SDK_ROOT }}
+          key: android-sdk-ndk${{ env.NDK_VERSION }}-bt${{ env.BUILD_TOOLS_VERSION }}
+
+      - name: Install Android SDK + NDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get install -y openjdk-17-jdk-headless unzip
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          curl -sL \
+            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
+            -o /tmp/cmdtools.zip
+          unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
+          mv /tmp/cmdtools/cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          # Accept all SDK licences non-interactively.
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses \
+            > /dev/null 2>&1 || true
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "build-tools;$BUILD_TOOLS_VERSION" \
+            "platforms;android-34" \
+            "ndk;$NDK_VERSION"
+
+      - name: Export Android environment
+        run: |
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT"              >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      # ── Rust toolchain ─────────────────────────────────────────────────
+      - name: Install Rust stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain stable --no-modify-path
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Add Android cross-compilation targets
+        run: |
+          rustup target add \
+            aarch64-linux-android \
+            armv7-linux-androideabi \
+            x86_64-linux-android
+
+      # ── Cargo caches ───────────────────────────────────────────────────
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-
+
+      - name: Cache cargo-apk binary
+        uses: actions/cache@v4
+        id: apk-tool-cache
+        with:
+          path: ~/.cargo/bin/cargo-apk
+          key: cargo-apk-${{ runner.os }}-stable
+
+      - name: Cache build artifacts
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: android-target-${{ hashFiles('**/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: android-target-${{ hashFiles('**/Cargo.lock') }}-
+
+      # ── Build ──────────────────────────────────────────────────────────
+      - name: Install cargo-apk
+        if: steps.apk-tool-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-apk --locked
+
+      - name: Build debug APK
+        run: cargo apk build --package solitaire_app --lib
+
+      # ── Artifact ───────────────────────────────────────────────────────
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: solitaire-quest-debug-${{ steps.meta.outputs.sha }}
+          path: target/debug/apk/solitaire-quest.apk
+          retention-days: 30
