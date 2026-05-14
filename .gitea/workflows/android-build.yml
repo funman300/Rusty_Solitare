@@ -13,6 +13,8 @@ on:
 
 env:
   ANDROID_SDK_ROOT: /opt/android-sdk
+  ANDROID_HOME: /opt/android-sdk
+  ANDROID_NDK_HOME: /opt/android-sdk/ndk/25.2.9519653
   NDK_VERSION: "25.2.9519653"
   BUILD_TOOLS_VERSION: "34.0.0"
 
@@ -59,12 +61,7 @@ jobs:
             "platforms;android-34" \
             "ndk;$NDK_VERSION"
 
-      - name: Export Android environment
-        run: |
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT"              >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
-
-      # ── Rust toolchain ─────────────────────────────────────────────────
+# ── Rust toolchain ─────────────────────────────────────────────────
       - name: Install Rust stable
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
