@@ -104,6 +104,10 @@ jobs:
         run: cargo install cargo-ndk --locked
 
       # ── Build APK ──────────────────────────────────────────────────────
+      # Debug CI only builds arm64-v8a — full three-ABI debug builds blow
+      # past the runner's disk budget (~25 GB of target/ + intermediate
+      # APKs caused apksigner to OOM-on-disk in the previous run). Release
+      # CI still ships all three ABIs from android-release.yml.
       - name: Build debug APK
         env:
           ANDROID_HOME: ${{ env.ANDROID_SDK }}
@@ -111,6 +115,7 @@ jobs:
           BUILD_TOOLS_VERSION: ${{ env.BUILD_TOOLS_VERSION }}
           PLATFORM: ${{ env.PLATFORM }}
           PROFILE: debug
+          ABIS: arm64-v8a
         run: ./scripts/build_android_apk.sh
 
       # ── Artifact ───────────────────────────────────────────────────────

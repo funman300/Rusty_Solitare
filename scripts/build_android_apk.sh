@@ -14,6 +14,10 @@
 #
 # Optional environment:
 #   PROFILE                 "debug" (default) | "release"
+#   ABIS                    Space-separated Android ABIs to build (default:
+#                           "arm64-v8a armeabi-v7a x86_64"). Reduce in CI to
+#                           fit the runner's disk budget — a full three-ABI
+#                           debug build can exceed 25 GB of target/ output.
 #   APK_OUT                 Output APK path (default: target/$PROFILE/apk/solitaire-quest.apk)
 #   KEYSTORE                Path to keystore for signing (default: generates a debug keystore)
 #   KEYSTORE_PASS           Keystore password (default: "android" for the generated debug keystore)
@@ -30,6 +34,7 @@ set -euo pipefail
 : "${PLATFORM:?PLATFORM must be set (e.g. android-34)}"
 
 PROFILE="${PROFILE:-debug}"
+ABIS="${ABIS:-arm64-v8a armeabi-v7a x86_64}"
 APK_OUT="${APK_OUT:-target/${PROFILE}/apk/solitaire-quest.apk}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -53,14 +58,11 @@ mkdir -p "$STAGING/lib" "$STAGING/compiled-res"
 # --- 1. native libraries via cargo-ndk -------------------------------------
 # `-o $STAGING/lib` lays out files as $STAGING/lib/<abi>/libsolitaire_app.so
 # which is the directory structure the APK expects under lib/.
-CARGO_NDK_ARGS=(
-  -t arm64-v8a
-  -t armeabi-v7a
-  -t x86_64
-  --platform 26
-  -o "$STAGING/lib"
-  build --package solitaire_app --lib
-)
+CARGO_NDK_ARGS=( --platform 26 -o "$STAGING/lib" )
+for abi in $ABIS; do
+  CARGO_NDK_ARGS+=( -t "$abi" )
+done
+CARGO_NDK_ARGS+=( build --package solitaire_app --lib )
 if [ "$PROFILE" = "release" ]; then
   CARGO_NDK_ARGS+=( --release )
 fi
@@ -97,6 +99,9 @@ echo ">>> bundle native libraries"
 # --- 4. zipalign -----------------------------------------------------------
 echo ">>> zipalign"
 "$BT/zipalign" -p -f 4 "$STAGING/app-unsigned.apk" "$STAGING/app-aligned.apk"
+# Free the unsigned intermediate now — apksigner reads $app-aligned.apk and
+# writes $APK_OUT, and the runner's disk is tight after a multi-ABI build.
+rm -f "$STAGING/app-unsigned.apk"
 
 # --- 5. sign ---------------------------------------------------------------
 if [ -z "${KEYSTORE:-}" ]; then
