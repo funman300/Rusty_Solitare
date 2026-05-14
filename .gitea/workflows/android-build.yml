@@ -101,12 +101,10 @@ jobs:
       # ── Build ──────────────────────────────────────────────────────────
       - name: Verify SDK structure
         run: |
-          echo "=== /opt/android-sdk/ ==="
-          ls ${{ env.ANDROID_SDK }}/ || echo "MISSING"
-          echo "=== platforms/ ==="
-          ls ${{ env.ANDROID_SDK }}/platforms/ || echo "MISSING"
-          echo "=== android-34/ ==="
-          ls ${{ env.ANDROID_SDK }}/platforms/android-34/ 2>/dev/null | head -3 || echo "MISSING"
+          echo "=== /opt/android-sdk tree ==="
+          find ${{ env.ANDROID_SDK }} -maxdepth 3 -type d 2>/dev/null || echo "SDK dir missing"
+          echo "=== find android.jar ==="
+          find /opt /root /usr/local/lib/android -name "android.jar" 2>/dev/null || echo "android.jar not found"
 
       - name: Install cargo-apk
         if: steps.apk-tool-cache.outputs.cache-hit != 'true'
