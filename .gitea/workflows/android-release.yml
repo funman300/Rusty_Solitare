@@ -34,10 +34,13 @@ jobs:
           path: ${{ env.ANDROID_SDK_ROOT }}
           key: android-sdk-ndk${{ env.NDK_VERSION }}-bt${{ env.BUILD_TOOLS_VERSION }}
 
+      # Java and jq are always needed (apksigner requires Java even on cache hits).
+      - name: Install system dependencies
+        run: sudo apt-get install -y openjdk-17-jdk-headless unzip jq
+
       - name: Install Android SDK + NDK
         if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get install -y openjdk-17-jdk-headless unzip
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
           curl -sL \
             "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
@@ -136,11 +139,22 @@ jobs:
         id: release
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
-          RELEASE_ID=$(curl -sf -X POST "$GITEA_API/repos/$REPO/releases" \
+          # Try to create; fall back to fetching the existing release on 409.
+          RESPONSE=$(curl -s -o /tmp/release.json -w "%{http_code}" \
+            -X POST "$GITEA_API/repos/$REPO/releases" \
             -H "Authorization: token ${{ secrets.CI_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"draft\":false,\"prerelease\":false}" \
-            | jq -r '.id')
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"draft\":false,\"prerelease\":false}")
+          if [ "$RESPONSE" = "409" ]; then
+            curl -sf "$GITEA_API/repos/$REPO/releases/tags/$TAG" \
+              -H "Authorization: token ${{ secrets.CI_TOKEN }}" \
+              > /tmp/release.json
+          elif [ "$RESPONSE" != "201" ]; then
+            echo "Release creation failed with HTTP $RESPONSE"
+            cat /tmp/release.json
+            exit 1
+          fi
+          RELEASE_ID=$(jq -r '.id' /tmp/release.json)
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
       - name: Upload signed APK
