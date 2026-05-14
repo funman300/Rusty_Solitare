@@ -214,6 +214,10 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
             get(|| async { Html(include_str!("../web/game.html")) }),
         )
         .route(
+            "/account",
+            get(|| async { Html(include_str!("../web/account.html")) }),
+        )
+        .route(
             "/leaderboard",
             get(|| async { Html(include_str!("../web/leaderboard.html")) }),
         )

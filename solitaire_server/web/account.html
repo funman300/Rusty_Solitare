@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ferrous Solitaire — Account</title>
+    <style>
+        @font-face {
+            font-family: "FiraMono";
+            src: url("/assets/fonts/main.ttf") format("truetype");
+        }
+        :root {
+            --bg: #151515; --panel: #202020; --panel-hi: #2a2a2a;
+            --border: #353535; --text: #d0d0d0; --text-muted: #a0a0a0;
+            --accent: #a54242; --accent-hi: #c25e5e; --success: #acc267;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: "FiraMono", "Fira Mono", monospace;
+            background: var(--bg); color: var(--text);
+            min-height: 100vh; display: flex; flex-direction: column;
+        }
+        header {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border);
+            position: sticky; top: 0; background: var(--bg); z-index: 10;
+        }
+        .home-link {
+            color: var(--text-muted); text-decoration: none;
+            font-size: 18px; padding: 2px 4px; border-radius: 4px;
+            transition: color 120ms, background 120ms;
+        }
+        .home-link:hover { color: var(--text); background: var(--panel-hi); }
+        h1 { font-size: 16px; font-weight: 700; }
+        main {
+            flex: 1; display: flex; align-items: flex-start;
+            justify-content: center; padding: 40px 20px;
+        }
+        .card {
+            background: var(--panel); border: 1px solid var(--border);
+            border-radius: 10px; padding: 28px; width: 100%; max-width: 380px;
+            display: flex; flex-direction: column; gap: 20px;
+        }
+
+        /* ── Tabs ── */
+        .tabs {
+            display: flex; border-bottom: 1px solid var(--border);
+            margin-bottom: -4px;
+        }
+        .tab {
+            flex: 1; padding: 8px 0; text-align: center;
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            color: var(--text-muted); border-bottom: 2px solid transparent;
+            transition: color 120ms, border-color 120ms;
+        }
+        .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+        .tab:hover:not(.active) { color: var(--text); }
+
+        /* ── Form ── */
+        .form { display: flex; flex-direction: column; gap: 12px; }
+        label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+        input {
+            background: var(--panel-hi); border: 1px solid var(--border);
+            border-radius: 6px; padding: 9px 12px; color: var(--text);
+            font-family: inherit; font-size: 14px; width: 100%;
+            transition: border-color 120ms;
+        }
+        input:focus { outline: none; border-color: var(--accent); }
+        .hint { font-size: 11px; color: var(--text-muted); }
+        .error-msg { color: var(--accent-hi); font-size: 12px; display: none; }
+        .success-msg { color: var(--success); font-size: 12px; display: none; }
+        button[type="submit"] {
+            background: var(--accent); color: var(--text); border: none;
+            border-radius: 6px; padding: 10px 16px; font-family: inherit;
+            font-size: 14px; font-weight: 700; cursor: pointer;
+            transition: background 120ms; margin-top: 4px;
+        }
+        button[type="submit"]:hover { background: var(--accent-hi); }
+        button[type="submit"]:disabled { opacity: 0.4; cursor: default; }
+
+        /* ── Signed-in state ── */
+        #signed-in { display: none; flex-direction: column; gap: 16px; }
+        .username-display {
+            font-size: 20px; font-weight: 700; text-align: center;
+        }
+        .signed-in-detail {
+            font-size: 13px; color: var(--text-muted); text-align: center;
+        }
+        .signed-in-actions { display: flex; flex-direction: column; gap: 8px; }
+        .btn-secondary {
+            background: var(--panel-hi); color: var(--text);
+            border: 1px solid var(--border); border-radius: 6px;
+            padding: 9px 16px; font-family: inherit; font-size: 13px;
+            font-weight: 600; cursor: pointer; transition: background 120ms;
+            text-align: center; text-decoration: none; display: block;
+        }
+        .btn-secondary:hover { background: var(--border); }
+        .btn-danger {
+            background: transparent; color: var(--accent-hi);
+            border: 1px solid var(--accent); border-radius: 6px;
+            padding: 9px 16px; font-family: inherit; font-size: 13px;
+            cursor: pointer; transition: background 120ms;
+        }
+        .btn-danger:hover { background: rgba(165, 66, 66, 0.15); }
+    </style>
+</head>
+<body>
+    <header>
+        <a href="/" class="home-link">&#8592;</a>
+        <h1>Account</h1>
+    </header>
+    <main>
+        <div class="card">
+            <!-- Signed-in view -->
+            <div id="signed-in">
+                <div class="signed-in-detail">Signed in as</div>
+                <div class="username-display" id="display-username"></div>
+                <div class="signed-in-actions">
+                    <a class="btn-secondary" href="/leaderboard">View Leaderboard</a>
+                    <a class="btn-secondary" href="/replays">Recent Replays</a>
+                    <button class="btn-danger" id="btn-signout">Sign Out</button>
+                </div>
+            </div>
+
+            <!-- Auth forms -->
+            <div id="auth-section">
+                <div class="tabs">
+                    <div class="tab active" data-tab="signin">Sign In</div>
+                    <div class="tab" data-tab="signup">Create Account</div>
+                </div>
+
+                <!-- Sign In -->
+                <form class="form" id="form-signin" style="margin-top:20px">
+                    <div>
+                        <label for="si-user">Username</label>
+                        <input type="text" id="si-user" placeholder="your_username" autocomplete="username">
+                    </div>
+                    <div>
+                        <label for="si-pass">Password</label>
+                        <input type="password" id="si-pass" placeholder="••••••••" autocomplete="current-password">
+                    </div>
+                    <div class="error-msg" id="si-error"></div>
+                    <button type="submit">Sign In</button>
+                </form>
+
+                <!-- Sign Up -->
+                <form class="form" id="form-signup" style="display:none; margin-top:20px">
+                    <div>
+                        <label for="su-user">Username</label>
+                        <input type="text" id="su-user" placeholder="your_username" autocomplete="username"
+                               minlength="3" maxlength="32">
+                        <div class="hint" style="margin-top:4px">3–32 characters, letters, digits, underscores</div>
+                    </div>
+                    <div>
+                        <label for="su-pass">Password</label>
+                        <input type="password" id="su-pass" placeholder="••••••••" autocomplete="new-password"
+                               minlength="8">
+                        <div class="hint" style="margin-top:4px">Minimum 8 characters</div>
+                    </div>
+                    <div>
+                        <label for="su-pass2">Confirm Password</label>
+                        <input type="password" id="su-pass2" placeholder="••••••••" autocomplete="new-password">
+                    </div>
+                    <div class="error-msg" id="su-error"></div>
+                    <div class="success-msg" id="su-success"></div>
+                    <button type="submit" id="btn-signup">Create Account</button>
+                </form>
+            </div>
+        </div>
+    </main>
+    <script>
+        const TOKEN_KEY = 'fs_token';
+
+        function getUsername(token) {
+            try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                return payload.sub_name ?? payload.username ?? payload.sub ?? null;
+            } catch { return null; }
+        }
+
+        function showSignedIn(token) {
+            const username = getUsername(token);
+            document.getElementById('display-username').textContent = username ?? 'Player';
+            document.getElementById('signed-in').style.display = 'flex';
+            document.getElementById('auth-section').style.display = 'none';
+        }
+
+        function showAuth() {
+            document.getElementById('signed-in').style.display = 'none';
+            document.getElementById('auth-section').style.display = 'block';
+        }
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                const which = tab.dataset.tab;
+                document.getElementById('form-signin').style.display = which === 'signin' ? 'flex' : 'none';
+                document.getElementById('form-signup').style.display = which === 'signup' ? 'flex' : 'none';
+            });
+        });
+
+        // Sign In
+        document.getElementById('form-signin').addEventListener('submit', async e => {
+            e.preventDefault();
+            const user = document.getElementById('si-user').value.trim();
+            const pass = document.getElementById('si-pass').value;
+            const err = document.getElementById('si-error');
+            err.style.display = 'none';
+            const res = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: user, password: pass }),
+            });
+            if (!res.ok) {
+                err.textContent = 'Invalid username or password.';
+                err.style.display = 'block';
+                return;
+            }
+            const { access_token } = await res.json();
+            localStorage.setItem(TOKEN_KEY, access_token);
+            showSignedIn(access_token);
+        });
+
+        // Sign Up
+        document.getElementById('form-signup').addEventListener('submit', async e => {
+            e.preventDefault();
+            const user = document.getElementById('su-user').value.trim();
+            const pass = document.getElementById('su-pass').value;
+            const pass2 = document.getElementById('su-pass2').value;
+            const err = document.getElementById('su-error');
+            const ok = document.getElementById('su-success');
+            err.style.display = 'none';
+            ok.style.display = 'none';
+
+            if (pass !== pass2) {
+                err.textContent = 'Passwords do not match.';
+                err.style.display = 'block';
+                return;
+            }
+            const btn = document.getElementById('btn-signup');
+            btn.disabled = true;
+            const res = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: user, password: pass }),
+            });
+            btn.disabled = false;
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                err.textContent = body.message ?? 'Registration failed. Username may already be taken.';
+                err.style.display = 'block';
+                return;
+            }
+            const { access_token } = await res.json();
+            localStorage.setItem(TOKEN_KEY, access_token);
+            showSignedIn(access_token);
+        });
+
+        // Sign Out
+        document.getElementById('btn-signout').addEventListener('click', () => {
+            localStorage.removeItem(TOKEN_KEY);
+            showAuth();
+        });
+
+        // Initial state
+        const token = localStorage.getItem(TOKEN_KEY);
+        if (token) { showSignedIn(token); } else { showAuth(); }
+    </script>
+</body>
+</html>
