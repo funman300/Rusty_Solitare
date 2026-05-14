@@ -1,0 +1,154 @@
+name: Android Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  ANDROID_SDK_ROOT: /opt/android-sdk
+  NDK_VERSION: "25.2.9519653"
+  BUILD_TOOLS_VERSION: "34.0.0"
+  GITEA_API: https://git.aleshym.co/api/v1
+  REPO: funman300/Rusty_Solitare
+
+jobs:
+  build-release-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: meta
+        run: echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      # ── Android SDK + NDK ──────────────────────────────────────────────
+      # Shared cache key with the debug workflow so a warm debug run
+      # saves the ~2 GB SDK download for the release run too.
+      - name: Cache Android SDK
+        uses: actions/cache@v4
+        id: sdk-cache
+        with:
+          path: ${{ env.ANDROID_SDK_ROOT }}
+          key: android-sdk-ndk${{ env.NDK_VERSION }}-bt${{ env.BUILD_TOOLS_VERSION }}
+
+      - name: Install Android SDK + NDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get install -y openjdk-17-jdk-headless unzip
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          curl -sL \
+            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
+            -o /tmp/cmdtools.zip
+          unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
+          mv /tmp/cmdtools/cmdline-tools "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses \
+            > /dev/null 2>&1 || true
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "build-tools;$BUILD_TOOLS_VERSION" \
+            "platforms;android-34" \
+            "ndk;$NDK_VERSION"
+
+      - name: Export Android environment
+        run: |
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT"                        >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK_VERSION"  >> "$GITHUB_ENV"
+
+      # ── Rust toolchain ─────────────────────────────────────────────────
+      - name: Install Rust stable
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain stable --no-modify-path
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Add Android cross-compilation targets
+        run: |
+          rustup target add \
+            aarch64-linux-android \
+            armv7-linux-androideabi \
+            x86_64-linux-android
+
+      # ── Cargo caches ───────────────────────────────────────────────────
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-
+
+      - name: Cache cargo-apk binary
+        uses: actions/cache@v4
+        id: apk-tool-cache
+        with:
+          path: ~/.cargo/bin/cargo-apk
+          key: cargo-apk-${{ runner.os }}-stable
+
+      - name: Cache build artifacts
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: android-release-target-${{ hashFiles('**/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: android-release-target-${{ hashFiles('**/Cargo.lock') }}-
+
+      # ── Build ──────────────────────────────────────────────────────────
+      - name: Install cargo-apk
+        if: steps.apk-tool-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-apk --locked
+
+      - name: Build release APK
+        run: cargo apk build --release --package solitaire_app --lib
+
+      # ── Sign ───────────────────────────────────────────────────────────
+      - name: Decode keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > /tmp/solitaire-release.jks
+
+      - name: Align and sign APK
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          UNSIGNED="target/release/apk/solitaire-quest.apk"
+          ALIGNED="/tmp/solitaire-quest-aligned.apk"
+          SIGNED="ferrous-solitaire-${TAG}.apk"
+
+          "$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VERSION/zipalign" -v 4 \
+            "$UNSIGNED" "$ALIGNED"
+
+          "$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VERSION/apksigner" sign \
+            --ks /tmp/solitaire-release.jks \
+            --ks-pass "pass:${{ secrets.KEYSTORE_PASS }}" \
+            --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
+            --key-pass "pass:${{ secrets.KEY_PASS }}" \
+            --out "$SIGNED" \
+            "$ALIGNED"
+
+      - name: Verify APK signature
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          "$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VERSION/apksigner" verify \
+            --verbose "ferrous-solitaire-${TAG}.apk"
+
+      # ── Publish ────────────────────────────────────────────────────────
+      - name: Create Gitea release
+        id: release
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          RELEASE_ID=$(curl -sf -X POST "$GITEA_API/repos/$REPO/releases" \
+            -H "Authorization: token ${{ secrets.CI_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"draft\":false,\"prerelease\":false}" \
+            | jq -r '.id')
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed APK
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          APK="ferrous-solitaire-${TAG}.apk"
+          curl -sf -X POST \
+            "$GITEA_API/repos/$REPO/releases/${{ steps.release.outputs.release_id }}/assets?name=$APK" \
+            -H "Authorization: token ${{ secrets.CI_TOKEN }}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @"$APK"
