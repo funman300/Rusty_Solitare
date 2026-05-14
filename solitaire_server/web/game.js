@@ -53,15 +53,21 @@ const SUIT_CODE   = { clubs: "C", diamonds: "D", hearts: "H", spades: "S" };
 const RANK_LABELS = ["","A","2","3","4","5","6","7","8","9","10","J","Q","K"];
 const RED_SUITS   = new Set(["diamonds", "hearts"]);
 
-// Preload all card images so face-up transitions never flash white.
-(function preloadCards() {
+// ── Theme ─────────────────────────────────────────────────────────────────────
+let cardTheme = localStorage.getItem("fs_theme") || "classic";
+
+function preloadTheme(theme) {
     const suits = Object.values(SUIT_CODE);
-    const ranks = RANK_LABELS.slice(1); // skip empty index 0
+    const ranks = RANK_LABELS.slice(1);
     for (const r of ranks) for (const s of suits) {
-        new Image().src = `/assets/cards/faces/${r}${s}.png`;
+        new Image().src = `/assets/cards/faces/${theme}/${r}${s}.png`;
     }
-    new Image().src = "/assets/cards/backs/back_0.png";
-}());
+    new Image().src = `/assets/cards/backs/${theme}/back_0.png`;
+}
+
+// Preload both themes on load so switching is instant.
+preloadTheme("classic");
+preloadTheme("dark");
 
 // ── State ────────────────────────────────────────────────────────────────────
 let game      = null;
@@ -100,6 +106,7 @@ const hudSeed    = document.getElementById("hud-seed");
 const btnUndo    = document.getElementById("btn-undo");
 const btnNew     = document.getElementById("btn-new");
 const chkDraw3   = document.getElementById("chk-draw3");
+const btnTheme   = document.getElementById("btn-theme");
 const winOverlay = document.getElementById("win-overlay");
 const winScore   = document.getElementById("win-score");
 const winMoves   = document.getElementById("win-moves");
@@ -121,9 +128,14 @@ function scaleBoard() {
     board.style.transformOrigin = "center center";
 }
 
+function syncThemeButton() {
+    if (btnTheme) btnTheme.textContent = cardTheme === "classic" ? "Dark" : "Classic";
+}
+
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 async function bootstrap() {
     await init();
+    syncThemeButton();
 
     const params  = new URLSearchParams(window.location.search);
     const urlSeed = params.has("seed") ? Number(params.get("seed")) : randomSeed();
@@ -302,12 +314,12 @@ function updateCardEl(el, card, pileName, idx, total) {
 
     if (!card.face_up) {
         el.className = "card face-down";
-        el.style.backgroundImage = "url('/assets/cards/backs/back_0.png')";
+        el.style.backgroundImage = `url('/assets/cards/backs/${cardTheme}/back_0.png')`;
         el.innerHTML = "";
     } else {
         const isRed = RED_SUITS.has(card.suit);
         el.className = `card ${isRed ? "red" : "black"}`;
-        el.style.backgroundImage = `url('/assets/cards/faces/${RANK_LABELS[card.rank]}${SUIT_CODE[card.suit]}.png')`;
+        el.style.backgroundImage = `url('/assets/cards/faces/${cardTheme}/${RANK_LABELS[card.rank]}${SUIT_CODE[card.suit]}.png')`;
         el.innerHTML = "";
     }
 }
@@ -382,6 +394,12 @@ function attachHandlers() {
     chkDraw3.addEventListener("change", () => {
         drawThree = chkDraw3.checked;
         startGame(randomSeed());
+    });
+    btnTheme.addEventListener("click", () => {
+        cardTheme = cardTheme === "classic" ? "dark" : "classic";
+        localStorage.setItem("fs_theme", cardTheme);
+        syncThemeButton();
+        if (snap) render(snap);
     });
 
     document.addEventListener("keydown", (e) => {
