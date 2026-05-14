@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="384" viewBox="0 0 256 384">
+  <rect x="2" y="2" width="252" height="380" rx="14" ry="14"
+        fill="#FAFAF8" stroke="#AAAAAA" stroke-width="1.5"/>
+
+  <!-- Top-left corner: rank label + small suit -->
+  <text x="11" y="44" font-family="Fira Mono" font-size="36" font-weight="700"
+        fill="#111111">10</text>
+  <g transform="translate(14 50) scale(0.625)">
+    <path d="M16,4 C 13,4 10,7 10,10 C 10,12 11,13 12,14 C 9,14 4,17 4,21 C 4,24 7,27 10,27 C 12,27 14,26 14,24 L 13,30 L 19,30 L 18,24 C 18,26 20,27 22,27 C 25,27 28,24 28,21 C 28,17 23,14 20,14 C 21,13 22,12 22,10 C 22,7 19,4 16,4 Z" fill="#111111"/>
+  </g>
+
+  <!-- Centre: large suit, 64x64 in 256x384 card -->
+  <g transform="translate(96 160) scale(2)">
+    <path d="M16,4 C 13,4 10,7 10,10 C 10,12 11,13 12,14 C 9,14 4,17 4,21 C 4,24 7,27 10,27 C 12,27 14,26 14,24 L 13,30 L 19,30 L 18,24 C 18,26 20,27 22,27 C 25,27 28,24 28,21 C 28,17 23,14 20,14 C 21,13 22,12 22,10 C 22,7 19,4 16,4 Z" fill="#111111"/>
+  </g>
+
+  <!-- Bottom-right corner: mirrored via 180° rotation around card centre -->
+  <g transform="rotate(180 128 192)">
+    <text x="11" y="44" font-family="Fira Mono" font-size="36" font-weight="700"
+          fill="#111111">10</text>
+    <g transform="translate(14 50) scale(0.625)">
+      <path d="M16,4 C 13,4 10,7 10,10 C 10,12 11,13 12,14 C 9,14 4,17 4,21 C 4,24 7,27 10,27 C 12,27 14,26 14,24 L 13,30 L 19,30 L 18,24 C 18,26 20,27 22,27 C 25,27 28,24 28,21 C 28,17 23,14 20,14 C 21,13 22,12 22,10 C 22,7 19,4 16,4 Z" fill="#111111"/>
+    </g>
+  </g>
+</svg>

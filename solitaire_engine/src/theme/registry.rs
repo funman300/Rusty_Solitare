@@ -101,6 +101,7 @@ fn build_registry_on_startup(mut registry: bevy::ecs::system::ResMut<ThemeRegist
 pub fn build_registry(user_dir: &Path) -> ThemeRegistry {
     let mut entries = Vec::new();
     entries.push(default_entry());
+    entries.push(classic_entry());
     entries.extend(discover_user_themes(user_dir));
     ThemeRegistry { entries }
 }
@@ -117,6 +118,24 @@ fn default_entry() -> ThemeEntry {
             name: "Default".to_string(),
             author: "Ferrous Solitaire".to_string(),
             version: "1.0".to_string(),
+            card_aspect: (2, 3),
+        },
+    }
+}
+
+/// Classic bundled theme — white card faces with traditional red/black
+/// colour scheme, loaded from `assets/themes/classic/` via the default
+/// AssetServer source.
+fn classic_entry() -> ThemeEntry {
+    ThemeEntry {
+        id: "classic".to_string(),
+        display_name: "Classic".to_string(),
+        manifest_url: "themes/classic/theme.ron".to_string(),
+        meta: ThemeMeta {
+            id: "classic".to_string(),
+            name: "Classic".to_string(),
+            author: "Ferrous Solitaire".to_string(),
+            version: "1.0.0".to_string(),
             card_aspect: (2, 3),
         },
     }
@@ -238,20 +257,24 @@ mod tests {
         fs::write(dir.join("theme.ron"), manifest).unwrap();
     }
 
+    // Number of always-present bundled themes (default + classic).
+    const BUNDLED_COUNT: usize = 2;
+
     #[test]
-    fn empty_user_dir_yields_only_the_default_entry() {
+    fn empty_user_dir_yields_only_bundled_entries() {
         let tmp = tempfile::tempdir().unwrap();
         let registry = build_registry(tmp.path());
-        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.len(), BUNDLED_COUNT);
         assert_eq!(registry.entries[0].id, "default");
+        assert_eq!(registry.entries[1].id, "classic");
     }
 
     #[test]
-    fn nonexistent_user_dir_still_yields_default() {
+    fn nonexistent_user_dir_still_yields_bundled_entries() {
         let registry = build_registry(Path::new(
             "/definitely/not/a/real/path/should/not/panic",
         ));
-        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.len(), BUNDLED_COUNT);
         assert_eq!(registry.entries[0].id, "default");
     }
 
@@ -263,7 +286,7 @@ mod tests {
         write_manifest(&theme_dir, "midnight", "Midnight");
 
         let registry = build_registry(tmp.path());
-        assert_eq!(registry.len(), 2);
+        assert_eq!(registry.len(), BUNDLED_COUNT + 1);
         let entry = registry.find("midnight").expect("midnight registered");
         assert_eq!(entry.display_name, "Midnight");
         assert_eq!(entry.manifest_url, "themes://midnight/theme.ron");
@@ -309,7 +332,7 @@ mod tests {
         write_manifest(&theme_dir, "../etc/passwd", "Evil");
 
         let registry = build_registry(tmp.path());
-        assert_eq!(registry.len(), 1, "escape attempt must not register");
+        assert_eq!(registry.len(), BUNDLED_COUNT, "escape attempt must not register");
         assert_eq!(registry.entries[0].id, "default");
     }
 
@@ -321,7 +344,7 @@ mod tests {
         fs::write(lonely.join("readme.md"), "wrong filename").unwrap();
 
         let registry = build_registry(tmp.path());
-        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.len(), BUNDLED_COUNT);
     }
 
     #[test]
@@ -349,7 +372,7 @@ mod tests {
 
         refresh_registry(&mut registry, tmp.path());
 
-        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.len(), BUNDLED_COUNT);
         assert_eq!(registry.entries[0].id, "default");
         assert!(registry.find("stale").is_none());
     }
