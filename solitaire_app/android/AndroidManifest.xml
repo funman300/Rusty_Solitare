@@ -13,7 +13,7 @@
       shared object name without the `lib` prefix or `.so` suffix.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.solitairequest.app"
+    package="com.ferrousapp.solitaire"
     android:versionCode="1"
     android:versionName="1.0">
 

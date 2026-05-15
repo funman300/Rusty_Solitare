@@ -1,0 +1,23 @@
+[Unit]
+Description=Ferrous Solitaire Sync Server
+Documentation=https://github.com/funman300/ferrous-solitaire/blob/main/README_SERVER.md
+After=network.target
+
+[Service]
+Type=simple
+User=ferrous-solitaire
+Group=ferrous-solitaire
+EnvironmentFile=/etc/ferrous-solitaire-server/server.env
+ExecStart=/usr/bin/solitaire_server
+Restart=on-failure
+RestartSec=5s
+
+# Harden the service
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ferrous-solitaire-server
+
+[Install]
+WantedBy=multi-user.target

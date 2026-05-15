@@ -1,6 +1,6 @@
 //! Secure storage for JWT access and refresh tokens using the OS keychain.
 //!
-//! Tokens are stored under service name `"solitaire_quest_server"` with entry
+//! Tokens are stored under service name `"ferrous_solitaire_server"` with entry
 //! keys `"{username}_access"` and `"{username}_refresh"`.
 //!
 //! On Linux this requires a running secret service (GNOME Keyring / KWallet).
@@ -46,7 +46,7 @@ pub enum TokenError {
 
 /// Service name used to namespace all keychain entries for this application.
 #[cfg(not(target_os = "android"))]
-const SERVICE: &str = "solitaire_quest_server";
+const SERVICE: &str = "ferrous_solitaire_server";
 
 /// Map a `keyring_core::Error` to the appropriate `TokenError`.
 #[cfg(not(target_os = "android"))]

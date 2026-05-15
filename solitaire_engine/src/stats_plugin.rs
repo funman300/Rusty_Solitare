@@ -64,7 +64,7 @@ pub struct StatsCell;
 /// Resource holding the rolling [`ReplayHistory`] of recent winning
 /// replays.
 ///
-/// Populated from `<data_dir>/solitaire_quest/replays.json` at startup
+/// Populated from `<data_dir>/ferrous_solitaire/replays.json` at startup
 /// and refreshed in-place whenever the engine writes a new winning
 /// replay so the Stats overlay's selector always reflects the current
 /// on-disk history.
@@ -166,7 +166,7 @@ impl Default for StatsPlugin {
 
 impl StatsPlugin {
     /// Plugin configured with no persistence. Use in tests and headless apps
-    /// where touching `~/.local/share/solitaire_quest/stats.json` would be
+    /// where touching `~/.local/share/ferrous_solitaire/stats.json` would be
     /// incorrect.
     pub fn headless() -> Self {
         Self { storage_path: None }

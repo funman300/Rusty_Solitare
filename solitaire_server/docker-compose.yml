@@ -3,7 +3,7 @@ services:
     build:
       context: ..
       dockerfile: solitaire_server/Dockerfile
-    image: solitaire-quest-server:latest
+    image: ferrous-solitaire-server:latest
     restart: unless-stopped
     ports:
       - "${SERVER_PORT:-8080}:8080"

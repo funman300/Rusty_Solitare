@@ -6,7 +6,7 @@ later sections document what's known to compile, what's stubbed, and
 the next milestones.
 
 > **Status (2026-05-07):** First working APK at `fb8b2ac`. 54 MB
-> debug-signed `solitaire-quest.apk` for `x86_64-linux-android`. Has
+> debug-signed `ferrous-solitaire.apk` for `x86_64-linux-android`. Has
 > NOT yet been verified to launch on a device or emulator — that's
 > the next milestone.
 
@@ -121,7 +121,7 @@ cargo apk build -p solitaire_app --target x86_64-linux-android
 Output:
 
 ```
-target/debug/apk/solitaire-quest.apk
+target/debug/apk/ferrous-solitaire.apk
 ```
 
 Targets shipped via `[package.metadata.android].build_targets` in
@@ -164,8 +164,8 @@ Physical device:
 
 ```bash
 adb devices                                    # confirm connection
-adb install target/debug/apk/solitaire-quest.apk
-adb shell am start -n com.solitairequest.app/android.app.NativeActivity
+adb install target/debug/apk/ferrous-solitaire.apk
+adb shell am start -n com.ferrousapp.solitaire/android.app.NativeActivity
 adb logcat | grep -iE "RustStdoutStderr|solitaire|panic"
 ```
 
@@ -174,7 +174,7 @@ Emulator:
 ```bash
 emulator -avd bevy_test -no-window -gpu swiftshader_indirect &
 adb wait-for-device
-adb install target/debug/apk/solitaire-quest.apk
+adb install target/debug/apk/ferrous-solitaire.apk
 # ... same start + logcat steps as above.
 ```
 
@@ -203,7 +203,7 @@ What's NOT yet ported / not yet measured:
 - `dirs::data_dir()` returns `None` on Android. Callers in
   `solitaire_data/src/storage.rs`, `progress.rs`, `replay.rs`,
   `achievements.rs`, `settings.rs` all need an Android-aware
-  helper (likely `/data/data/com.solitairequest.app/files`).
+  helper (likely `/data/data/com.ferrousapp.solitaire/files`).
 - Touch UX pass — hit-target sizes, modal scaling on small screens,
   app lifecycle (suspend / resume), font scaling.
 - Android Keystore via JNI for `auth_tokens`.
@@ -221,8 +221,8 @@ cargo build -p solitaire_app                           # desktop sanity
 cargo clippy --workspace --all-targets -- -D warnings  # gate
 cargo test --workspace                                 # gate
 cargo apk build -p solitaire_app --target x86_64-linux-android --lib
-adb install -r target/debug/apk/solitaire-quest.apk    # `-r` reinstalls
-adb logcat -c && adb shell am start -n com.solitairequest.app/android.app.NativeActivity
+adb install -r target/debug/apk/ferrous-solitaire.apk    # `-r` reinstalls
+adb logcat -c && adb shell am start -n com.ferrousapp.solitaire/android.app.NativeActivity
 adb logcat | grep -iE "RustStdoutStderr|solitaire"
 ```
 

@@ -447,7 +447,7 @@ raw `z_index` values — they drift and cause ordering bugs.
 
 ```bash
 cargo apk build --package solitaire_app --lib
-adb install -r target/debug/apk/solitaire-quest.apk
+adb install -r target/debug/apk/ferrous-solitaire.apk
 ```
 
 ## 15.2 Coordinate system reminder

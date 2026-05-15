@@ -1302,7 +1302,7 @@ mod tests {
 
     /// Build a minimal headless `App` with just `GamePlugin` installed.
     /// Disables persistence and overrides the seed so tests are deterministic
-    /// and don't touch `~/.local/share/solitaire_quest/game_state.json`.
+    /// and don't touch `~/.local/share/ferrous_solitaire/game_state.json`.
     fn test_app(seed: u64) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).add_plugins(GamePlugin);
@@ -1316,7 +1316,7 @@ mod tests {
         // can't leak into per-test world state and trip the
         // `pending.0.is_some()` guard in `auto_save_game_state` /
         // `save_game_state_on_exit`. Without this clear, an
-        // unrelated `~/.local/share/solitaire_quest/game_state.json`
+        // unrelated `~/.local/share/ferrous_solitaire/game_state.json`
         // would silently disable the auto-save path under test.
         app.insert_resource(PendingRestoredGame(None));
         // Override the system-time seed with a known value.

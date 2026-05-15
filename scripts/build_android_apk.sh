@@ -18,7 +18,7 @@
 #                           "arm64-v8a armeabi-v7a x86_64"). Reduce in CI to
 #                           fit the runner's disk budget — a full three-ABI
 #                           debug build can exceed 25 GB of target/ output.
-#   APK_OUT                 Output APK path (default: target/$PROFILE/apk/solitaire-quest.apk)
+#   APK_OUT                 Output APK path (default: target/$PROFILE/apk/ferrous-solitaire.apk)
 #   KEYSTORE                Path to keystore for signing (default: generates a debug keystore)
 #   KEYSTORE_PASS           Keystore password (default: "android" for the generated debug keystore)
 #   KEY_ALIAS               Key alias (default: "androiddebugkey")
@@ -35,7 +35,7 @@ set -euo pipefail
 
 PROFILE="${PROFILE:-debug}"
 ABIS="${ABIS:-arm64-v8a armeabi-v7a x86_64}"
-APK_OUT="${APK_OUT:-target/${PROFILE}/apk/solitaire-quest.apk}"
+APK_OUT="${APK_OUT:-target/${PROFILE}/apk/ferrous-solitaire.apk}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"

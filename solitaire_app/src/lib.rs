@@ -109,7 +109,7 @@ pub fn run() {
                         title: "Ferrous Solitaire".into(),
                         // X11/Wayland WM_CLASS so taskbar managers group
                         // multiple windows of this app correctly.
-                        name: Some("solitaire-quest".into()),
+                        name: Some("ferrous-solitaire".into()),
                         resolution: window_resolution,
                         position: window_position,
                         // AutoNoVsync prefers Mailbox (triple-buffered) and

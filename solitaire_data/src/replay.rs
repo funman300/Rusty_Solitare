@@ -1,7 +1,7 @@
 //! Win-game replay recording + storage.
 //!
 //! When a player wins, the engine freezes the in-memory recording into a
-//! [`Replay`] and persists it to `<data_dir>/solitaire_quest/latest_replay.json`
+//! [`Replay`] and persists it to `<data_dir>/ferrous_solitaire/latest_replay.json`
 //! via [`save_latest_replay_to`]. The Stats screen offers a "Watch replay"
 //! action that loads it via [`load_latest_replay_from`] so the player can
 //! revisit (or, in a future build, watch the engine re-execute) the path
@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use solitaire_core::game_state::{DrawMode, GameMode};
 use solitaire_core::pile::PileType;
 
-const APP_DIR_NAME: &str = "solitaire_quest";
+const APP_DIR_NAME: &str = "ferrous_solitaire";
 const LATEST_REPLAY_FILE_NAME: &str = "latest_replay.json";
 const REPLAY_HISTORY_FILE_NAME: &str = "replays.json";
 
@@ -221,7 +221,7 @@ impl Replay {
 /// Rolling history of the player's most recent winning replays.
 ///
 /// Stored as a single JSON file at
-/// `<data_dir>/solitaire_quest/replays.json` (see
+/// `<data_dir>/ferrous_solitaire/replays.json` (see
 /// [`replay_history_path`]). Capped at [`REPLAY_HISTORY_CAP`] entries —
 /// when [`append_replay_to_history`] pushes past the cap, the oldest
 /// entry is dropped so the file never grows unbounded.

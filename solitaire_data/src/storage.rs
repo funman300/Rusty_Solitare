@@ -13,7 +13,7 @@ use solitaire_core::game_state::{GameState, GAME_STATE_SCHEMA_VERSION};
 
 use crate::stats::StatsSnapshot;
 
-const APP_DIR_NAME: &str = "solitaire_quest";
+const APP_DIR_NAME: &str = "ferrous_solitaire";
 const STATS_FILE_NAME: &str = "stats.json";
 const GAME_STATE_FILE_NAME: &str = "game_state.json";
 const TIME_ATTACK_SESSION_FILE_NAME: &str = "time_attack_session.json";

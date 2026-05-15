@@ -6,7 +6,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://git.aleshym.co/funman300/Rusty_Solitare.git
+    repoURL: https://git.aleshym.co/funman300/Ferrous-Solitaire.git
     targetRevision: master
     path: deploy
   destination:

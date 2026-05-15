@@ -3,7 +3,7 @@
 //! The rest of `solitaire_data` (settings, stats, achievements,
 //! replays, progress, game state) and the engine's user-themes
 //! discovery all need a base path under which to nest
-//! `solitaire_quest/<file>`. On desktop the right answer is
+//! `ferrous_solitaire/<file>`. On desktop the right answer is
 //! `dirs::data_dir()` (which resolves to platform-appropriate
 //! locations: `~/.local/share` on Linux, `~/Library/Application
 //! Support` on macOS, `%APPDATA%` on Windows). On Android the
@@ -12,9 +12,9 @@
 //!
 //! [`data_dir`] is a thin shim that returns the right base path
 //! per target. Callers continue to append
-//! `solitaire_quest/<file>` themselves, so the on-disk layout is
+//! `ferrous_solitaire/<file>` themselves, so the on-disk layout is
 //! identical across platforms (the per-app Android sandbox makes
-//! the extra `solitaire_quest/` segment harmless, and a `tar`
+//! the extra `ferrous_solitaire/` segment harmless, and a `tar`
 //! export from one platform deserialises cleanly on another).
 //!
 //! # Why hardcode on Android?
@@ -24,7 +24,7 @@
 //! `AndroidApp` context through Bevy's startup hooks and a
 //! per-call JNI bridge — meaningfully more code than the
 //! sandbox-guaranteed `/data/data/<package>/files` path. The
-//! package name `com.solitairequest.app` is fixed at compile
+//! package name `com.ferrousapp.solitaire` is fixed at compile
 //! time in `solitaire_app/Cargo.toml`'s
 //! `[package.metadata.android]` block, so a hardcoded path is
 //! safe until that ever changes (at which point this constant
@@ -40,14 +40,14 @@ use std::path::PathBuf;
 /// constant and the Cargo metadata together if the package id
 /// ever changes.
 #[cfg(target_os = "android")]
-const ANDROID_APP_FILES_DIR: &str = "/data/data/com.solitairequest.app/files";
+const ANDROID_APP_FILES_DIR: &str = "/data/data/com.ferrousapp.solitaire/files";
 
 /// Returns the per-user data directory for the current target,
 /// or `None` if the platform doesn't expose one (rare; usually
 /// indicates a broken `$HOME` or `$XDG_*` configuration on a
 /// minimal Linux container).
 ///
-/// Callers append `solitaire_quest/<file>` themselves. See the
+/// Callers append `ferrous_solitaire/<file>` themselves. See the
 /// module-level doc comment for the per-platform behaviour and
 /// why Android uses a hardcoded path.
 pub fn data_dir() -> Option<PathBuf> {
@@ -87,6 +87,6 @@ mod tests {
     #[test]
     fn data_dir_returns_sandbox_path_on_android() {
         let dir = data_dir().expect("android must report a data dir");
-        assert_eq!(dir, PathBuf::from("/data/data/com.solitairequest.app/files"));
+        assert_eq!(dir, PathBuf::from("/data/data/com.ferrousapp.solitaire/files"));
     }
 }

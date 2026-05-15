@@ -14,7 +14,7 @@ use chrono::{Datelike, NaiveDate};
 pub use solitaire_sync::progress::level_for_xp;
 pub use solitaire_sync::PlayerProgress;
 
-const APP_DIR_NAME: &str = "solitaire_quest";
+const APP_DIR_NAME: &str = "ferrous_solitaire";
 const FILE_NAME: &str = "progress.json";
 
 /// Deterministic seed derived from a date, identical for all players globally.

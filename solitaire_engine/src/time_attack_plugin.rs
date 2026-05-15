@@ -307,7 +307,7 @@ mod tests {
             .add_plugins(TimeAttackPlugin);
         app.init_resource::<ButtonInput<KeyCode>>();
         // Disable session persistence — tests must not touch the real
-        // ~/.local/share/solitaire_quest/time_attack_session.json.
+        // ~/.local/share/ferrous_solitaire/time_attack_session.json.
         app.insert_resource(TimeAttackSessionPath(None));
         // The plugin's startup-load hook may have populated TimeAttackResource
         // from a real on-disk session. Reset it so each test starts inactive.

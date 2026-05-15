@@ -1431,7 +1431,7 @@ candidate — the app-icon round — stays open.
 - **Android build target — first working APK** (`fb8b2ac`).
   `cargo apk build -p solitaire_app --target x86_64-linux-android`
   now produces a 54 MB debug-signed APK at
-  `target/debug/apk/solitaire-quest.apk`. Five gating points
+  `target/debug/apk/ferrous-solitaire.apk`. Five gating points
   resolved end-to-end:
   - **`solitaire_app` split into bin + lib.** cargo-apk needs a
     `cdylib` to bundle as `libmain.so`; pure-bin crates panic
@@ -1548,7 +1548,7 @@ candidate — the app-icon round — stays open.
   achievements, replays, game-state, time-attack sessions, user
   themes). New `solitaire_data::platform::data_dir()` shim falls
   through to `dirs::data_dir()` on desktop and returns the per-app
-  sandbox at `/data/data/com.solitairequest.app/files` on Android
+  sandbox at `/data/data/com.ferrousapp.solitaire/files` on Android
   — no JNI needed, since the package id is pinned in
   `[package.metadata.android]`. Six call sites across
   `solitaire_data` plus `solitaire_engine/assets/user_dir.rs`
@@ -1690,7 +1690,7 @@ fully reverted and is not part of this release.
   The test's single-frame `app.update()` was sensitive to
   first-frame `Time::delta_secs()` variance under heavy parallel
   cargo-test load, and to production-disk
-  `~/.local/share/solitaire_quest/game_state.json` state leaking
+  `~/.local/share/ferrous_solitaire/game_state.json` state leaking
   into the test world via `GamePlugin::build`'s load path.
   `test_app` now resets `PendingRestoredGame(None)` after plugin
   build (preventing the dev machine's saved-game state from
@@ -2386,7 +2386,7 @@ the binary shipped with bundled artwork.
   patterns.
 - **Ambient audio loop** wired through the kira mixer.
 - **Arch Linux PKGBUILDs** for the game client and sync server (under
-  the separate `solitaire-quest-pkgbuild` directory).
+  the separate `ferrous-solitaire-pkgbuild` directory).
 - **Workspace README, CI workflow, migration guide.**
 
 ### Changed

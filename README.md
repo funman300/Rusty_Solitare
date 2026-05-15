@@ -38,16 +38,16 @@ optional self-hosted sync so your stats follow you across machines.
 1. Install [Obtainium](https://github.com/ImranR98/Obtainium/releases) on your device
 2. Tap the badge below (on your Android device) or add the URL manually:
 
-   [<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="40">](https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://git.aleshym.co/funman300/Rusty_Solitare)
+   [<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="40">](https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://git.aleshym.co/funman300/Ferrous-Solitaire)
 
-   Manual URL: `https://git.aleshym.co/funman300/Rusty_Solitare`
+   Manual URL: `https://git.aleshym.co/funman300/Ferrous-Solitaire`
 
 3. Tap **Install** to download the current release — Obtainium will notify you when updates are available.
 
 ### Direct APK
 
-Download the latest `solitaire-quest.apk` from the
-[Releases](https://git.aleshym.co/funman300/Rusty_Solitare/releases) page,
+Download the latest `ferrous-solitaire.apk` from the
+[Releases](https://git.aleshym.co/funman300/Ferrous-Solitaire/releases) page,
 enable **Install from unknown sources** in your device settings, and open the file.
 
 ## Building

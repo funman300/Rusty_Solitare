@@ -1,10 +1,10 @@
 # Maintainer: funman300 <funman300@gmail.com>
 
-pkgname=solitaire-quest
+pkgname=ferrous-solitaire
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='Cross-platform Klondike Solitaire with progression, achievements, and optional sync'
-url='https://github.com/funman300/solitaire-quest'
+url='https://github.com/funman300/ferrous-solitaire'
 license=('MIT')
 arch=('x86_64')
 makedepends=('cargo' 'rust')

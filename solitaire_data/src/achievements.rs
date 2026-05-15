@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 pub use solitaire_sync::AchievementRecord;
 
-const APP_DIR_NAME: &str = "solitaire_quest";
+const APP_DIR_NAME: &str = "ferrous_solitaire";
 const FILE_NAME: &str = "achievements.json";
 
 /// Platform-specific default path for `achievements.json`.

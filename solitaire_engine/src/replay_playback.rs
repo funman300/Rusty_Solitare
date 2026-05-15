@@ -552,7 +552,7 @@ mod tests {
             .add_plugins(GamePlugin::headless())
             .add_plugins(ReplayPlaybackPlugin);
         // Disable game-state persistence so tests don't touch the
-        // real ~/.local/share/solitaire_quest/game_state.json.
+        // real ~/.local/share/ferrous_solitaire/game_state.json.
         app.insert_resource(crate::game_plugin::GameStatePath(None));
         app.insert_resource(crate::game_plugin::ReplayPath(None));
         // Tick once so any startup systems flush before the first

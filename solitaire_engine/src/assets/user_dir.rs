@@ -29,7 +29,7 @@ static USER_THEME_DIR_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
 /// Sub-folder under `dirs::data_dir()` where the project keeps every
 /// per-user file. Matches the existing convention used by
 /// `solitaire_data` for `settings.json`, `stats.json`, etc.
-const APP_DIR_NAME: &str = "solitaire_quest";
+const APP_DIR_NAME: &str = "ferrous_solitaire";
 
 /// Sub-folder under [`APP_DIR_NAME`] dedicated to user themes.
 const THEME_DIR_NAME: &str = "themes";
@@ -97,19 +97,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn user_theme_dir_for_appends_solitaire_quest_themes() {
+    fn user_theme_dir_for_appends_ferrous_solitaire_themes() {
         let dir = user_theme_dir_for(PathBuf::from("/tmp/data"));
         assert_eq!(
             dir,
-            PathBuf::from("/tmp/data/solitaire_quest/themes"),
-            "user dir must nest under solitaire_quest/themes"
+            PathBuf::from("/tmp/data/ferrous_solitaire/themes"),
+            "user dir must nest under ferrous_solitaire/themes"
         );
     }
 
     #[test]
     fn user_theme_dir_for_handles_empty_root() {
         let dir = user_theme_dir_for(PathBuf::new());
-        assert_eq!(dir, PathBuf::from("solitaire_quest/themes"));
+        assert_eq!(dir, PathBuf::from("ferrous_solitaire/themes"));
     }
 
     #[test]

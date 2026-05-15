@@ -58,7 +58,7 @@ Pure-core, no-panics-in-game-logic, and UI-first-interaction constraints are enf
 ## 2. Workspace Structure
 
 ```
-solitaire_quest/
+ferrous_solitaire/
 │
 ├── Cargo.toml                  # Workspace manifest
 ├── .env.example                # Server environment variable template
@@ -366,12 +366,12 @@ Minimum window: 800×600. At this size cards are small but usable.
 
 ### Local Storage
 
-All files stored under `dirs::data_dir() / "solitaire_quest"/`:
+All files stored under `dirs::data_dir() / "ferrous_solitaire"/`:
 
 ```
-~/.local/share/solitaire_quest/   (Linux)
-~/Library/Application Support/solitaire_quest/   (macOS)
-%APPDATA%\solitaire_quest\   (Windows)
+~/.local/share/ferrous_solitaire/   (Linux)
+~/Library/Application Support/ferrous_solitaire/   (macOS)
+%APPDATA%\ferrous_solitaire\   (Windows)
 │
 ├── stats.json          # StatsSnapshot
 ├── progress.json       # PlayerProgress (XP, level, unlocks, daily challenge)
@@ -426,7 +426,7 @@ pub enum SyncBackend {
         url: String,
         username: String,
         // JWT access + refresh tokens stored in OS keychain
-        // key: "solitaire_quest_server_{username}"
+        // key: "ferrous_solitaire_server_{username}"
     },
 }
 ```
@@ -980,8 +980,8 @@ Add `--features bevy/dynamic_linking` during development to dramatically reduce 
 ### Docker Compose (Recommended)
 
 ```bash
-git clone https://github.com/yourname/solitaire_quest
-cd solitaire_quest
+git clone https://github.com/yourname/ferrous_solitaire
+cd ferrous_solitaire
 cp .env.example .env
 # Edit .env — set JWT_SECRET and SERVER_PORT
 docker compose up -d

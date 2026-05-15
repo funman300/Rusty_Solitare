@@ -19,7 +19,7 @@ use std::path::PathBuf;
 
 use crate::auth_tokens::TokenError;
 
-const KEY_ALIAS: &str = "solitaire_quest_token_key";
+const KEY_ALIAS: &str = "ferrous_solitaire_token_key";
 
 #[derive(Serialize, Deserialize)]
 struct TokenBlob {

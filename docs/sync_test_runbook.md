@@ -39,13 +39,13 @@ Before starting, delete any existing local save files to ensure a clean state:
 
 ```
 # Linux
-rm -rf ~/.local/share/solitaire_quest/
+rm -rf ~/.local/share/ferrous_solitaire/
 
 # macOS
-rm -rf ~/Library/Application\ Support/solitaire_quest/
+rm -rf ~/Library/Application\ Support/ferrous_solitaire/
 
 # Windows
-rmdir /s %APPDATA%\solitaire_quest\
+rmdir /s %APPDATA%\ferrous_solitaire\
 ```
 
 ---
@@ -130,10 +130,10 @@ On the machine where you want to test (Linux example):
 
 ```bash
 # List keychain entries (uses secret-tool on GNOME)
-secret-tool search service solitaire_quest_server
+secret-tool search service ferrous_solitaire_server
 
 # Overwrite alice's access token with a deliberately invalid value
-secret-tool store --label="alice_access" service solitaire_quest_server account alice_access <<< "invalid.token.value"
+secret-tool store --label="alice_access" service ferrous_solitaire_server account alice_access <<< "invalid.token.value"
 ```
 
 ### Step 2 — Trigger a sync with the expired/invalid token
@@ -148,7 +148,7 @@ secret-tool store --label="alice_access" service solitaire_quest_server account 
 
 ```bash
 # Extract the new token from the keychain
-secret-tool lookup service solitaire_quest_server account alice_access | head -c 50
+secret-tool lookup service ferrous_solitaire_server account alice_access | head -c 50
 # Should look like a valid JWT (three base64 segments separated by dots)
 ```
 
@@ -157,8 +157,8 @@ secret-tool lookup service solitaire_quest_server account alice_access | head -c
 1. Corrupt both the access token and the refresh token in the keychain:
 
    ```bash
-   secret-tool store --label="alice_access" service solitaire_quest_server account alice_access <<< "bad"
-   secret-tool store --label="alice_refresh" service solitaire_quest_server account alice_refresh <<< "bad"
+   secret-tool store --label="alice_access" service ferrous_solitaire_server account alice_access <<< "bad"
+   secret-tool store --label="alice_refresh" service ferrous_solitaire_server account alice_refresh <<< "bad"
    ```
 
 2. Launch the game and trigger a sync.

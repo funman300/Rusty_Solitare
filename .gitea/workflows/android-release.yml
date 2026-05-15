@@ -10,9 +10,9 @@ env:
   NDK_VERSION: 30.0.14904198
   BUILD_TOOLS_VERSION: "36.1.0"
   PLATFORM: android-34
-  APK_OUT: target/release/apk/solitaire-quest.apk
+  APK_OUT: target/release/apk/ferrous-solitaire.apk
   GITEA_URL: https://git.aleshym.co
-  REPO: funman300/Rusty_Solitare
+  REPO: funman300/Ferrous-Solitaire
 
 jobs:
   build-apk:
@@ -106,7 +106,7 @@ jobs:
                  -d "{
                    \"tag_name\": \"$TAG\",
                    \"name\": \"$TAG\",
-                   \"body\": \"## Android release $TAG\n\n**Install / update with Obtainium** — add this source URL:\n\`\`\`\nhttps://git.aleshym.co/funman300/Rusty_Solitare\n\`\`\`\n\nOr download \`solitaire-quest.apk\` below and sideload it directly.\",
+                   \"body\": \"## Android release $TAG\n\n**Install / update with Obtainium** — add this source URL:\n\`\`\`\nhttps://git.aleshym.co/funman300/Ferrous-Solitaire\n\`\`\`\n\nOr download \`ferrous-solitaire.apk\` below and sideload it directly.\",
                    \"draft\": false,
                    \"prerelease\": false
                  }" \

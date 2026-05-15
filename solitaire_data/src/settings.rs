@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use solitaire_core::game_state::{DifficultyLevel, DrawMode};
 
-const APP_DIR_NAME: &str = "solitaire_quest";
+const APP_DIR_NAME: &str = "ferrous_solitaire";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 
 /// Animation playback speed for card transitions.

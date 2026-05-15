@@ -56,8 +56,8 @@ tiny-skia = { workspace = true }
 # already uses ships into the APK without copy-tree gymnastics.
 # `apk_name` keeps the output filename predictable across machines.
 [package.metadata.android]
-package = "com.solitairequest.app"
-apk_name = "solitaire-quest"
+package = "com.ferrousapp.solitaire"
+apk_name = "ferrous-solitaire"
 build_targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android"]
 assets = "../assets"
 # Density-bucketed launcher icons. `aapt` processes `res/mipmap-*/` and
