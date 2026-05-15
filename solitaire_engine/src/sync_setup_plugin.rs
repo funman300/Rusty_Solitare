@@ -424,6 +424,7 @@ fn poll_auth_task(
             settings.0.sync_backend = SyncBackend::SolitaireServer {
                 url: url.clone(),
                 username: username.clone(),
+                avatar_url: None,
             };
             if let Some(path) = &settings_path.0
                 && let Err(e) = save_settings_to(path, &settings.0)

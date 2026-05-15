@@ -1,6 +1,12 @@
-//! Authentication handlers: register, login, refresh, delete account.
+//! Authentication handlers: register, login, refresh, delete account,
+//! current-user profile, and avatar upload.
 
-use axum::{extract::State, Json};
+use axum::{
+    body::Bytes,
+    extract::State,
+    http::HeaderMap,
+    Json,
+};
 use bcrypt::{hash, verify};
 use chrono::Utc;
 use jsonwebtoken::{encode, EncodingKey, Header};
@@ -35,6 +41,14 @@ pub struct RefreshRequest {
 pub struct AuthResponse {
     pub access_token: String,
     pub refresh_token: String,
+}
+
+/// Response for `GET /api/me`.
+#[derive(Debug, Serialize)]
+pub struct MeResponse {
+    pub id: String,
+    pub username: String,
+    pub avatar_url: Option<String>,
 }
 
 /// Successful refresh response — contains the new access token and the rotated
@@ -300,6 +314,107 @@ pub async fn delete_account(
         .await?;
 
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// `GET /api/me` — return the authenticated user's id, username, and avatar URL.
+pub async fn get_me(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+) -> Result<Json<MeResponse>, AppError> {
+    struct Row {
+        username: Option<String>,
+        avatar_url: Option<String>,
+    }
+    let row = sqlx::query_as!(
+        Row,
+        "SELECT username, avatar_url FROM users WHERE id = ?",
+        user.user_id
+    )
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("user not found".into()))?;
+
+    Ok(Json(MeResponse {
+        id: user.user_id,
+        username: row.username.unwrap_or_default(),
+        avatar_url: row.avatar_url,
+    }))
+}
+
+/// Allowed MIME types for uploaded avatars.
+const ALLOWED_IMAGE_TYPES: &[&str] = &["image/jpeg", "image/png", "image/webp", "image/gif"];
+/// Maximum avatar upload size in bytes (1 MB).
+const AVATAR_MAX_BYTES: usize = 1024 * 1024;
+
+/// `PUT /api/me/avatar` — upload a new avatar image (raw bytes, ≤ 1 MB).
+///
+/// The `Content-Type` header must be one of `image/jpeg`, `image/png`,
+/// `image/webp`, or `image/gif`. The previous avatar file is replaced in-place.
+pub async fn upload_avatar(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<MeResponse>, AppError> {
+    let mime = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let ext = if mime.contains("jpeg") || mime.contains("jpg") {
+        "jpg"
+    } else if mime.contains("png") {
+        "png"
+    } else if mime.contains("webp") {
+        "webp"
+    } else if mime.contains("gif") {
+        "gif"
+    } else {
+        return Err(AppError::BadRequest(
+            "avatar must be image/jpeg, image/png, image/webp, or image/gif".into(),
+        ));
+    };
+
+    if !ALLOWED_IMAGE_TYPES.iter().any(|t| mime.starts_with(t)) {
+        return Err(AppError::BadRequest("unsupported image type".into()));
+    }
+    if body.len() > AVATAR_MAX_BYTES {
+        return Err(AppError::BadRequest("avatar must be ≤ 1 MB".into()));
+    }
+
+    // Write to avatars/ directory, replacing any previous file for this user.
+    std::fs::create_dir_all("avatars").map_err(|e| AppError::Internal(e.to_string()))?;
+    let filename = format!("{}.{}", user.user_id, ext);
+    let path = std::path::Path::new("avatars").join(&filename);
+    // Remove stale files with other extensions first.
+    for old_ext in &["jpg", "png", "webp", "gif"] {
+        let _ = std::fs::remove_file(
+            std::path::Path::new("avatars").join(format!("{}.{}", user.user_id, old_ext)),
+        );
+    }
+    std::fs::write(&path, &body).map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let avatar_url = format!("/avatars/{filename}");
+    sqlx::query!(
+        "UPDATE users SET avatar_url = ? WHERE id = ?",
+        avatar_url,
+        user.user_id
+    )
+    .execute(&state.pool)
+    .await?;
+
+    let username: Option<String> = sqlx::query_scalar!(
+        "SELECT username FROM users WHERE id = ?",
+        user.user_id
+    )
+    .fetch_optional(&state.pool)
+    .await?;
+
+    Ok(Json(MeResponse {
+        id: user.user_id,
+        username: username.unwrap_or_default(),
+        avatar_url: Some(avatar_url),
+    }))
 }
 
 // ---------------------------------------------------------------------------

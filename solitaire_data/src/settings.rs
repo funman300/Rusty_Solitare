@@ -56,6 +56,9 @@ pub enum SyncBackend {
         url: String,
         /// The player's username on that server.
         username: String,
+        /// Absolute URL of the user's avatar image, or `None` if not set.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        avatar_url: Option<String>,
         // JWT tokens are stored in the OS keychain — not here.
     },
 

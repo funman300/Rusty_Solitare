@@ -80,14 +80,14 @@
         button[type="submit"]:disabled { opacity: 0.4; cursor: default; }
 
         /* ── Signed-in state ── */
-        #signed-in { display: none; flex-direction: column; gap: 16px; }
+        #signed-in { display: none; flex-direction: column; gap: 16px; align-items: center; }
         .username-display {
             font-size: 20px; font-weight: 700; text-align: center;
         }
         .signed-in-detail {
             font-size: 13px; color: var(--text-muted); text-align: center;
         }
-        .signed-in-actions { display: flex; flex-direction: column; gap: 8px; }
+        .signed-in-actions { display: flex; flex-direction: column; gap: 8px; width: 100%; }
         .btn-secondary {
             background: var(--panel-hi); color: var(--text);
             border: 1px solid var(--border); border-radius: 6px;
@@ -103,6 +103,40 @@
             cursor: pointer; transition: background 120ms;
         }
         .btn-danger:hover { background: rgba(165, 66, 66, 0.15); }
+
+        /* ── Avatar ── */
+        .avatar-wrap {
+            position: relative; width: 96px; height: 96px; cursor: pointer;
+            border-radius: 50%; overflow: hidden;
+            border: 2px solid var(--border);
+            flex-shrink: 0;
+        }
+        .avatar-img {
+            width: 100%; height: 100%; object-fit: cover;
+            border-radius: 50%;
+        }
+        .avatar-initials {
+            width: 100%; height: 100%; border-radius: 50%;
+            background: var(--panel-hi); display: flex;
+            align-items: center; justify-content: center;
+            font-size: 32px; font-weight: 700; color: var(--text-muted);
+            user-select: none;
+        }
+        .avatar-overlay {
+            position: absolute; inset: 0; border-radius: 50%;
+            background: rgba(0,0,0,0.55); display: flex;
+            align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 700; color: #fff;
+            letter-spacing: 0.06em; opacity: 0;
+            transition: opacity 120ms;
+        }
+        .avatar-wrap:hover .avatar-overlay { opacity: 1; }
+        .avatar-status {
+            font-size: 11px; color: var(--text-muted); text-align: center;
+            min-height: 16px;
+        }
+        .avatar-status.ok { color: var(--success); }
+        .avatar-status.err { color: var(--accent-hi); }
     </style>
     <!-- Matomo -->
     <script>
@@ -128,6 +162,13 @@
         <div class="card">
             <!-- Signed-in view -->
             <div id="signed-in">
+                <div class="avatar-wrap" id="avatar-wrap" title="Click to change avatar">
+                    <img id="avatar-img" class="avatar-img" src="" alt="" style="display:none">
+                    <div id="avatar-initials" class="avatar-initials"></div>
+                    <div class="avatar-overlay">Upload</div>
+                    <input type="file" id="avatar-file" accept="image/jpeg,image/png,image/webp,image/gif" style="display:none">
+                </div>
+                <div class="avatar-status" id="avatar-status"></div>
                 <div class="signed-in-detail">Signed in as</div>
                 <div class="username-display" id="display-username"></div>
                 <div class="signed-in-actions">
@@ -152,7 +193,7 @@
                     </div>
                     <div>
                         <label for="si-pass">Password</label>
-                        <input type="password" id="si-pass" placeholder="••••••••" autocomplete="current-password">
+                        <input type="password" id="si-pass" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="current-password">
                     </div>
                     <div class="error-msg" id="si-error"></div>
                     <button type="submit">Sign In</button>
@@ -164,17 +205,17 @@
                         <label for="su-user">Username</label>
                         <input type="text" id="su-user" placeholder="your_username" autocomplete="username"
                                minlength="3" maxlength="32">
-                        <div class="hint" style="margin-top:4px">3–32 characters, letters, digits, underscores</div>
+                        <div class="hint" style="margin-top:4px">3&ndash;32 characters, letters, digits, underscores</div>
                     </div>
                     <div>
                         <label for="su-pass">Password</label>
-                        <input type="password" id="su-pass" placeholder="••••••••" autocomplete="new-password"
+                        <input type="password" id="su-pass" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="new-password"
                                minlength="8">
                         <div class="hint" style="margin-top:4px">Minimum 8 characters</div>
                     </div>
                     <div>
                         <label for="su-pass2">Confirm Password</label>
-                        <input type="password" id="su-pass2" placeholder="••••••••" autocomplete="new-password">
+                        <input type="password" id="su-pass2" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" autocomplete="new-password">
                     </div>
                     <div class="error-msg" id="su-error"></div>
                     <div class="success-msg" id="su-success"></div>
@@ -186,18 +227,40 @@
     <script>
         const TOKEN_KEY = 'fs_token';
 
-        function getUsername(token) {
-            try {
-                const payload = JSON.parse(atob(token.split('.')[1]));
-                return payload.sub_name ?? payload.username ?? payload.sub ?? null;
-            } catch { return null; }
+        async function fetchMe(token) {
+            const res = await fetch('/api/me', {
+                headers: { 'Authorization': 'Bearer ' + token },
+            });
+            if (!res.ok) return null;
+            return res.json();
         }
 
-        function showSignedIn(token) {
-            const username = getUsername(token);
-            document.getElementById('display-username').textContent = username ?? 'Player';
+        function applyProfile(me) {
+            document.getElementById('display-username').textContent = me.username || 'Player';
+            const img = document.getElementById('avatar-img');
+            const initials = document.getElementById('avatar-initials');
+            if (me.avatar_url) {
+                img.src = me.avatar_url;
+                img.style.display = 'block';
+                initials.style.display = 'none';
+            } else {
+                img.style.display = 'none';
+                initials.style.display = 'flex';
+                initials.textContent = (me.username || 'P')[0].toUpperCase();
+            }
+        }
+
+        async function showSignedIn(token) {
             document.getElementById('signed-in').style.display = 'flex';
             document.getElementById('auth-section').style.display = 'none';
+            const me = await fetchMe(token);
+            if (me) {
+                applyProfile(me);
+            } else {
+                // Token is stale — kick back to auth
+                localStorage.removeItem(TOKEN_KEY);
+                showAuth();
+            }
         }
 
         function showAuth() {
@@ -277,6 +340,46 @@
         document.getElementById('btn-signout').addEventListener('click', () => {
             localStorage.removeItem(TOKEN_KEY);
             showAuth();
+        });
+
+        // Avatar: click wrap → trigger file picker
+        document.getElementById('avatar-wrap').addEventListener('click', () => {
+            document.getElementById('avatar-file').click();
+        });
+
+        document.getElementById('avatar-file').addEventListener('change', async e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const status = document.getElementById('avatar-status');
+            status.className = 'avatar-status';
+            status.textContent = 'Uploading...';
+            const token = localStorage.getItem(TOKEN_KEY);
+            try {
+                const res = await fetch('/api/me/avatar', {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': file.type,
+                    },
+                    body: file,
+                });
+                if (!res.ok) {
+                    const body = await res.json().catch(() => ({}));
+                    status.className = 'avatar-status err';
+                    status.textContent = body.message ?? 'Upload failed.';
+                    return;
+                }
+                const me = await res.json();
+                applyProfile(me);
+                status.className = 'avatar-status ok';
+                status.textContent = 'Avatar updated.';
+                setTimeout(() => { status.textContent = ''; }, 3000);
+            } catch {
+                status.className = 'avatar-status err';
+                status.textContent = 'Network error.';
+            }
+            // Reset so re-selecting the same file triggers change again
+            e.target.value = '';
         });
 
         // Initial state

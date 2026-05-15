@@ -500,6 +500,53 @@ impl SolitaireServerClient {
         })?;
         Ok(format!("{}/replays/{}", self.base_url, id))
     }
+
+    /// Fetch the authenticated user's profile (`GET /api/me`).
+    ///
+    /// Returns `(username, avatar_url)`. `avatar_url` is `None` when the user
+    /// has not set an avatar. Returns an error on network failure or if the
+    /// token is expired and refresh also fails.
+    pub async fn fetch_me(&self) -> Result<(String, Option<String>), SyncError> {
+        let token = self.access_token()?;
+        let url = format!("{}/api/me", self.base_url);
+
+        let resp = self
+            .client
+            .get(&url)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.refresh_token().await?;
+            let new_token = self.access_token()?;
+            let resp = self
+                .client
+                .get(&url)
+                .bearer_auth(new_token)
+                .send()
+                .await
+                .map_err(|e| SyncError::Network(e.to_string()))?;
+            return Self::extract_me_body(resp).await;
+        }
+
+        Self::extract_me_body(resp).await
+    }
+
+    async fn extract_me_body(resp: reqwest::Response) -> Result<(String, Option<String>), SyncError> {
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(SyncError::Network(format!("GET /api/me returned {status}")));
+        }
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| SyncError::Serialization(e.to_string()))?;
+        let username = body["username"].as_str().unwrap_or("").to_string();
+        let avatar_url = body["avatar_url"].as_str().map(str::to_string);
+        Ok((username, avatar_url))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -575,7 +622,7 @@ async fn extract_push_body(resp: reqwest::Response) -> Result<SyncResponse, Sync
 pub fn provider_for_backend(backend: &SyncBackend) -> Box<dyn SyncProvider + Send + Sync> {
     match backend {
         SyncBackend::Local => Box::new(LocalOnlyProvider),
-        SyncBackend::SolitaireServer { url, username } => {
+        SyncBackend::SolitaireServer { url, username, .. } => {
             Box::new(SolitaireServerClient::new(url.clone(), username.clone()))
         }
     }
@@ -628,6 +675,7 @@ mod tests {
         let provider = provider_for_backend(&SyncBackend::SolitaireServer {
             url: "https://example.com".to_string(),
             username: "bob".to_string(),
+            avatar_url: None,
         });
         assert_eq!(provider.backend_name(), "solitaire_server");
     }
