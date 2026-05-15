@@ -399,7 +399,7 @@ function attachHandlers() {
         cardTheme = cardTheme === "classic" ? "dark" : "classic";
         localStorage.setItem("fs_theme", cardTheme);
         syncThemeButton();
-        if (snap) render(snap);
+        if (game) render(game.state());
     });
 
     document.addEventListener("keydown", (e) => {
@@ -414,6 +414,20 @@ function attachHandlers() {
     board.addEventListener("pointercancel", onPointerCancel);
     board.addEventListener("click",         onBoardClick);
     board.addEventListener("dblclick",      onBoardDblClick);
+    board.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        if (drag) return;
+        const { x: bx, y: by } = boardRelative(e.clientX, e.clientY);
+        const hit = hitTestCard(bx, by);
+        if (!hit || !hit.card.face_up) return;
+        const cards = getPileCards(hit.pileName);
+        if (!cards) return;
+        let fromIndex = hit.cardIndex;
+        if (!hit.pileName.startsWith("tableau-")) {
+            if (fromIndex !== cards.length - 1) return;
+        }
+        smartMove(hit.pileName, fromIndex);
+    });
 }
 
 // ── Coordinate helpers ────────────────────────────────────────────────────────
@@ -606,18 +620,46 @@ function onBoardClick(e) {
     }
 }
 
+// Try to move cards from pileName starting at fromIndex to the best valid target.
+// Tries foundations first (single card only), then tableau columns.
+// Returns true if a move was made.
+function smartMove(pileName, fromIndex) {
+    const cards = getPileCards(pileName);
+    if (!cards || fromIndex >= cards.length) return false;
+    const count = cards.length - fromIndex;
+
+    if (count === 1) {
+        for (let s = 0; s < 4; s++) {
+            const r = game.move_cards(pileName, `foundation-${s}`, 1);
+            if (r.ok) { render(r.snapshot); return true; }
+        }
+    }
+
+    for (let t = 0; t < 7; t++) {
+        const target = `tableau-${t}`;
+        if (target === pileName) continue;
+        const r = game.move_cards(pileName, target, count);
+        if (r.ok) { render(r.snapshot); return true; }
+    }
+
+    return false;
+}
+
 function onBoardDblClick(e) {
+    if (drag) return;
     const { x: bx, y: by } = boardRelative(e.clientX, e.clientY);
     const hit = hitTestCard(bx, by);
     if (!hit || !hit.card.face_up) return;
 
     const cards = getPileCards(hit.pileName);
-    if (!cards || hit.cardIndex !== cards.length - 1) return;
+    if (!cards) return;
 
-    for (let s = 0; s < 4; s++) {
-        const r = game.move_cards(hit.pileName, `foundation-${s}`, 1);
-        if (r.ok) { render(r.snapshot); return; }
+    let fromIndex = hit.cardIndex;
+    if (!hit.pileName.startsWith("tableau-")) {
+        if (fromIndex !== cards.length - 1) return;
     }
+
+    if (!smartMove(hit.pileName, fromIndex)) flashIllegal([cards[fromIndex].id]);
 }
 
 // ── Start ─────────────────────────────────────────────────────────────────────
