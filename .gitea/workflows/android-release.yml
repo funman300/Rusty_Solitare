@@ -1,0 +1,122 @@
+name: Android Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  ANDROID_HOME: /opt/android-sdk
+  NDK_VERSION: 30.0.14904198
+  BUILD_TOOLS_VERSION: "36.1.0"
+  PLATFORM: android-34
+  APK_OUT: target/release/apk/solitaire-quest.apk
+  GITEA_URL: https://git.aleshym.co
+  REPO: funman300/Rusty_Solitare
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Android SDK
+        uses: actions/cache@v4
+        id: android-cache
+        with:
+          path: /opt/android-sdk
+          key: android-sdk-${{ env.NDK_VERSION }}-${{ env.BUILD_TOOLS_VERSION }}
+
+      - name: Install Android SDK + NDK
+        if: steps.android-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
+               -O /tmp/cmdtools.zip
+          unzip -q /tmp/cmdtools.zip -d $ANDROID_HOME/cmdline-tools
+          mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "ndk;$NDK_VERSION" \
+            "build-tools;$BUILD_TOOLS_VERSION" \
+            "platforms;$PLATFORM"
+
+      - name: Set up Rust (stable + aarch64-android)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.cargo/bin/cargo-ndk
+            target/aarch64-linux-android
+          key: cargo-android-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-android-
+
+      - name: Install cargo-ndk
+        run: cargo-ndk --version 2>/dev/null || cargo install cargo-ndk --version 4.1.2 --locked
+
+      - name: Decode release keystore
+        run: echo "${{ secrets.RELEASE_KEYSTORE_B64 }}" | base64 -d > release.jks
+
+      - name: Build release APK
+        env:
+          ANDROID_NDK_HOME: /opt/android-sdk/ndk/${{ env.NDK_VERSION }}
+          PROFILE: release
+          ABIS: arm64-v8a
+          KEYSTORE: ./release.jks
+          KEYSTORE_PASS: ${{ secrets.RELEASE_KEYSTORE_PASS }}
+          KEY_ALIAS: release
+          KEY_PASS: ${{ secrets.RELEASE_KEYSTORE_PASS }}
+        run: bash scripts/build_android_apk.sh
+
+      - name: Get tag name
+        id: tag
+        run: echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Create or get Gitea release
+        id: release
+        run: |
+          TAG="${{ steps.tag.outputs.name }}"
+          BASE="${{ env.GITEA_URL }}/api/v1/repos/${{ env.REPO }}"
+          AUTH="Authorization: token ${{ secrets.CI_TOKEN }}"
+
+          # Re-use an existing release for this tag (e.g. created manually).
+          ID=$(curl -sf -H "$AUTH" "$BASE/releases/tags/$TAG" \
+               | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" \
+               2>/dev/null || true)
+
+          if [ -z "$ID" ]; then
+            ID=$(curl -sf -X POST \
+                 -H "$AUTH" -H "Content-Type: application/json" \
+                 "$BASE/releases" \
+                 -d "{
+                   \"tag_name\": \"$TAG\",
+                   \"name\": \"$TAG\",
+                   \"body\": \"## Android release $TAG\n\n**Install / update with Obtainium** — add this source URL:\n\`\`\`\nhttps://git.aleshym.co/funman300/Rusty_Solitare\n\`\`\`\n\nOr download \`solitaire-quest.apk\` below and sideload it directly.\",
+                   \"draft\": false,
+                   \"prerelease\": false
+                 }" \
+                 | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+          fi
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK to release
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: token ${{ secrets.CI_TOKEN }}" \
+            -F "attachment=@${{ env.APK_OUT }};type=application/vnd.android.package-archive" \
+            "${{ env.GITEA_URL }}/api/v1/repos/${{ env.REPO }}/releases/${{ steps.release.outputs.id }}/assets"
