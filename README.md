@@ -31,6 +31,26 @@ optional self-hosted sync so your stats follow you across machines.
 - **Color-blind mode** — blue tint on red-suit cards alongside the suit
   glyph
 
+## Android Install
+
+### Obtainium (recommended — automatic updates)
+
+1. Install [Obtainium](https://github.com/ImranR98/Obtainium/releases) on your device
+2. Tap **Add App** and enter:
+   ```
+   https://git.aleshym.co/funman300/Rusty_Solitare
+   ```
+3. Tap **Add** — Obtainium will detect the Gitea source automatically
+4. Tap **Install** to download the current release, and **Update** whenever a new version drops
+
+Obtainium polls for new releases and notifies you when an update is available.
+
+### Direct APK
+
+Download the latest `solitaire-quest.apk` from the
+[Releases](https://git.aleshym.co/funman300/Rusty_Solitare/releases) page,
+enable **Install from unknown sources** in your device settings, and open the file.
+
 ## Building
 
 **Prerequisites**
