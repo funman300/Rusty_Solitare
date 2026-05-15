@@ -31,9 +31,11 @@ use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_body_text, spawn_modal_button,
     spawn_modal_header, ButtonVariant,
 };
+use crate::ui_theme::{TEXT_SECONDARY, Z_ONBOARDING};
+#[cfg(not(target_os = "android"))]
 use crate::ui_theme::{
-    BORDER_SUBTLE, HighContrastBorder, RADIUS_SM, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY,
-    TYPE_CAPTION, VAL_SPACE_1, VAL_SPACE_2, VAL_SPACE_3, Z_ONBOARDING,
+    BORDER_SUBTLE, HighContrastBorder, RADIUS_SM, TEXT_PRIMARY, TYPE_BODY, TYPE_CAPTION,
+    VAL_SPACE_1, VAL_SPACE_2, VAL_SPACE_3,
 };
 
 // ---------------------------------------------------------------------------
@@ -86,6 +88,7 @@ pub struct OnboardingSlideIndex(pub u8);
 // ---------------------------------------------------------------------------
 
 /// A single `key — description` pair shown on slide 3.
+#[cfg(not(target_os = "android"))]
 struct HotkeyRow {
     keys: &'static str,
     description: &'static str,
@@ -96,6 +99,7 @@ struct HotkeyRow {
 /// Updating the list in `help_plugin.rs` should be mirrored here. The
 /// ARCHITECTURE.md decision log calls out that we copy values rather than
 /// refactor the help plugin.
+#[cfg(not(target_os = "android"))]
 const HOTKEYS: &[HotkeyRow] = &[
     HotkeyRow { keys: "D / Space", description: "Draw from stock" },
     HotkeyRow { keys: "U", description: "Undo last move" },
@@ -359,6 +363,7 @@ fn spawn_slide_how_to_play(commands: &mut Commands, font_res: Option<&FontResour
 }
 
 /// Slide 3 — Keyboard shortcuts.
+#[cfg(not(target_os = "android"))]
 fn spawn_slide_hotkeys(commands: &mut Commands, font_res: Option<&FontResource>) {
     let font_handle = font_res.map(|f| f.0.clone()).unwrap_or_default();
     let font_row = TextFont {

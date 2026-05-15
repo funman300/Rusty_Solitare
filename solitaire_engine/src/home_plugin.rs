@@ -174,6 +174,7 @@ impl HomeMode {
 
     /// The keyboard accelerator that dispatches the same launch event,
     /// shown in a small chip on the card.
+    #[cfg(not(target_os = "android"))]
     fn hotkey(self) -> &'static str {
         match self {
             HomeMode::Classic => "N",

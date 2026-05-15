@@ -1165,6 +1165,7 @@ fn keybind_footer_mode_text() -> &'static str {
 /// pause/resume, the ESC accelerator for stop, and the ← / →
 /// accelerators for paused single-move stepping. The footer never
 /// lists unimplemented keybinds (would lie to users).
+#[cfg(not(target_os = "android"))]
 fn keybind_footer_hint_text() -> &'static str {
     "[SPACE] pause/resume \u{00B7} [ESC] stop \u{00B7} [\u{2190}\u{2192}] step" // · separator
 }

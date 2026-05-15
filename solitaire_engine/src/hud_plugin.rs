@@ -799,8 +799,7 @@ fn spawn_action_button<M: Component>(
     // visibly clutter the narrow-viewport action row. Force the hint
     // off on Android; the chevrons on Menu/Modes remain because they
     // indicate dropdown behaviour and still apply on touch.
-    #[cfg(target_os = "android")]
-    let hotkey: Option<&'static str> = None;
+    let hotkey = if cfg!(target_os = "android") { None } else { hotkey };
 
     let hotkey_font = TextFont {
         font: font.font.clone(),

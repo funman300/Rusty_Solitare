@@ -3,11 +3,13 @@ name: Build and Deploy
 on:
   push:
     branches: [master]
-    # Only run when server code changes, not when CI itself updates deploy/.
-    paths-ignore:
-      - 'deploy/**'
-      - 'argocd/**'
-      - '**.md'
+    paths:
+      - 'solitaire_server/**'
+      - 'solitaire_sync/**'
+      - 'solitaire_core/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.gitea/workflows/docker-build.yml'
 
 env:
   REGISTRY: git.aleshym.co

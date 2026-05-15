@@ -13,10 +13,9 @@ use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
     ScrimDismissible,
 };
-use crate::ui_theme::{
-    BORDER_SUBTLE, HighContrastBorder, RADIUS_SM, SPACE_2, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY,
-    TYPE_CAPTION, VAL_SPACE_1, VAL_SPACE_2, VAL_SPACE_3, Z_MODAL_PANEL,
-};
+use crate::ui_theme::{SPACE_2, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY, VAL_SPACE_2, VAL_SPACE_3, Z_MODAL_PANEL};
+#[cfg(not(target_os = "android"))]
+use crate::ui_theme::{BORDER_SUBTLE, HighContrastBorder, RADIUS_SM, TYPE_CAPTION, VAL_SPACE_1};
 
 /// Marker on the help overlay root node.
 #[derive(Component, Debug)]
@@ -123,6 +122,7 @@ fn scroll_help_panel(
 }
 
 /// Each entry in the controls reference table.
+#[allow(dead_code)]
 struct ControlRow {
     keys: &'static str,
     description: &'static str,
@@ -243,6 +243,7 @@ fn spawn_help_screen(commands: &mut Commands, font_res: Option<&FontResource>) {
         ..default()
     };
     let font_row = font_section.clone();
+    #[cfg(not(target_os = "android"))]
     let font_kbd = TextFont {
         font: font_handle,
         font_size: TYPE_CAPTION,
