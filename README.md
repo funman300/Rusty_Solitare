@@ -36,14 +36,13 @@ optional self-hosted sync so your stats follow you across machines.
 ### Obtainium (recommended — automatic updates)
 
 1. Install [Obtainium](https://github.com/ImranR98/Obtainium/releases) on your device
-2. Tap **Add App** and enter:
-   ```
-   https://git.aleshym.co/funman300/Rusty_Solitare
-   ```
-3. Tap **Add** — Obtainium will detect the Gitea source automatically
-4. Tap **Install** to download the current release, and **Update** whenever a new version drops
+2. Tap the badge below (on your Android device) or add the URL manually:
 
-Obtainium polls for new releases and notifies you when an update is available.
+   [<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="40">](https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://git.aleshym.co/funman300/Rusty_Solitare)
+
+   Manual URL: `https://git.aleshym.co/funman300/Rusty_Solitare`
+
+3. Tap **Install** to download the current release — Obtainium will notify you when updates are available.
 
 ### Direct APK
 
