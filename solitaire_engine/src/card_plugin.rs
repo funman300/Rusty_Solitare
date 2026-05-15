@@ -181,6 +181,15 @@ pub struct CardLabel;
 #[derive(Component, Debug, Clone, Copy)]
 struct AndroidCornerLabel;
 
+/// Solid-colour background sprite behind [`AndroidCornerLabel`].
+///
+/// Covers the card art's own small corner rank/suit text so only the
+/// large overlay is visible. Sized at [`FONT_SIZE_FRAC_MOBILE`]-derived
+/// dimensions and coloured [`CARD_FACE_COLOUR`] to match the card face.
+#[cfg(target_os = "android")]
+#[derive(Component, Debug, Clone, Copy)]
+struct AndroidCornerBg;
+
 /// Marker component indicating the card is currently highlighted as a hint.
 /// `remaining` counts down in real seconds; the highlight is removed when it
 /// reaches zero and the card sprite colour is restored to its normal value.
@@ -988,9 +997,9 @@ fn mobile_label_for(card: &Card) -> String {
     format!("{rank}{suit}")
 }
 
-/// Spawns the [`AndroidCornerLabel`] overlay child on face-up cards.
-/// Uses [`Anchor::TopLeft`] so the transform is the inset top-left corner
-/// of the card face; the text block grows down and right from there.
+/// Spawns the [`AndroidCornerLabel`] + [`AndroidCornerBg`] children on
+/// face-up cards. The background sprite covers the card art's own small
+/// corner text so only the large overlay is visible.
 #[cfg(target_os = "android")]
 fn add_android_corner_label(
     parent: &mut ChildSpawnerCommands,
@@ -1002,15 +1011,35 @@ fn add_android_corner_label(
     if !card.face_up {
         return;
     }
-    let inset = 4.0_f32;
+    let font_size = card_size.x * FONT_SIZE_FRAC_MOBILE;
+    let inset = 3.0_f32;
+    // Background covers ~3 monospace chars wide × 1 line tall.
+    // FiraMono char width ≈ 0.6 × font_size; 2.0× gives room for "10♠"
+    // (3 chars = 1.8× font_size) plus a small margin.
+    let bg_w = font_size * 2.0;
+    let bg_h = font_size * 1.25;
+
+    // Solid background that hides the card art's small corner label.
+    parent.spawn((
+        AndroidCornerBg,
+        Sprite {
+            color: CARD_FACE_COLOUR,
+            custom_size: Some(Vec2::new(bg_w, bg_h)),
+            ..default()
+        },
+        Transform::from_xyz(
+            -card_size.x / 2.0 + inset + bg_w / 2.0,
+            card_size.y / 2.0 - inset - bg_h / 2.0,
+            0.015,
+        ),
+    ));
+
+    // Large rank+suit text drawn on top of the background.
     parent.spawn((
         AndroidCornerLabel,
         CardLabel,
         Text2d::new(mobile_label_for(card)),
-        TextFont {
-            font_size: card_size.x * FONT_SIZE_FRAC_MOBILE,
-            ..default()
-        },
+        TextFont { font_size, ..default() },
         TextColor(text_colour(card, color_blind, high_contrast)),
         Anchor::TOP_LEFT,
         Transform::from_xyz(
@@ -1938,19 +1967,31 @@ fn resize_cards_in_place(
 fn resize_android_corner_labels(
     layout: Res<LayoutResource>,
     card_images: Option<Res<CardImageSet>>,
-    mut query: Query<(&mut TextFont, &mut Transform), With<AndroidCornerLabel>>,
+    mut text_query: Query<(&mut TextFont, &mut Transform), With<AndroidCornerLabel>>,
+    mut bg_query: Query<
+        (&mut Sprite, &mut Transform),
+        (With<AndroidCornerBg>, Without<AndroidCornerLabel>),
+    >,
 ) {
     if !layout.is_changed() || card_images.is_none() {
         return;
     }
-    let new_font_size = layout.0.card_size.x * FONT_SIZE_FRAC_MOBILE;
-    let inset = 4.0_f32;
-    let new_x = -layout.0.card_size.x / 2.0 + inset;
-    let new_y = layout.0.card_size.y / 2.0 - inset;
-    for (mut font, mut transform) in query.iter_mut() {
-        font.font_size = new_font_size;
-        transform.translation.x = new_x;
-        transform.translation.y = new_y;
+    let font_size = layout.0.card_size.x * FONT_SIZE_FRAC_MOBILE;
+    let inset = 3.0_f32;
+    let bg_w = font_size * 2.0;
+    let bg_h = font_size * 1.25;
+    let text_x = -layout.0.card_size.x / 2.0 + inset;
+    let text_y = layout.0.card_size.y / 2.0 - inset;
+
+    for (mut font, mut transform) in text_query.iter_mut() {
+        font.font_size = font_size;
+        transform.translation.x = text_x;
+        transform.translation.y = text_y;
+    }
+    for (mut sprite, mut transform) in bg_query.iter_mut() {
+        sprite.custom_size = Some(Vec2::new(bg_w, bg_h));
+        transform.translation.x = text_x + bg_w / 2.0;
+        transform.translation.y = text_y - bg_h / 2.0;
     }
 }
 
