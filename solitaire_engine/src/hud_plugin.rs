@@ -13,12 +13,14 @@ use solitaire_core::game_state::{DrawMode, GameMode};
 use solitaire_core::pile::PileType;
 
 use crate::auto_complete_plugin::AutoCompleteState;
+use crate::avatar_plugin::AvatarResource;
+use solitaire_data::SyncBackend;
 use crate::challenge_plugin::CHALLENGE_UNLOCK_LEVEL;
 use crate::daily_challenge_plugin::DailyChallengeResource;
 use crate::progress_plugin::ProgressResource;
 use crate::settings_plugin::SettingsResource;
 use crate::layout::HUD_BAND_HEIGHT;
-use crate::safe_area::{SafeAreaAnchoredTop, SafeAreaInsets};
+use crate::safe_area::{SafeAreaAnchoredBottom, SafeAreaAnchoredTop, SafeAreaInsets};
 use crate::ui_theme::SPACE_2;
 use crate::ui_theme::{
     scaled_duration, ACCENT_PRIMARY, ACCENT_SECONDARY, BG_ELEVATED, BG_ELEVATED_HI,
@@ -138,6 +140,13 @@ pub struct HudColumn;
 #[derive(Component, Debug)]
 pub struct HudActionBar;
 
+/// Marker on the circular profile-picture button anchored to the
+/// top-right of the HUD band. Pressing it opens the Profile overlay.
+/// Shows the server avatar image when loaded; falls back to the player's
+/// initial on a filled disc when no image is available.
+#[derive(Component, Debug)]
+pub struct HudAvatar;
+
 /// Controls whether the in-game HUD (band, score column, action buttons) is
 /// visible. Toggled on Android by tapping empty board space; always `Visible`
 /// on desktop. Resets to `Visible` whenever a modal opens.
@@ -152,10 +161,13 @@ pub enum HudVisibility {
 #[derive(Resource, Debug, Default)]
 struct HudTapTracker {
     start_pos: Option<bevy::math::Vec2>,
+    /// Set `true` when the finger-down hit an action button so the
+    /// finger-up never toggles bar visibility.
+    started_on_button: bool,
 }
 
 #[cfg(target_os = "android")]
-const HUD_TAP_SLOP_PX: f32 = 15.0;
+const HUD_TAP_SLOP_PX: f32 = 25.0;
 
 /// Drives the score-readout pulse: scales the [`HudScore`] text from
 /// 1.0 → 1.1 → 1.0 over [`MOTION_SCORE_PULSE_SECS`] (scaled by
@@ -395,13 +407,14 @@ impl Plugin for HudPlugin {
             // WindowResized is registered by table_plugin; re-register
             // defensively so the HUD plugin works standalone in tests.
             .add_message::<WindowResized>()
-            .add_systems(Startup, (spawn_hud_band, spawn_hud, spawn_action_buttons))
+            .add_systems(Startup, (spawn_hud_band, spawn_hud, spawn_action_buttons, spawn_hud_avatar))
             .add_systems(Update, update_hud.after(GameMutation))
             .add_systems(
                 Update,
                 apply_hud_visibility.before(LayoutSystem::UpdateOnResize),
             )
             .add_systems(Update, restore_hud_on_modal)
+            .add_systems(Update, (update_hud_avatar, handle_avatar_button))
             .add_systems(Update, update_won_previously.after(GameMutation))
             .add_systems(Update, announce_auto_complete.after(GameMutation))
             .add_systems(Update, update_selection_hud)
@@ -446,7 +459,12 @@ impl Plugin for HudPlugin {
             // Otherwise on a hover-state change (`Changed<Interaction>`),
             // `paint_action_buttons` would clobber the alpha back to 1.0
             // mid-fade and produce a visible blip.
-            .add_systems(Last, (update_action_fade, apply_action_fade).chain());
+            ;
+        // Desktop-only: cursor-proximity fade. On Android the bar
+        // visibility is toggled explicitly; cursor_position() returning
+        // Some(touch_pos) during a tap would otherwise fade the bar out.
+        #[cfg(not(target_os = "android"))]
+        app.add_systems(Last, (update_action_fade, apply_action_fade).chain());
         #[cfg(target_os = "android")]
         {
             app.init_resource::<HudTapTracker>()
@@ -684,6 +702,135 @@ fn spawn_hud(
         });
 }
 
+/// Spawns the circular avatar / initials button anchored to the top-right
+/// of the HUD band. Initial content is seeded from whatever resources are
+/// available at startup; `update_hud_avatar` replaces the children whenever
+/// `AvatarResource` or `SettingsResource` later changes.
+fn spawn_hud_avatar(
+    font_res: Option<Res<FontResource>>,
+    insets: Option<Res<SafeAreaInsets>>,
+    avatar: Option<Res<AvatarResource>>,
+    settings: Option<Res<SettingsResource>>,
+    mut commands: Commands,
+) {
+    const SIZE: f32 = 32.0;
+    let top_inset = insets.as_deref().copied().unwrap_or_default().top;
+    let id = commands
+        .spawn((
+            HudAvatar,
+            Button,
+            Tooltip::new("Your profile — tap to open."),
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(SPACE_2 + top_inset),
+                right: VAL_SPACE_3,
+                width: Val::Px(SIZE),
+                height: Val::Px(SIZE),
+                border_radius: BorderRadius::all(Val::Px(SIZE / 2.0)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(ACCENT_PRIMARY),
+            ZIndex(Z_HUD),
+            SafeAreaAnchoredTop { base_top: SPACE_2 },
+        ))
+        .id();
+    spawn_avatar_child(
+        &mut commands,
+        id,
+        avatar.as_deref(),
+        settings.as_deref(),
+        font_res.as_deref(),
+    );
+}
+
+/// Re-spawns the avatar circle content (image or initials) whenever either
+/// [`AvatarResource`] or [`SettingsResource`] changes — covers both the
+/// image arriving after download and the username changing after login.
+fn update_hud_avatar(
+    avatar: Option<Res<AvatarResource>>,
+    settings: Option<Res<SettingsResource>>,
+    font_res: Option<Res<FontResource>>,
+    q: Query<Entity, With<HudAvatar>>,
+    mut commands: Commands,
+) {
+    let avatar_changed = avatar.as_ref().is_some_and(|r| r.is_changed());
+    let settings_changed = settings.as_ref().is_some_and(|r| r.is_changed());
+    if !avatar_changed && !settings_changed {
+        return;
+    }
+    let Ok(entity) = q.single() else {
+        return;
+    };
+    commands.entity(entity).despawn_related::<Children>();
+    spawn_avatar_child(
+        &mut commands,
+        entity,
+        avatar.as_deref(),
+        settings.as_deref(),
+        font_res.as_deref(),
+    );
+}
+
+/// Populates the avatar container with either the downloaded image or an
+/// initials fallback disc. Called from both the startup spawn and the
+/// reactive update system so the rendering logic lives in one place.
+fn spawn_avatar_child(
+    commands: &mut Commands,
+    parent: Entity,
+    avatar: Option<&AvatarResource>,
+    settings: Option<&SettingsResource>,
+    font_res: Option<&FontResource>,
+) {
+    const SIZE: f32 = 32.0;
+    if let Some(handle) = avatar.and_then(|a| a.0.clone()) {
+        // Image fills the circle container; border_radius clips it to a disc.
+        commands.entity(parent).with_children(|b| {
+            b.spawn((
+                ImageNode::new(handle),
+                Node {
+                    width: Val::Px(SIZE),
+                    height: Val::Px(SIZE),
+                    border_radius: BorderRadius::all(Val::Px(SIZE / 2.0)),
+                    ..default()
+                },
+            ));
+        });
+    } else {
+        let initial = settings
+            .and_then(|s| match &s.0.sync_backend {
+                SyncBackend::SolitaireServer { username, .. } => username.chars().next(),
+                SyncBackend::Local => None,
+            })
+            .and_then(|c| c.to_uppercase().next())
+            .unwrap_or('?');
+        commands.entity(parent).with_children(|b| {
+            b.spawn((
+                Text::new(initial.to_string()),
+                TextFont {
+                    font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(TEXT_PRIMARY),
+            ));
+        });
+    }
+}
+
+/// Opens the Profile overlay when the avatar button is pressed.
+fn handle_avatar_button(
+    interaction_query: Query<&Interaction, (With<HudAvatar>, Changed<Interaction>)>,
+    mut toggle_profile: MessageWriter<ToggleProfileRequestEvent>,
+) {
+    for interaction in &interaction_query {
+        if *interaction == Interaction::Pressed {
+            toggle_profile.write(ToggleProfileRequestEvent);
+        }
+    }
+}
+
 /// Spawns the action button bar anchored to the top-right of the window.
 /// Each child is a clickable button mirroring a keyboard accelerator —
 /// per the UI-first principle (CLAUDE.md / ARCHITECTURE.md §1) the buttons
@@ -697,23 +844,19 @@ fn spawn_action_buttons(
     insets: Option<Res<SafeAreaInsets>>,
     mut commands: Commands,
 ) {
-    let top_inset = insets.as_deref().copied().unwrap_or_default().top;
+    let bottom_inset = insets.as_deref().copied().unwrap_or_default().bottom;
     let font = TextFont {
         font: font_res.as_ref().map(|f| f.0.clone()).unwrap_or_default(),
         font_size: TYPE_BODY,
         ..default()
     };
 
-    // On Android, 7 text-labelled buttons at 48 dp each wrap to two rows on
-    // a 411 dp phone. Use compact Unicode symbols and tighter gaps so all 7
-    // fit in a single row (7×44 + 6×4 = 332 dp, well within a 90%-wide band
-    // of 370 dp). On desktop, keep the descriptive text labels.
+    // On Android, compact Unicode symbols fit all 7 buttons in one row.
+    // On desktop, keep the descriptive text labels.
     #[cfg(target_os = "android")]
-    let (max_width, col_gap, row_gap_val) =
-        (Val::Percent(90.0), Val::Px(4.0), Val::Px(4.0));
+    let col_gap = Val::Px(4.0);
     #[cfg(not(target_os = "android"))]
-    let (max_width, col_gap, row_gap_val) =
-        (Val::Percent(65.0), VAL_SPACE_2, VAL_SPACE_2);
+    let col_gap = VAL_SPACE_2;
 
     #[cfg(target_os = "android")]
     let labels = (
@@ -721,9 +864,8 @@ fn spawn_action_buttons(
         /* undo */  "\u{2190}",  // ←  leftwards arrow (Arrows block, confirmed FiraMono)
         /* pause */ "||",        // || ASCII double-pipe — ‖ (U+2016) absent from FiraMono
         /* help */  "?",
-        /* hint */  "\u{2192}",  // →  rightwards arrow (Arrows block, confirmed FiraMono)
-        /* modes */ "\u{2193}",  // ↓  downwards arrow (Arrows block, confirmed FiraMono)
-                                 //    replaces ▾ (U+25BE) which is absent from FiraMono
+        /* hint */  "!",         // !  attention/alert — semantically: "look here"
+        /* modes */ "M",          // plain ASCII — U+21BB and U+21C4 both render as tofu on FiraMono
         /* new */   "+",
     );
     #[cfg(not(target_os = "android"))]
@@ -737,23 +879,33 @@ fn spawn_action_buttons(
         "New Game",
     );
 
+    // Bottom bar: full-width, centered, sits above the gesture-navigation zone.
+    // `bottom` is set to `bottom_inset` initially; `SafeAreaAnchoredBottom` keeps
+    // it correct as Android insets arrive in later frames.
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                right: VAL_SPACE_3,
-                top: Val::Px(SPACE_2 + top_inset),
+                bottom: Val::Px(bottom_inset),
+                left: Val::Px(0.0),
+                width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Row,
-                max_width,
                 flex_wrap: FlexWrap::Wrap,
-                justify_content: JustifyContent::FlexEnd,
+                justify_content: JustifyContent::Center,
                 column_gap: col_gap,
-                row_gap: row_gap_val,
+                row_gap: VAL_SPACE_2,
                 align_items: AlignItems::Center,
+                padding: UiRect {
+                    left: VAL_SPACE_3,
+                    right: VAL_SPACE_3,
+                    top: VAL_SPACE_2,
+                    bottom: VAL_SPACE_2,
+                },
                 ..default()
             },
+            BackgroundColor(BG_HUD_BAND),
             ZIndex(Z_HUD),
-            SafeAreaAnchoredTop { base_top: SPACE_2 },
+            SafeAreaAnchoredBottom { base_bottom: 0.0 },
             HudActionBar,
         ))
         .with_children(|row| {
@@ -1012,6 +1164,14 @@ fn spawn_modes_popover(
         ));
     }
 
+    // Popover opens upward from just above the bottom action bar.
+    // Use a platform-aware offset that clears the bar height + safe-area
+    // gesture zone on Android, and the flat bar height on desktop.
+    #[cfg(target_os = "android")]
+    let popover_bottom = Val::Px(200.0);
+    #[cfg(not(target_os = "android"))]
+    let popover_bottom = Val::Px(80.0);
+
     commands
         .spawn((
             ModesPopover,
@@ -1019,7 +1179,7 @@ fn spawn_modes_popover(
             Node {
                 position_type: PositionType::Absolute,
                 right: VAL_SPACE_3,
-                top: Val::Px(50.0),
+                bottom: popover_bottom,
                 flex_direction: FlexDirection::Column,
                 row_gap: VAL_SPACE_1,
                 padding: UiRect::all(VAL_SPACE_2),
@@ -1204,6 +1364,12 @@ fn spawn_menu_popover(commands: &mut Commands, font_res: Option<&FontResource>) 
         ),
     ];
 
+    // Same upward-opening placement as ModesPopover.
+    #[cfg(target_os = "android")]
+    let popover_bottom = Val::Px(200.0);
+    #[cfg(not(target_os = "android"))]
+    let popover_bottom = Val::Px(80.0);
+
     commands
         .spawn((
             MenuPopover,
@@ -1211,7 +1377,7 @@ fn spawn_menu_popover(commands: &mut Commands, font_res: Option<&FontResource>) 
             Node {
                 position_type: PositionType::Absolute,
                 right: VAL_SPACE_3,
-                top: Val::Px(50.0),
+                bottom: popover_bottom,
                 flex_direction: FlexDirection::Column,
                 row_gap: VAL_SPACE_1,
                 padding: UiRect::all(VAL_SPACE_2),
@@ -1423,9 +1589,9 @@ impl Default for HudActionFade {
     }
 }
 
-/// Cursor-y threshold (in window pixels, 0 = top) below which the bar
-/// stays visible. Set slightly above `HUD_BAND_HEIGHT` so the bar fades
-/// in as the cursor approaches, not only once it crosses into the band.
+/// How many pixels from the bottom edge the cursor must be to reveal the bar.
+/// Set slightly taller than `HUD_BAND_HEIGHT` so the bar fades in as the
+/// cursor approaches, not only when it crosses into the band itself.
 const ACTION_FADE_REVEAL_PX: f32 = HUD_BAND_HEIGHT + 32.0;
 
 /// Lerp rate for fading (per second). 6.0 ≈ 167 ms for a full
@@ -1434,7 +1600,7 @@ const ACTION_FADE_REVEAL_PX: f32 = HUD_BAND_HEIGHT + 32.0;
 const ACTION_FADE_RATE_PER_SEC: f32 = 6.0;
 
 /// Updates the fade state from cursor position. Sets `target = 1.0` if
-/// the cursor is in the reveal zone (top of window) or off-screen
+/// the cursor is in the reveal zone (bottom of window) or off-screen
 /// (player is using keyboard); `0.0` otherwise. Lerps `alpha` toward
 /// `target` at a fixed rate so the visual transition is smooth across
 /// variable framerates.
@@ -1446,8 +1612,9 @@ fn update_action_fade(
     let Ok(window) = windows.single() else {
         return;
     };
+    let height = window.resolution.height();
     fade.target = match window.cursor_position() {
-        Some(pos) if pos.y <= ACTION_FADE_REVEAL_PX => 1.0,
+        Some(pos) if pos.y >= height - ACTION_FADE_REVEAL_PX => 1.0,
         Some(_) => 0.0,
         // Off-window cursor: assume keyboard navigation and keep the
         // bar visible so Tab cycling doesn't lead to invisible focus.
@@ -2280,15 +2447,9 @@ fn update_hud_typography(
     }
 }
 
-#[allow(clippy::type_complexity)]
 fn apply_hud_visibility(
     hud_vis: Res<HudVisibility>,
-    mut nodes: Query<
-        &mut Visibility,
-        Or<(With<HudBand>, With<HudColumn>, With<HudActionBar>)>,
-    >,
-    window_entities: Query<(Entity, &Window)>,
-    mut resize_events: MessageWriter<WindowResized>,
+    mut action_bar: Query<&mut Visibility, With<HudActionBar>>,
 ) {
     if !hud_vis.is_changed() {
         return;
@@ -2298,16 +2459,11 @@ fn apply_hud_visibility(
     } else {
         Visibility::Hidden
     };
-    for mut node_vis in &mut nodes {
-        *node_vis = v;
+    for mut vis in &mut action_bar {
+        *vis = v;
     }
-    if let Some((entity, window)) = window_entities.iter().next() {
-        resize_events.write(WindowResized {
-            window: entity,
-            width: window.resolution.width(),
-            height: window.resolution.height(),
-        });
-    }
+    // The bottom action bar is a pure overlay — it does not claim any
+    // space in the card layout, so no WindowResized event is needed.
 }
 
 fn restore_hud_on_modal(
@@ -2327,29 +2483,47 @@ fn toggle_hud_on_tap(
     paused: Option<Res<PausedResource>>,
     mut tracker: ResMut<HudTapTracker>,
     mut hud_vis: ResMut<HudVisibility>,
+    buttons: Query<&Interaction, With<ActionButton>>,
 ) {
     use bevy::input::touch::TouchPhase;
     if !scrims.is_empty() || paused.is_some_and(|p| p.0) {
+        // Drain buffered events so they don't replay in the frame after
+        // the scrim despawns, which would trigger a spurious visibility
+        // toggle as the resume/close button tap's Started+Ended pair
+        // replays in the now-scrim-free frame.
+        for _ in touch_events.read() {}
         tracker.start_pos = None;
+        tracker.started_on_button = false;
         return;
     }
     for event in touch_events.read() {
         match event.phase {
             TouchPhase::Started => {
                 tracker.start_pos = Some(event.position);
+                // Record whether the finger-down landed on a button so
+                // the finger-up doesn't double-fire (toggle bar + press
+                // button at the same time).
+                tracker.started_on_button =
+                    buttons.iter().any(|i| *i != Interaction::None);
             }
             TouchPhase::Ended if drag.is_idle() => {
+                let on_button = tracker.started_on_button;
                 if let Some(start) = tracker.start_pos.take() {
-                    if (event.position - start).length() < HUD_TAP_SLOP_PX {
+                    if !on_button && (event.position - start).length() < HUD_TAP_SLOP_PX {
                         *hud_vis = match *hud_vis {
                             HudVisibility::Visible => HudVisibility::Hidden,
                             HudVisibility::Hidden => HudVisibility::Visible,
                         };
                     }
                 }
+                tracker.started_on_button = false;
             }
-            TouchPhase::Canceled | TouchPhase::Moved => {
+            // Moved: don't clear start_pos — Android fires Moved for normal
+            // tap jitter, and the distance check at Ended already rejects
+            // real drags. Clearing here would silently swallow tap toggles.
+            TouchPhase::Canceled => {
                 tracker.start_pos = None;
+                tracker.started_on_button = false;
             }
             _ => {}
         }

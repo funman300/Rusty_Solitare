@@ -51,12 +51,25 @@ pub struct SafeAreaAnchoredTop {
     pub base_top: f32,
 }
 
+/// Marker for `Node` entities whose `bottom` offset should be re-applied
+/// as `base_bottom + SafeAreaInsets::bottom / scale`.
+///
+/// Use this for elements anchored to the bottom edge (e.g. a bottom action
+/// bar) so they clear the Android gesture-navigation zone automatically.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SafeAreaAnchoredBottom {
+    pub base_bottom: f32,
+}
+
 pub struct SafeAreaInsetsPlugin;
 
 impl Plugin for SafeAreaInsetsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SafeAreaInsets>()
-            .add_systems(Update, (apply_safe_area_anchors, apply_safe_area_to_modal_scrims));
+            .add_systems(
+                Update,
+                (apply_safe_area_anchors, apply_safe_area_bottom_anchors, apply_safe_area_to_modal_scrims),
+            );
 
         #[cfg(target_os = "android")]
         app.add_systems(Update, android::refresh_insets);
@@ -86,6 +99,23 @@ fn apply_safe_area_anchors(
     let top_logical = insets.top / scale;
     for (anchor, mut node) in &mut q {
         node.top = Val::Px(anchor.base_top + top_logical);
+    }
+}
+
+/// Re-applies `base_bottom + insets.bottom / scale` to every entity carrying
+/// [`SafeAreaAnchoredBottom`] whenever [`SafeAreaInsets`] changes.
+fn apply_safe_area_bottom_anchors(
+    insets: Res<SafeAreaInsets>,
+    windows: Query<&Window>,
+    mut q: Query<(&SafeAreaAnchoredBottom, &mut Node)>,
+) {
+    if !insets.is_changed() {
+        return;
+    }
+    let scale = windows.iter().next().map_or(1.0, |w| w.scale_factor());
+    let bottom_logical = insets.bottom / scale;
+    for (anchor, mut node) in &mut q {
+        node.bottom = Val::Px(anchor.base_bottom + bottom_logical);
     }
 }
 

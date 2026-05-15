@@ -339,8 +339,8 @@ fn add_card_shadow_child(parent: &mut ChildSpawnerCommands, card_size: Vec2) {
     ));
 }
 
-/// Spawns a `CardBackFrame` child behind a face-down card entity so the dark
-/// back PNG has a visible perimeter against the dark felt.
+/// Spawns a `CardBackFrame` child behind a card entity to give every card a
+/// thin perimeter against the dark felt, regardless of face state.
 fn add_card_back_frame_child(parent: &mut ChildSpawnerCommands, card_size: Vec2) {
     parent.spawn((
         CardBackFrame,
@@ -754,13 +754,11 @@ fn spawn_card_entity(
     entity.with_children(|b| {
         add_card_shadow_child(b, layout.card_size);
     });
-    // Face-down cards get a thin contrasting border frame so the dark back
-    // PNG reads as a distinct rectangle against the dark felt.
-    if !card.face_up {
-        entity.with_children(|b| {
-            add_card_back_frame_child(b, layout.card_size);
-        });
-    }
+    // Every card gets a thin border frame so it reads as a distinct
+    // rectangle against the dark felt, regardless of face state.
+    entity.with_children(|b| {
+        add_card_back_frame_child(b, layout.card_size);
+    });
     // When PNG faces are loaded the rank/suit are baked into the image.
     // Only spawn the Text2d overlay in the solid-colour fallback (tests).
     if card_images.is_none() {
@@ -836,11 +834,9 @@ fn update_card_entity(
     commands.entity(entity).with_children(|b| {
         add_card_shadow_child(b, layout.card_size);
     });
-    if !card.face_up {
-        commands.entity(entity).with_children(|b| {
-            add_card_back_frame_child(b, layout.card_size);
-        });
-    }
+    commands.entity(entity).with_children(|b| {
+        add_card_back_frame_child(b, layout.card_size);
+    });
     if card_images.is_none() {
         commands.entity(entity).with_children(|b| {
             b.spawn((

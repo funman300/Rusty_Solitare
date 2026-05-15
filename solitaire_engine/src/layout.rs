@@ -77,15 +77,14 @@ const MAX_TABLEAU_CARDS: f32 = 13.0;
 /// (action buttons, Score / Moves / Timer readouts). The card grid starts
 /// below this band so the HUD doesn't bleed into the play surface.
 ///
-/// Desktop: 64 px fits the single-row action bar plus the Score/Moves line.
-/// Android: 128 px accommodates the two-row button wrap on narrow phones
-/// (7 buttons × ~52 dp each, with a 65% max-width constraint, wraps to two
-/// ~48 dp rows plus row-gap). Without this larger reserve the bottom row of
-/// buttons overlaps the top card row.
+/// Desktop: 64 px fits the score/moves/time + mode badge rows.
+/// Android: 80 px gives the same content rows comfortable clearance.
+/// (Previously 128 px when action buttons lived in the top band; those are
+/// now in the bottom bar so the larger reserve is no longer needed.)
 #[cfg(not(target_os = "android"))]
 pub const HUD_BAND_HEIGHT: f32 = 64.0;
 #[cfg(target_os = "android")]
-pub const HUD_BAND_HEIGHT: f32 = 128.0;
+pub const HUD_BAND_HEIGHT: f32 = 80.0;
 
 /// Table background colour (dark green felt).
 pub const TABLE_COLOUR: [f32; 3] = [0.059, 0.322, 0.196];
