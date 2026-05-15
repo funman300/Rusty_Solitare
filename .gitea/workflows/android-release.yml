@@ -43,7 +43,7 @@ jobs:
                -O /tmp/cmdtools.zip
           unzip -q /tmp/cmdtools.zip -d $ANDROID_HOME/cmdline-tools
           mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
             "ndk;$NDK_VERSION" \
             "build-tools;$BUILD_TOOLS_VERSION" \
