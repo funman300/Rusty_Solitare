@@ -70,6 +70,9 @@ jobs:
           git config user.email "ci@gitea.local"
           git config user.name "Gitea CI"
           git add deploy/kustomization.yaml
-          git commit -m "chore(deploy): bump image to ${{ steps.meta.outputs.sha }} [skip ci]" || true
-          git pull --rebase origin master
-          git push
+          git diff --cached --quiet && exit 0  # nothing to commit — skip push
+          git commit -m "chore(deploy): bump image to ${{ steps.meta.outputs.sha }} [skip ci]"
+          for i in 1 2 3; do
+            git pull --rebase origin master && git push && break
+            sleep 5
+          done
