@@ -6,6 +6,15 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.28.0] — 2026-05-14
+
+### Changed
+
+- **Rename: Solitaire Quest → Ferrous Solitaire.** Android package id changed
+  from `com.solitairequest.app` to `com.ferrousapp.solitaire`; existing installs
+  must be uninstalled first (Android treats the new id as a new app).
+  Data directory renamed from `solitaire_quest/` to `ferrous_solitaire/`.
+
 ### Fixed
 
 - **BUG-3: Multi-modal stacking** (`hud_plugin.rs`). `handle_menu_button`
