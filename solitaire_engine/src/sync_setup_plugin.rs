@@ -46,6 +46,7 @@ use solitaire_data::{
     SyncError,
 };
 
+use crate::avatar_plugin::AvatarFetchEvent;
 use crate::events::{
     DeleteAccountRequestEvent, InfoToastEvent, ManualSyncRequestEvent, SyncConfigureRequestEvent,
     SyncLogoutRequestEvent,
@@ -135,9 +136,12 @@ impl SyncFocusedField {
 /// In-flight login/register task. `url` and `username` are preserved so the
 /// poll system can update settings and provider on success without re-reading
 /// the (already-despawned or cleared) form fields.
+/// Return type of the async auth + profile-fetch task.
+type AuthTaskResult = Result<(String, String, Option<String>), SyncError>;
+
 #[derive(Resource, Default)]
 struct PendingAuthTask {
-    task: Option<Task<Result<(String, String), SyncError>>>,
+    task: Option<Task<AuthTaskResult>>,
     url: String,
     username: String,
 }
@@ -366,11 +370,18 @@ fn handle_auth_button(
             .build()
             .map_err(|e| SyncError::Network(format!("tokio rt: {e}")))?
             .block_on(async {
-                if is_register {
-                    client.register(&pw).await
+                let (access_token, refresh_token) = if is_register {
+                    client.register(&pw).await?
                 } else {
-                    client.login(&pw).await
-                }
+                    client.login(&pw).await?
+                };
+                // Fetch avatar URL immediately while we have the fresh token.
+                let avatar_url = client
+                    .fetch_me_with_token(&access_token)
+                    .await
+                    .ok()
+                    .and_then(|(_, url)| url);
+                Ok((access_token, refresh_token, avatar_url))
             })
     });
 
@@ -393,6 +404,7 @@ fn poll_auth_task(
     mut commands: Commands,
     mut manual_sync: MessageWriter<ManualSyncRequestEvent>,
     mut toast: MessageWriter<InfoToastEvent>,
+    mut avatar_fetch: MessageWriter<AvatarFetchEvent>,
 ) {
     let Some(task) = pending.task.as_mut() else {
         return;
@@ -407,7 +419,7 @@ fn poll_auth_task(
     }
 
     match result {
-        Ok((access_token, refresh_token)) => {
+        Ok((access_token, refresh_token, fetched_avatar_url)) => {
             let url = pending.url.clone();
             let username = pending.username.clone();
 
@@ -424,7 +436,7 @@ fn poll_auth_task(
             settings.0.sync_backend = SyncBackend::SolitaireServer {
                 url: url.clone(),
                 username: username.clone(),
-                avatar_url: None,
+                avatar_url: fetched_avatar_url.clone(),
             };
             if let Some(path) = &settings_path.0
                 && let Err(e) = save_settings_to(path, &settings.0)
@@ -437,6 +449,14 @@ fn poll_auth_task(
 
             // Kick off an immediate pull with the new provider.
             manual_sync.write(ManualSyncRequestEvent);
+
+            // Trigger avatar download if the server reported a profile picture.
+            if let Some(ref rel_url) = fetched_avatar_url {
+                let base = pending.url.trim_end_matches('/').to_string();
+                avatar_fetch.write(AvatarFetchEvent {
+                    url: format!("{base}{rel_url}"),
+                });
+            }
 
             // Close both the setup modal and the settings panel.
             for entity in &screen {

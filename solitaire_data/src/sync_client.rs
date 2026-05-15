@@ -534,6 +534,21 @@ impl SolitaireServerClient {
         Self::extract_me_body(resp).await
     }
 
+    /// Like [`fetch_me`] but uses an explicit token instead of reading from the
+    /// OS keychain. Useful immediately after login/register when the token has
+    /// not yet been persisted.
+    pub async fn fetch_me_with_token(&self, token: &str) -> Result<(String, Option<String>), SyncError> {
+        let url = format!("{}/api/me", self.base_url);
+        let resp = self
+            .client
+            .get(&url)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| SyncError::Network(e.to_string()))?;
+        Self::extract_me_body(resp).await
+    }
+
     async fn extract_me_body(resp: reqwest::Response) -> Result<(String, Option<String>), SyncError> {
         let status = resp.status();
         if !status.is_success() {

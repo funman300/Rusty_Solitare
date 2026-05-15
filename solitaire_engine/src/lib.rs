@@ -7,6 +7,7 @@ pub mod card_animation;
 pub mod achievement_plugin;
 pub mod analytics_plugin;
 pub mod animation_plugin;
+pub mod avatar_plugin;
 pub mod auto_complete_plugin;
 pub mod audio_plugin;
 pub mod card_plugin;
@@ -123,6 +124,7 @@ pub use leaderboard_plugin::{LeaderboardPlugin, LeaderboardResource, Leaderboard
 pub use input_plugin::InputPlugin;
 pub use onboarding_plugin::{OnboardingPlugin, OnboardingScreen};
 pub use pause_plugin::{ForfeitConfirmScreen, PausePlugin, PauseScreen, PausedResource};
+pub use avatar_plugin::{AvatarFetchEvent, AvatarPlugin, AvatarResource};
 pub use profile_plugin::{ProfilePlugin, ProfileScreen};
 pub use radial_menu::{
     legal_destinations_for_card, radial_anchor_for_index, radial_hovered_index, RadialIcon,

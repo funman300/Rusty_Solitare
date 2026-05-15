@@ -6,6 +6,8 @@ edition.workspace = true
 
 [dependencies]
 bevy           = { workspace = true }
+image          = { workspace = true }
+reqwest        = { workspace = true }
 kira           = { workspace = true }
 solitaire_core = { workspace = true }
 solitaire_data = { workspace = true }

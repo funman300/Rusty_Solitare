@@ -110,6 +110,9 @@ ron = "0.12"
 # only `deflate` is needed because the importer rejects other
 # compression methods anyway (see Phase 7 spec).
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
+# Image decoding for avatar bytes received from the server.
+# Features mirror what Bevy already enables via bevy_image.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 
 # Importer-only test dependency: tests build zip archives in a
 # scratch directory so they don't pollute the real user themes path

@@ -12,6 +12,7 @@ use solitaire_core::achievement::{achievement_by_id, ALL_ACHIEVEMENTS};
 use solitaire_data::SyncBackend;
 
 use crate::achievement_plugin::AchievementsResource;
+use crate::avatar_plugin::AvatarResource;
 use crate::events::ToggleProfileRequestEvent;
 use crate::font_plugin::FontResource;
 use crate::progress_plugin::ProgressResource;
@@ -143,6 +144,7 @@ fn toggle_profile_screen(
     achievements: Option<Res<AchievementsResource>>,
     stats: Option<Res<StatsResource>>,
     font_res: Option<Res<FontResource>>,
+    avatar: Option<Res<AvatarResource>>,
     screens: Query<Entity, With<ProfileScreen>>,
 ) {
     let button_clicked = requests.read().count() > 0;
@@ -170,10 +172,12 @@ fn toggle_profile_screen(
             achievements.as_deref(),
             stats.as_deref(),
             font_res.as_deref(),
+            avatar.as_deref(),
         );
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_profile_screen(
     commands: &mut Commands,
     settings: Option<&SettingsResource>,
@@ -182,6 +186,7 @@ fn spawn_profile_screen(
     achievements: Option<&AchievementsResource>,
     stats: Option<&StatsResource>,
     font_res: Option<&FontResource>,
+    avatar: Option<&AvatarResource>,
 ) {
     let font_handle = font_res.map(|f| f.0.clone()).unwrap_or_default();
     let font_section = TextFont {
@@ -245,11 +250,61 @@ fn spawn_profile_screen(
             ));
             if let Some(s) = settings {
                 let (backend_name, username) = sync_info(&s.0.sync_backend);
-                body.spawn((
-                    Text::new(format!("Account: {username}  |  Backend: {backend_name}")),
-                    font_row.clone(),
-                    TextColor(TEXT_PRIMARY),
-                ));
+
+                // Avatar row: image (if downloaded) or filled initials circle.
+                let avatar_handle = avatar.and_then(|a| a.0.clone());
+                body.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    margin: UiRect { bottom: Val::Px(4.0), ..default() },
+                    ..default()
+                })
+                .with_children(|row| {
+                    const SIZE: f32 = 48.0;
+                    const RADIUS: f32 = 24.0;
+                    if let Some(handle) = avatar_handle {
+                        row.spawn((
+                            ImageNode::new(handle),
+                            Node {
+                                width: Val::Px(SIZE),
+                                height: Val::Px(SIZE),
+                                border_radius: BorderRadius::all(Val::Px(RADIUS)),
+                                ..default()
+                            },
+                        ));
+                    } else {
+                        // Initials fallback: coloured disc with the first letter.
+                        let initial = username.chars().next().unwrap_or('?').to_uppercase().next().unwrap_or('?');
+                        row.spawn((
+                            Node {
+                                width: Val::Px(SIZE),
+                                height: Val::Px(SIZE),
+                                border_radius: BorderRadius::all(Val::Px(RADIUS)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            BackgroundColor(BG_ELEVATED),
+                        ))
+                        .with_children(|disc| {
+                            disc.spawn((
+                                Text::new(initial.to_string()),
+                                TextFont {
+                                    font: font_res.map(|f| f.0.clone()).unwrap_or_default(),
+                                    font_size: 22.0,
+                                    ..default()
+                                },
+                                TextColor(TEXT_SECONDARY),
+                            ));
+                        });
+                    }
+                    row.spawn((
+                        Text::new(format!("{username}  |  {backend_name}")),
+                        font_row.clone(),
+                        TextColor(TEXT_PRIMARY),
+                    ));
+                });
             }
             if let Some(ss) = sync_status {
                 let status_text = match &ss.0 {
