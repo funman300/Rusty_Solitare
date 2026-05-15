@@ -48,6 +48,24 @@ pub const MIN_WINDOW: Vec2 = Vec2::new(320.0, 400.0);
 /// which rendered the cards ~3.6 % squashed vertically.
 const CARD_ASPECT: f32 = 1.4523;
 
+/// Divisor used to derive the horizontal gap between columns from the card
+/// width: `h_gap = card_width / H_GAP_DIVISOR`.
+///
+/// This constant also drives `card_width_width_based`:
+///   total layout width = 7*card_width + 8*h_gap = card_width*(7 + 8/H_GAP_DIVISOR)
+///   → card_width = window.x / (7 + 8/H_GAP_DIVISOR)
+///
+/// Desktop (H_GAP_DIVISOR = 4): card_width = window.x / 9  — existing behaviour.
+/// Android (H_GAP_DIVISOR = 32): card_width = window.x / 7.25  — cards are ~10 %
+///   wider than at divisor 8, with very tight gaps (~4 px) that are still visible
+///   as a faint seam between columns. The primary readability boost on Android
+///   comes from the `AndroidCornerLabel` overlay in `card_plugin`, but maximising
+///   the physical card size helps too.
+#[cfg(not(target_os = "android"))]
+const H_GAP_DIVISOR: f32 = 4.0;
+#[cfg(target_os = "android")]
+const H_GAP_DIVISOR: f32 = 32.0;
+
 /// Fraction of card height used as vertical padding between the top row and
 /// the tableau row.
 const VERTICAL_GAP_FRAC: f32 = 0.2;
@@ -149,8 +167,10 @@ pub fn compute_layout(window: Vec2, safe_area_top: f32, safe_area_bottom: f32, h
     let window = window.max(MIN_WINDOW);
     let band_h = if hud_visible { HUD_BAND_HEIGHT } else { 0.0 };
 
-    // Width-based candidate (existing behaviour): 7 cards + 8 h_gaps = 9*card_width.
-    let card_width_width_based = window.x / 9.0;
+    // Width-based candidate: 7 cards + 8 h_gaps where h_gap = card_width/H_GAP_DIVISOR.
+    // Total = card_width*(7 + 8/H_GAP_DIVISOR) = window.x  →  card_width = window.x/card_width_divisor.
+    let card_width_divisor = 7.0 + 8.0 / H_GAP_DIVISOR;
+    let card_width_width_based = window.x / card_width_divisor;
 
     // Height-based candidate. The vertical budget below the top row must hold
     // a worst-case fanned tableau column plus a bottom margin equal to h_gap.
@@ -175,13 +195,12 @@ pub fn compute_layout(window: Vec2, safe_area_top: f32, safe_area_bottom: f32, h
     let card_height = card_width * CARD_ASPECT;
     let card_size = Vec2::new(card_width, card_height);
 
-    let h_gap = card_width / 4.0;
-    // Total occupied width = 7*card_width + 8*h_gap = 9*card_width. When card
-    // sizing is height-limited (tall/narrow windows), this is smaller than
-    // window.x, so the grid is centred horizontally; otherwise side_margin
-    // collapses to h_gap and the geometry matches the original width-based
-    // layout exactly.
-    let total_grid_width = 9.0 * card_width;
+    let h_gap = card_width / H_GAP_DIVISOR;
+    // Total occupied width = 7*card_width + 8*h_gap = card_width_divisor*card_width.
+    // When card sizing is height-limited (tall/narrow windows) this is smaller than
+    // window.x and the grid is centred horizontally; otherwise side_margin collapses
+    // to h_gap and the geometry fills the window exactly.
+    let total_grid_width = card_width_divisor * card_width;
     let side_margin = (window.x - total_grid_width) / 2.0 + h_gap;
     let left_edge = -window.x / 2.0;
     let col_x = |col: usize| -> f32 {
@@ -401,11 +420,10 @@ mod tests {
     #[test]
     fn tall_narrow_window_keeps_width_based_sizing() {
         // Tall narrow window: there's plenty of vertical budget, so width is
-        // the bottleneck and card_width matches the legacy window.x / 9
-        // derivation exactly.
+        // the bottleneck and card_width matches window.x / (7 + 8/H_GAP_DIVISOR).
         let window = Vec2::new(900.0, 1600.0);
         let layout = compute_layout(window, 0.0, 0.0, true);
-        let width_based = window.x / 9.0;
+        let width_based = window.x / (7.0 + 8.0 / H_GAP_DIVISOR);
         assert!(
             (layout.card_size.x - width_based).abs() < 1e-3,
             "expected width-based sizing (card_width {} should equal {})",

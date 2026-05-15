@@ -15,6 +15,8 @@ use std::collections::{HashMap, HashSet};
 use bevy::color::Color;
 use bevy::prelude::*;
 use bevy::window::WindowResized;
+#[cfg(target_os = "android")]
+use bevy::sprite::Anchor;
 use solitaire_core::card::{Card, Rank, Suit};
 use solitaire_core::game_state::{DrawMode, GameState};
 use solitaire_core::pile::PileType;
@@ -64,6 +66,12 @@ pub const STACK_FAN_FRAC: f32 = 0.003;
 
 /// Font size as a fraction of card width.
 const FONT_SIZE_FRAC: f32 = 0.28;
+
+/// Font-size fraction for the large-print readability overlay on Android.
+/// Spawned on top of PNG face cards to make the rank+suit legible at phone
+/// scale, where the baked-in PNG corner text is only ~10 px physical.
+#[cfg(target_os = "android")]
+const FONT_SIZE_FRAC_MOBILE: f32 = 0.35;
 
 /// Card-face background — Terminal `#1a1a1a` (BG_ELEVATED).
 pub const CARD_FACE_COLOUR: Color = Color::srgb(0.102, 0.102, 0.102);
@@ -162,6 +170,16 @@ pub struct CardEntity {
 /// Marker for the text child inside a card entity.
 #[derive(Component, Debug)]
 pub struct CardLabel;
+
+/// Marker for the large-print rank+suit corner overlay on Android.
+///
+/// Spawned on top of PNG face cards (face-up only) at font size
+/// [`FONT_SIZE_FRAC_MOBILE`] so the rank and suit character are
+/// readable at phone scale. Only exists when `CardImageSet` is present
+/// (the fallback solid-colour path uses a plain `CardLabel` instead).
+#[cfg(target_os = "android")]
+#[derive(Component, Debug, Clone, Copy)]
+struct AndroidCornerLabel;
 
 /// Marker component indicating the card is currently highlighted as a hint.
 /// `remaining` counts down in real seconds; the highlight is removed when it
@@ -429,6 +447,9 @@ impl Plugin for CardPlugin {
                     snap_cards_on_window_resize.after(collect_resize_events),
                 ),
             );
+
+        #[cfg(target_os = "android")]
+        app.add_systems(Update, resize_android_corner_labels);
     }
 }
 
@@ -761,6 +782,8 @@ fn spawn_card_entity(
     });
     // When PNG faces are loaded the rank/suit are baked into the image.
     // Only spawn the Text2d overlay in the solid-colour fallback (tests).
+    // On Android we additionally spawn a large-print corner label even in
+    // image mode so the rank/suit are legible at phone scale.
     if card_images.is_none() {
         entity.with_children(|b| {
             b.spawn((
@@ -774,6 +797,12 @@ fn spawn_card_entity(
                 Transform::from_xyz(0.0, 0.0, 0.01),
                 label_visibility(card),
             ));
+        });
+    }
+    #[cfg(target_os = "android")]
+    if card_images.is_some() {
+        entity.with_children(|b| {
+            add_android_corner_label(b, card, layout.card_size, color_blind, high_contrast);
         });
     }
 }
@@ -829,7 +858,8 @@ fn update_card_entity(
 
     // Despawn any stale children and re-add the per-card drop shadow plus,
     // in solid-colour fallback mode, the label overlay. In image mode the
-    // rank/suit are baked into the PNG, so no `Text2d` overlay is needed.
+    // rank/suit are baked into the PNG; on Android we also add a large-print
+    // corner overlay so they are legible at phone scale.
     commands.entity(entity).despawn_related::<Children>();
     commands.entity(entity).with_children(|b| {
         add_card_shadow_child(b, layout.card_size);
@@ -850,6 +880,12 @@ fn update_card_entity(
                 Transform::from_xyz(0.0, 0.0, 0.01),
                 label_visibility(card),
             ));
+        });
+    }
+    #[cfg(target_os = "android")]
+    if card_images.is_some() {
+        commands.entity(entity).with_children(|b| {
+            add_android_corner_label(b, card, layout.card_size, color_blind, high_contrast);
         });
     }
 }
@@ -922,6 +958,67 @@ fn label_visibility(card: &Card) -> Visibility {
     } else {
         Visibility::Hidden
     }
+}
+
+/// Rank+suit string for the Android readability overlay.
+/// Uses Unicode suit glyphs (♠♥♦♣ — U+2660–U+2666, covered by FiraMono).
+#[cfg(target_os = "android")]
+fn mobile_label_for(card: &Card) -> String {
+    let rank = match card.rank {
+        Rank::Ace => "A",
+        Rank::Two => "2",
+        Rank::Three => "3",
+        Rank::Four => "4",
+        Rank::Five => "5",
+        Rank::Six => "6",
+        Rank::Seven => "7",
+        Rank::Eight => "8",
+        Rank::Nine => "9",
+        Rank::Ten => "10",
+        Rank::Jack => "J",
+        Rank::Queen => "Q",
+        Rank::King => "K",
+    };
+    let suit = match card.suit {
+        Suit::Clubs => "♣",
+        Suit::Diamonds => "♦",
+        Suit::Hearts => "♥",
+        Suit::Spades => "♠",
+    };
+    format!("{rank}{suit}")
+}
+
+/// Spawns the [`AndroidCornerLabel`] overlay child on face-up cards.
+/// Uses [`Anchor::TopLeft`] so the transform is the inset top-left corner
+/// of the card face; the text block grows down and right from there.
+#[cfg(target_os = "android")]
+fn add_android_corner_label(
+    parent: &mut ChildSpawnerCommands,
+    card: &Card,
+    card_size: Vec2,
+    color_blind: bool,
+    high_contrast: bool,
+) {
+    if !card.face_up {
+        return;
+    }
+    let inset = 4.0_f32;
+    parent.spawn((
+        AndroidCornerLabel,
+        CardLabel,
+        Text2d::new(mobile_label_for(card)),
+        TextFont {
+            font_size: card_size.x * FONT_SIZE_FRAC_MOBILE,
+            ..default()
+        },
+        TextColor(text_colour(card, color_blind, high_contrast)),
+        Anchor::TOP_LEFT,
+        Transform::from_xyz(
+            -card_size.x / 2.0 + inset,
+            card_size.y / 2.0 - inset,
+            0.02,
+        ),
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -1829,6 +1926,31 @@ fn resize_cards_in_place(
     let frame_size = layout.card_size + Vec2::splat(CARD_BACK_FRAME_PADDING);
     for mut frame_sprite in frame_query.iter_mut() {
         frame_sprite.custom_size = Some(frame_size);
+    }
+}
+
+/// Updates font size and top-left anchor transform of every
+/// [`AndroidCornerLabel`] entity when `LayoutResource` changes (orientation
+/// change or any window resize). The full despawn/respawn path in
+/// `update_card_entity` already handles game-state changes; this system
+/// covers the resize-only path where children are mutated in place.
+#[cfg(target_os = "android")]
+fn resize_android_corner_labels(
+    layout: Res<LayoutResource>,
+    card_images: Option<Res<CardImageSet>>,
+    mut query: Query<(&mut TextFont, &mut Transform), With<AndroidCornerLabel>>,
+) {
+    if !layout.is_changed() || card_images.is_none() {
+        return;
+    }
+    let new_font_size = layout.0.card_size.x * FONT_SIZE_FRAC_MOBILE;
+    let inset = 4.0_f32;
+    let new_x = -layout.0.card_size.x / 2.0 + inset;
+    let new_y = layout.0.card_size.y / 2.0 - inset;
+    for (mut font, mut transform) in query.iter_mut() {
+        font.font_size = new_font_size;
+        transform.translation.x = new_x;
+        transform.translation.y = new_y;
     }
 }
 
