@@ -36,11 +36,13 @@ optional self-hosted sync so your stats follow you across machines.
 ### Obtainium (recommended — automatic updates)
 
 1. Install [Obtainium](https://github.com/ImranR98/Obtainium/releases) on your device
-2. Tap the badge below (on your Android device) or add the URL manually:
+2. Tap **Add App** in Obtainium, paste the URL below, **set the source type to Gitea**, then tap **Fetch**:
+
+   `https://git.aleshym.co/funman300/Ferrous-Solitaire`
+
+   Or try the one-tap badge (auto-detection may require manually selecting **Gitea** as the source type if it doesn't pre-fill):
 
    [<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="40">](https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://git.aleshym.co/funman300/Ferrous-Solitaire)
-
-   Manual URL: `https://git.aleshym.co/funman300/Ferrous-Solitaire`
 
 3. Tap **Install** to download the current release — Obtainium will notify you when updates are available.
 
