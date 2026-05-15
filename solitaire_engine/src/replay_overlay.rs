@@ -33,8 +33,11 @@ use crate::replay_playback::{
     step_backwards_replay_playback, step_replay_playback, stop_replay_playback,
     toggle_pause_replay_playback, ReplayPlaybackState,
 };
+use solitaire_core::card::{Card, Rank, Suit};
+use solitaire_core::game_state::GameState;
 use solitaire_core::pile::PileType;
 use solitaire_data::ReplayMove;
+use crate::resources::GameStateResource;
 use crate::ui_modal::{spawn_modal_button, ButtonVariant};
 use crate::ui_theme::{
     ACCENT_PRIMARY, BG_ELEVATED_HI, BORDER_SUBTLE, HighContrastBackground, HighContrastBorder,
@@ -153,6 +156,12 @@ const MOVE_LOG_PREV_ROWS: usize = 2;
 /// won); for a future "live preview during play" use case the
 /// preview-shape might need rethinking.
 const MOVE_LOG_NEXT_ROWS: usize = 2;
+
+/// Vertical offset from the top edge of the window to the top edge of the
+/// mini-tableau preview panel. Places the panel 8 px below the banner's
+/// bottom edge so the two surfaces don't overlap. Derived from
+/// `BANNER_HEIGHT` so the gap stays consistent if the banner ever grows.
+const MINI_TABLEAU_TOP_OFFSET: f32 = BANNER_HEIGHT + 8.0;
 
 /// Background colour alpha for the banner. `BG_ELEVATED_HI` at this alpha
 /// reads as a clear "this is a UI strip" callout while still letting the
@@ -404,6 +413,34 @@ pub struct ReplayOverlayMoveLogNextRow {
     pub offset: u8,
 }
 
+/// Marker added to every top-level entity spawned by [`spawn_overlay`].
+/// `react_to_state_change` uses a single `Query<Entity, With<DespawnWithReplay>>`
+/// to despawn all of them, rather than keeping a separate query per
+/// entity type. Future sibling overlay surfaces just need this marker
+/// at spawn time — no changes to the despawn logic required.
+#[derive(Component, Debug)]
+pub struct DespawnWithReplay;
+
+/// Marker on the mini-tableau preview panel root. A right-edge-anchored
+/// panel that shows a compact summary of the live game state during
+/// replay: the four foundation tops and the stock / waste heads.
+/// Spawned as a sibling root entity (same lifecycle pattern as
+/// [`ReplayOverlayMoveLogPanel`]) at `right: 0`, `top: MINI_TABLEAU_TOP_OFFSET`.
+#[derive(Component, Debug)]
+pub struct ReplayMiniTableauPanel;
+
+/// Marker on the foundations row `Text` inside the mini-tableau panel.
+/// Carries `F: A♠ 7♥ 5♦ K♣` (or `--` for empty slots); repainted by
+/// `update_mini_tableau` whenever [`GameStateResource`] changes.
+#[derive(Component, Debug)]
+pub struct ReplayMiniTableauFoundations;
+
+/// Marker on the stock/waste row `Text` inside the mini-tableau panel.
+/// Carries `STK:14 WST:7♥`; repainted by `update_mini_tableau` whenever
+/// [`GameStateResource`] changes.
+#[derive(Component, Debug)]
+pub struct ReplayMiniTableauStockWaste;
+
 // ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
@@ -451,6 +488,8 @@ impl Plugin for ReplayOverlayPlugin {
                     update_move_log_active_row,
                     update_move_log_prev_rows,
                     update_move_log_next_rows,
+                    update_mini_tableau_foundations,
+                    update_mini_tableau_stock_waste,
                     update_pause_button_label,
                     handle_pause_button,
                     handle_step_button,
@@ -476,10 +515,8 @@ impl Plugin for ReplayOverlayPlugin {
 fn react_to_state_change(
     mut commands: Commands,
     state: Res<ReplayPlaybackState>,
-    existing: Query<Entity, With<ReplayOverlayRoot>>,
-    floating_chips: Query<Entity, With<ReplayFloatingProgressChip>>,
-    move_log_panels: Query<Entity, With<ReplayOverlayMoveLogPanel>>,
-    dim_layers: Query<Entity, With<ReplayTableauDimLayer>>,
+    roots: Query<Entity, With<ReplayOverlayRoot>>,
+    despawnable: Query<Entity, With<DespawnWithReplay>>,
     font_res: Option<Res<FontResource>>,
 ) {
     if !state.is_changed() {
@@ -487,30 +524,15 @@ fn react_to_state_change(
     }
 
     let should_be_visible = state.is_playing() || state.is_completed();
-    let already_spawned = existing.iter().next().is_some();
+    let already_spawned = roots.iter().next().is_some();
 
     if should_be_visible && !already_spawned {
         spawn_overlay(&mut commands, font_res.as_deref(), &state);
     } else if !should_be_visible && already_spawned {
-        for entity in &existing {
-            commands.entity(entity).despawn();
-        }
-        // Floating chip lives outside the UI tree (world-space
-        // entity), so the banner-root despawn doesn't reach it.
-        // Despawn separately on the same state transition so both
-        // disappear together when the replay ends.
-        for entity in &floating_chips {
-            commands.entity(entity).despawn();
-        }
-        // Move-log panel is also a separate root entity (sibling
-        // of the banner anchored to the viewport's bottom edge),
-        // so the banner-root despawn doesn't reach it either.
-        for entity in &move_log_panels {
-            commands.entity(entity).despawn();
-        }
-        // Tableau dim layer is also a separate root entity — same
-        // pattern as the move-log panel.
-        for entity in &dim_layers {
+        // Despawn all sibling root entities in one loop — every entity
+        // spawned by `spawn_overlay` carries `DespawnWithReplay` for
+        // exactly this purpose.
+        for entity in &despawnable {
             commands.entity(entity).despawn();
         }
     }
@@ -546,6 +568,8 @@ fn spawn_overlay(
     // entity spawned after the banner closure closes. Mirrors the
     // floating-chip clone reasoning.
     let font_handle_for_move_log = font_handle.clone();
+    // Fourth clone for the mini-tableau preview panel.
+    let font_handle_for_mini_tableau = font_handle.clone();
 
     let banner_label = if state.is_completed() {
         "\u{258C} replay complete" // ▌ — cursor-block prefix; matches the splash boot-screen convention.
@@ -562,6 +586,7 @@ fn spawn_overlay(
     // component — purely visual.
     commands.spawn((
         ReplayTableauDimLayer,
+        DespawnWithReplay,
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(0.0),
@@ -585,6 +610,7 @@ fn spawn_overlay(
     commands
         .spawn((
             ReplayOverlayRoot,
+            DespawnWithReplay,
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -967,6 +993,7 @@ fn spawn_overlay(
     // when the replay state transitions back to `Inactive`.
     commands.spawn((
         ReplayFloatingProgressChip,
+        DespawnWithReplay,
         Text2d::new(format_progress(state)),
         TextFont {
             font: font_handle_for_floating,
@@ -996,6 +1023,7 @@ fn spawn_overlay(
     commands
         .spawn((
             ReplayOverlayMoveLogPanel,
+            DespawnWithReplay,
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -1110,6 +1138,68 @@ fn spawn_overlay(
                     TextColor(TEXT_SECONDARY),
                 ));
             }
+        });
+
+    // Mini-tableau preview panel — right-edge anchor, just below the banner.
+    // Compact two-row readout: foundation tops then stock/waste head.
+    // Sibling-of-banner pattern (separate root entity, own spawn/despawn).
+    let banner_bg = Color::srgba(
+        BG_ELEVATED_HI.to_srgba().red,
+        BG_ELEVATED_HI.to_srgba().green,
+        BG_ELEVATED_HI.to_srgba().blue,
+        BANNER_ALPHA,
+    );
+    commands
+        .spawn((
+            ReplayMiniTableauPanel,
+            DespawnWithReplay,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(0.0),
+                top: Val::Px(MINI_TABLEAU_TOP_OFFSET),
+                padding: UiRect::axes(VAL_SPACE_2, VAL_SPACE_2),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::FlexStart,
+                row_gap: VAL_SPACE_1,
+                border: UiRect::left(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(banner_bg),
+            BorderColor::all(BORDER_SUBTLE),
+            ZIndex(Z_REPLAY_OVERLAY),
+            GlobalZIndex(Z_REPLAY_OVERLAY),
+            HighContrastBorder::with_default(BORDER_SUBTLE),
+        ))
+        .with_children(|panel| {
+            panel.spawn((
+                Text::new("\u{258C} BOARD"),
+                TextFont {
+                    font: font_handle_for_mini_tableau.clone(),
+                    font_size: TYPE_CAPTION,
+                    ..default()
+                },
+                TextColor(ACCENT_PRIMARY),
+            ));
+            panel.spawn((
+                ReplayMiniTableauFoundations,
+                Text::new("F: -- -- -- --"),
+                TextFont {
+                    font: font_handle_for_mini_tableau.clone(),
+                    font_size: TYPE_CAPTION,
+                    ..default()
+                },
+                TextColor(TEXT_PRIMARY),
+            ));
+            panel.spawn((
+                ReplayMiniTableauStockWaste,
+                Text::new("STK:-- WST:--"),
+                TextFont {
+                    font: font_handle_for_mini_tableau,
+                    font_size: TYPE_CAPTION,
+                    ..default()
+                },
+                TextColor(TEXT_SECONDARY),
+            ));
         });
 }
 
@@ -1555,6 +1645,118 @@ fn format_active_move_row(state: &ReplayPlaybackState) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Mini-tableau format helpers and update system
+// ---------------------------------------------------------------------------
+
+/// Pure helper — short rank symbol. Single character for all ranks
+/// except Ten which uses "T" (keeps every card a consistent 2-char
+/// wide render: rank-char + suit-glyph). Players familiar with
+/// solitaire shorthand read "T" instantly; the suit glyph immediately
+/// follows and disambiguates from an ambiguous "T".
+fn format_rank_short(rank: Rank) -> &'static str {
+    match rank {
+        Rank::Ace   => "A",
+        Rank::Two   => "2",
+        Rank::Three => "3",
+        Rank::Four  => "4",
+        Rank::Five  => "5",
+        Rank::Six   => "6",
+        Rank::Seven => "7",
+        Rank::Eight => "8",
+        Rank::Nine  => "9",
+        Rank::Ten   => "T",
+        Rank::Jack  => "J",
+        Rank::Queen => "Q",
+        Rank::King  => "K",
+    }
+}
+
+/// Pure helper — Unicode suit glyph from FiraMono's covered range
+/// (U+2660–U+2666). These four code points are confirmed present in
+/// the bundled FiraMono on Android (verified on Pixel 7 / API 34).
+fn format_suit_glyph(suit: Suit) -> &'static str {
+    match suit {
+        Suit::Spades   => "\u{2660}", // ♠
+        Suit::Hearts   => "\u{2665}", // ♥
+        Suit::Diamonds => "\u{2666}", // ♦
+        Suit::Clubs    => "\u{2663}", // ♣
+    }
+}
+
+/// Pure helper — compact 2-char card label (`rank + suit glyph`) for a
+/// known card, or `"--"` for an absent top card (empty pile).
+fn format_card_short(card: Option<&Card>) -> String {
+    match card {
+        Some(c) => format!("{}{}", format_rank_short(c.rank), format_suit_glyph(c.suit)),
+        None    => "--".to_string(),
+    }
+}
+
+/// Pure helper — one-line summary of the four foundation tops.
+/// Renders as `F: A♠ 7♥ 5♦ K♣` with `--` for any empty slot.
+/// Foundation slots are displayed in their natural 0-3 order
+/// (matching the visual left-to-right order on screen).
+fn format_foundations_row(game: &GameState) -> String {
+    let slots: [String; 4] = std::array::from_fn(|i| {
+        let top = game.piles
+            .get(&PileType::Foundation(i as u8))
+            .and_then(|p| p.cards.last());
+        format_card_short(top)
+    });
+    format!("F: {} {} {} {}", slots[0], slots[1], slots[2], slots[3])
+}
+
+/// Pure helper — one-line stock / waste summary.
+/// Renders as `STK:N WST:X♠` where N is the stock card count and
+/// X♠ is the top waste card (or `--` when the waste pile is empty).
+fn format_stock_waste_row(game: &GameState) -> String {
+    let stock_count = game.piles
+        .get(&PileType::Stock)
+        .map(|p| p.cards.len())
+        .unwrap_or(0);
+    let waste_top = game.piles
+        .get(&PileType::Waste)
+        .and_then(|p| p.cards.last());
+    format!("STK:{} WST:{}", stock_count, format_card_short(waste_top))
+}
+
+/// Repaints the foundations row whenever [`GameStateResource`] changes.
+/// Split into its own system (rather than combined with the stock/waste
+/// updater) to avoid a Bevy B0001 query conflict: two `&mut Text`
+/// queries in one system are always ambiguous regardless of marker
+/// filters. Each updater owns exactly one `Query<&mut Text, With<…>>`.
+fn update_mini_tableau_foundations(
+    game: Option<Res<GameStateResource>>,
+    mut q: Query<&mut Text, With<ReplayMiniTableauFoundations>>,
+) {
+    let Some(game) = game else { return };
+    if !game.is_changed() {
+        return;
+    }
+    let text = format_foundations_row(&game.0);
+    for mut t in &mut q {
+        **t = text.clone();
+    }
+}
+
+/// Repaints the stock/waste row whenever [`GameStateResource`] changes.
+/// Sibling of [`update_mini_tableau_foundations`] — same change-detection
+/// guard, separate system to avoid the B0001 query conflict.
+fn update_mini_tableau_stock_waste(
+    game: Option<Res<GameStateResource>>,
+    mut q: Query<&mut Text, With<ReplayMiniTableauStockWaste>>,
+) {
+    let Some(game) = game else { return };
+    if !game.is_changed() {
+        return;
+    }
+    let text = format_stock_waste_row(&game.0);
+    for mut t in &mut q {
+        **t = text.clone();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Playback-control button handlers
 // ---------------------------------------------------------------------------
 
@@ -1763,6 +1965,7 @@ fn handle_stop_keyboard(
 mod tests {
     use super::*;
     use chrono::NaiveDate;
+    use solitaire_core::card::{Rank, Suit};
     use solitaire_core::game_state::{DrawMode, GameMode};
     use solitaire_data::{Replay, ReplayMove};
 
@@ -3989,5 +4192,114 @@ mod tests {
     #[test]
     fn dim_layer_z_is_below_replay_chrome() {
         const { assert!(Z_REPLAY_DIM < Z_REPLAY_OVERLAY) }
+    }
+
+    // -----------------------------------------------------------------------
+    // Mini-tableau preview tests
+    // -----------------------------------------------------------------------
+
+    fn mini_tableau_panel_count(app: &mut App) -> usize {
+        app.world_mut()
+            .query::<&ReplayMiniTableauPanel>()
+            .iter(app.world())
+            .count()
+    }
+
+    /// Mini-tableau panel spawns alongside the other overlay surfaces
+    /// when playback starts and despawns when it ends.
+    #[test]
+    fn mini_tableau_panel_spawns_and_despawns_with_overlay() {
+        let mut app = headless_app();
+
+        app.update();
+        assert_eq!(
+            mini_tableau_panel_count(&mut app),
+            0,
+            "no mini-tableau panel while playback is Inactive",
+        );
+
+        set_state(
+            &mut app,
+            ReplayPlaybackState::Playing {
+                replay: synthetic_replay(5),
+                cursor: 0,
+                secs_to_next: 0.5,
+                paused: false,
+            },
+        );
+        app.update();
+        assert_eq!(
+            mini_tableau_panel_count(&mut app),
+            1,
+            "mini-tableau panel must spawn when playback starts",
+        );
+
+        set_state(&mut app, ReplayPlaybackState::Inactive);
+        app.update();
+        assert_eq!(
+            mini_tableau_panel_count(&mut app),
+            0,
+            "mini-tableau panel must despawn when playback ends",
+        );
+    }
+
+    /// `format_rank_short` maps every `Rank` variant to a single ASCII
+    /// character except Ten which maps to `"T"`.
+    #[test]
+    fn format_rank_short_all_ranks() {
+        assert_eq!(format_rank_short(Rank::Ace),   "A");
+        assert_eq!(format_rank_short(Rank::Two),   "2");
+        assert_eq!(format_rank_short(Rank::Three), "3");
+        assert_eq!(format_rank_short(Rank::Four),  "4");
+        assert_eq!(format_rank_short(Rank::Five),  "5");
+        assert_eq!(format_rank_short(Rank::Six),   "6");
+        assert_eq!(format_rank_short(Rank::Seven), "7");
+        assert_eq!(format_rank_short(Rank::Eight), "8");
+        assert_eq!(format_rank_short(Rank::Nine),  "9");
+        assert_eq!(format_rank_short(Rank::Ten),   "T");
+        assert_eq!(format_rank_short(Rank::Jack),  "J");
+        assert_eq!(format_rank_short(Rank::Queen), "Q");
+        assert_eq!(format_rank_short(Rank::King),  "K");
+    }
+
+    /// `format_suit_glyph` returns the FiraMono-covered Unicode suit
+    /// glyphs for each `Suit` variant (U+2660–U+2666 confirmed on Android).
+    #[test]
+    fn format_suit_glyph_all_suits() {
+        assert_eq!(format_suit_glyph(Suit::Spades),   "\u{2660}");
+        assert_eq!(format_suit_glyph(Suit::Hearts),   "\u{2665}");
+        assert_eq!(format_suit_glyph(Suit::Diamonds), "\u{2666}");
+        assert_eq!(format_suit_glyph(Suit::Clubs),    "\u{2663}");
+    }
+
+    /// `format_foundations_row` with a freshly-dealt game (all empty).
+    #[test]
+    fn format_foundations_row_empty_board() {
+        let game = solitaire_core::game_state::GameState::new_with_mode(
+            42,
+            solitaire_core::game_state::DrawMode::DrawOne,
+            solitaire_core::game_state::GameMode::Classic,
+        );
+        assert_eq!(format_foundations_row(&game), "F: -- -- -- --");
+    }
+
+    /// `format_stock_waste_row` with a freshly-dealt game: stock has
+    /// 24 cards, waste is empty.
+    #[test]
+    fn format_stock_waste_row_initial_state() {
+        let game = solitaire_core::game_state::GameState::new_with_mode(
+            42,
+            solitaire_core::game_state::DrawMode::DrawOne,
+            solitaire_core::game_state::GameMode::Classic,
+        );
+        let text = format_stock_waste_row(&game);
+        assert!(
+            text.starts_with("STK:"),
+            "row must start with STK: prefix; got {text:?}",
+        );
+        assert!(
+            text.contains("WST:--"),
+            "waste must show -- on a fresh deal; got {text:?}",
+        );
     }
 }
