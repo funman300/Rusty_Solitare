@@ -191,7 +191,7 @@ impl GameState {
             is_auto_completable: false,
             undo_count: 0,
             recycle_count: 0,
-            take_from_foundation: false,
+            take_from_foundation: true,
             schema_version: GAME_STATE_SCHEMA_VERSION,
             undo_stack: VecDeque::new(),
         }
@@ -1306,9 +1306,18 @@ mod tests {
     }
 
     #[test]
-    fn take_from_foundation_blocked_by_default() {
+    fn take_from_foundation_allowed_by_default() {
         let mut g = setup_take_from_foundation_game();
-        assert!(!g.take_from_foundation);
+        assert!(g.take_from_foundation, "standard Klondike allows take-from-foundation by default");
+        g.move_cards(PileType::Foundation(0), PileType::Tableau(0), 1).unwrap();
+        assert_eq!(g.piles[&PileType::Foundation(0)].cards.len(), 1);
+        assert_eq!(g.piles[&PileType::Tableau(0)].cards.len(), 2);
+    }
+
+    #[test]
+    fn take_from_foundation_blocked_when_disabled() {
+        let mut g = setup_take_from_foundation_game();
+        g.take_from_foundation = false;
         let err = g
             .move_cards(PileType::Foundation(0), PileType::Tableau(0), 1)
             .unwrap_err();
@@ -1321,6 +1330,7 @@ mod tests {
     #[test]
     fn take_from_foundation_allowed_when_enabled() {
         let mut g = setup_take_from_foundation_game();
+        // already true by default; explicit set confirms the behaviour holds
         g.take_from_foundation = true;
         g.move_cards(PileType::Foundation(0), PileType::Tableau(0), 1).unwrap();
         // Foundation slot 0 should now hold only the Ace.

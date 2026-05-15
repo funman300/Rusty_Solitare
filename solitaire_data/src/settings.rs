@@ -239,11 +239,11 @@ pub struct Settings {
     /// field existed deserialize cleanly to `None` via `#[serde(default)]`.
     #[serde(default)]
     pub leaderboard_display_name: Option<String>,
-    /// When `true`, the player may drag the top card of a completed foundation
-    /// pile back onto a compatible tableau column — a non-standard house rule.
-    /// Off by default. Older `settings.json` files deserialize cleanly to
-    /// `false` via `#[serde(default)]`.
-    #[serde(default)]
+    /// When `true`, the player may drag the top card of a foundation pile back
+    /// onto a compatible tableau column. Enabled by default (standard Klondike
+    /// rules). Older `settings.json` files without this key deserialize to
+    /// `true` via the custom serde default.
+    #[serde(default = "default_take_from_foundation")]
     pub take_from_foundation: bool,
     /// When `true`, anonymous game-play events (game start, game won, etc.)
     /// are sent to the configured Matomo instance. Opt-in; defaults to `false`.
@@ -332,6 +332,10 @@ fn default_matomo_site_id() -> u32 {
     1
 }
 
+fn default_take_from_foundation() -> bool {
+    true
+}
+
 /// Lower bound of the player-tunable replay-playback per-move interval,
 /// in seconds. Below this the cards barely register visually before
 /// the next move fires; the cap keeps the playback legible.
@@ -384,7 +388,7 @@ impl Default for Settings {
             replay_move_interval_secs: default_replay_move_interval_secs(),
             last_difficulty: None,
             leaderboard_display_name: None,
-            take_from_foundation: false,
+            take_from_foundation: true,
             analytics_enabled: false,
             matomo_url: None,
             matomo_site_id: default_matomo_site_id(),
