@@ -75,12 +75,23 @@ if [ -d "$RES_DIR" ]; then
   "$BT/aapt2" compile --dir "$RES_DIR" -o "$STAGING/compiled-res"
 fi
 
+# Derive versionCode/versionName from VERSION_NAME env var (e.g. "v0.28.0" → code 2800, name "0.28.0").
+# Falls back to the values hardcoded in AndroidManifest.xml when not set (local debug builds).
+VERSION_CODE=""
+if [ -n "${VERSION_NAME:-}" ]; then
+  VN="${VERSION_NAME#v}"
+  IFS='.' read -r _MAJ _MIN _PAT <<< "$VN"
+  VERSION_CODE=$(( ${_MAJ:-0} * 10000 + ${_MIN:-0} * 100 + ${_PAT:-0} ))
+fi
+
 LINK_ARGS=(
   link
   -o "$STAGING/app-unsigned.apk"
   -I "$PLATFORM_JAR"
   --manifest "$MANIFEST"
 )
+[ -n "$VERSION_CODE" ]         && LINK_ARGS+=( --version-code "$VERSION_CODE" )
+[ -n "${VERSION_NAME:-}" ]     && LINK_ARGS+=( --version-name "${VERSION_NAME#v}" )
 [ -d "$ASSETS_DIR" ] && LINK_ARGS+=( -A "$ASSETS_DIR" )
 # Add compiled resources if any
 shopt -s nullglob

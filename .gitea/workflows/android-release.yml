@@ -81,6 +81,7 @@ jobs:
           KEYSTORE_PASS: ${{ secrets.RELEASE_KEYSTORE_PASS }}
           KEY_ALIAS: release
           KEY_PASS: ${{ secrets.RELEASE_KEYSTORE_PASS }}
+          VERSION_NAME: ${{ steps.tag.outputs.name }}
         run: bash scripts/build_android_apk.sh
 
       - name: Get tag name
