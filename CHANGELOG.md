@@ -6,6 +6,14 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-05-16
+
+### Changed
+
+- **Tableau card spacing tightened.** Face-up card fan reduced from 25% to 18%
+  of card height; face-down from 20% to 14%. Cards on tableau piles sit closer
+  together while still showing enough of each card to read the pile depth.
+
 ## [0.29.0] — 2026-05-16
 
 ### Fixed
