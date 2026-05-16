@@ -301,16 +301,30 @@ btnPlay.addEventListener("click", () => {
     }, STEP_INTERVAL_MS);
 });
 
+/// Step the player back one move. Re-creates the ReplayPlayer and fast-
+/// forwards to (step_idx - 1) without rendering intermediate frames, then
+/// renders once so the CSS transition animates each card to its previous
+/// position.
+function stepBack() {
+    if (!player || player.step_idx() === 0) return;
+    if (playInterval) {
+        clearInterval(playInterval);
+        playInterval = null;
+        btnPlay.textContent = "▶ Play";
+    }
+    const target = player.step_idx() - 1;
+    player = new ReplayPlayer(replayJson);
+    for (let i = 0; i < target; i++) {
+        player.step();
+    }
+    render(player.state());
+    btnPrev.disabled = player.step_idx() === 0;
+    btnStep.disabled = false;
+    btnPlay.disabled = false;
+}
+
 btnPrev.addEventListener("click", () => {
-    if (!replayJson) return;
-    // Drop every existing card so the next render fades them all in
-    // at the freshly-dealt positions. Without this, cards from the
-    // current state would slide to wherever the new deal puts them
-    // — confusing since the deal is supposed to look like a fresh
-    // start, not a continuation.
-    cardEls.forEach((el) => el.remove());
-    cardEls.clear();
-    resetPlayer();
+    if (player) stepBack();
 });
 
 bootstrap();
