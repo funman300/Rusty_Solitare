@@ -6,6 +6,24 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-05-16
+
+### Fixed
+
+- **Stock-count badge overlaps waste pile on Android** (Bug 1). The badge was
+  centred 12 px inward from the stock pile's right edge, but its half-width of
+  17 px pushed it 5 px past the edge. On Android (`H_GAP_DIVISOR = 32`) the
+  inter-pile gap is only ~4 px, so the badge's top-right corner covered the
+  left edge of the adjacent waste card at `Z_STOCK_BADGE = 30` (above the
+  card's Z ≈ 1). Fixed by moving the inset to 20 px so the badge right edge
+  sits 3 px inside the stock card on every device.
+- **Oversized grey header bar** (Bug 2). The top HUD band was a full-width
+  `Node` with an opaque dark-grey `BackgroundColor` sized to `HUD_BAND_HEIGHT`
+  (64 px desktop / 80 px Android). Typical gameplay only shows one tier of
+  score text (~30 px), leaving a large empty grey block. Removed the
+  `BackgroundColor` from the band entity; the green felt now shows through and
+  only the score text and avatar button are visible in the header area.
+
 ## [0.31.0] — 2026-05-16
 
 ### Fixed

@@ -479,16 +479,13 @@ impl Plugin for HudPlugin {
     }
 }
 
-/// Spawns the translucent HUD band that anchors the action buttons
-/// and primary readouts visually. Sits behind every other HUD element
-/// (one z-rung below `Z_HUD`) so it reads as the band's "container"
-/// without intercepting clicks from the buttons it sits under.
+/// Spawns the invisible HUD band that reserves vertical space at the top of
+/// the screen so the card layout (computed by `layout::compute_layout` using
+/// `HUD_BAND_HEIGHT`) aligns correctly below the score readouts.
 ///
-/// Width is full-window, height matches `layout::HUD_BAND_HEIGHT` (the
-/// same constant the card layout reserves at the top), so the band's
-/// bottom edge lines up exactly with the top edge of the highest
-/// playable card. The fill is `BG_HUD_BAND` — midnight purple at 0.70
-/// alpha, so the green felt reads through subtly.
+/// The entity carries no `BackgroundColor` — the green felt shows through.
+/// A slim grey background is handled by each content section individually
+/// (the bottom action bar has its own `BG_HUD_BAND` background).
 fn spawn_hud_band(insets: Option<Res<SafeAreaInsets>>, mut commands: Commands) {
     const BASE_TOP: f32 = 0.0;
     let top_inset = insets.as_deref().copied().unwrap_or_default().top;
@@ -501,10 +498,6 @@ fn spawn_hud_band(insets: Option<Res<SafeAreaInsets>>, mut commands: Commands) {
             height: Val::Px(HUD_BAND_HEIGHT),
             ..default()
         },
-        BackgroundColor(BG_HUD_BAND),
-        // Sit one z-rung below the HUD content so the buttons and text
-        // paint on top, but above the card sprites (which are 2D-world
-        // entities and rendered behind UI regardless).
         ZIndex(Z_HUD - 1),
         SafeAreaAnchoredTop { base_top: BASE_TOP },
         HudBand,

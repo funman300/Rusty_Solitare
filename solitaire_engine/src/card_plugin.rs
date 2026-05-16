@@ -1614,10 +1614,11 @@ fn update_stock_empty_indicator(
 // ---------------------------------------------------------------------------
 
 /// Inset (in pixels) from the top-right corner of the stock pile sprite to
-/// the centre of the count badge. A small inward offset keeps the chip from
-/// drifting half-off the card while still reading as "attached" to the
-/// corner.
-const STOCK_BADGE_INSET: Vec2 = Vec2::new(-12.0, -8.0);
+/// the centre of the count badge. Must satisfy `|x| >= STOCK_BADGE_SIZE.x / 2`
+/// so the badge right edge stays inside the stock pile and never overlaps the
+/// adjacent waste pile — critical on Android where `H_GAP_DIVISOR = 32` gives
+/// an inter-pile gap of only ~4 px.
+const STOCK_BADGE_INSET: Vec2 = Vec2::new(-20.0, -8.0);
 
 /// Width / height of the badge background sprite, in world pixels. Sized so
 /// a 2-digit count (max "24") fits comfortably with `TYPE_BODY` (14 pt) text.
