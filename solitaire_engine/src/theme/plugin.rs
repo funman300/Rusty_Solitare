@@ -129,7 +129,7 @@ fn load_initial_theme(
     let id = settings
         .as_deref()
         .map(|s| s.0.selected_theme_id.as_str())
-        .unwrap_or("dark");
+        .unwrap_or("classic");
     let url = bundled_theme_url(id)
         .map(str::to_string)
         .unwrap_or_else(|| format!("themes://{id}/theme.ron"));

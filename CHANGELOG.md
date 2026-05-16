@@ -6,6 +6,20 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-05-16
+
+### Fixed
+
+- **Face-down cards render as tiny red squares (startup ordering bug)**. The
+  `load_initial_theme` system fell back to `"dark"` when `SettingsResource` was
+  not yet available at `Startup`, which happens on every fresh run before the
+  settings file is read. The dark theme's near-black card back (#151515) renders
+  as fully-off pixels on AMOLED screens, leaving only a 24×32 px red badge
+  visible. Changed the fallback to `"classic"` so startup behaviour matches the
+  `default_theme_id()` set in v0.31.0. Cascade-collapse and top-row legibility
+  issues were visual consequences of the same invisible-card-back problem, not
+  separate layout bugs.
+
 ## [0.32.0] — 2026-05-16
 
 ### Fixed
