@@ -98,14 +98,10 @@ jobs:
 
           # Remove any existing APK assets so re-runs don't accumulate duplicates.
           curl -sf -H "$AUTH" "$BASE/releases/$RELEASE_ID/assets" \
-            | python3 -c "
-import sys, json
-for a in json.load(sys.stdin):
-    if a['name'].endswith('.apk'):
-        print(a['id'])
-" | while read AID; do
-            curl -sf -X DELETE -H "$AUTH" "$BASE/releases/$RELEASE_ID/assets/$AID"
-          done
+            | python3 -c "import sys,json; [print(a['id']) for a in json.load(sys.stdin) if a['name'].endswith('.apk')]" \
+            | while read AID; do
+                curl -sf -X DELETE -H "$AUTH" "$BASE/releases/$RELEASE_ID/assets/$AID"
+              done
 
           curl -sf -X POST \
             -H "$AUTH" \
