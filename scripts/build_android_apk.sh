@@ -76,12 +76,16 @@ if [ -d "$RES_DIR" ]; then
 fi
 
 # Derive versionCode/versionName from VERSION_NAME env var (e.g. "v0.28.0" → code 2800, name "0.28.0").
-# Falls back to the values hardcoded in AndroidManifest.xml when not set (local debug builds).
-VERSION_CODE=""
+# AndroidManifest.xml intentionally has no versionCode/versionName — aapt2's --version-* flags only
+# inject when absent, so the manifest must be clean for CI injection to work. Local debug builds
+# fall back to code=1 / name="0.0.0-dev".
 if [ -n "${VERSION_NAME:-}" ]; then
   VN="${VERSION_NAME#v}"
   IFS='.' read -r _MAJ _MIN _PAT <<< "$VN"
   VERSION_CODE=$(( ${_MAJ:-0} * 10000 + ${_MIN:-0} * 100 + ${_PAT:-0} ))
+else
+  VERSION_CODE=1
+  VERSION_NAME="0.0.0-dev"
 fi
 
 LINK_ARGS=(
