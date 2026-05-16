@@ -75,7 +75,7 @@ const VERTICAL_GAP_FRAC: f32 = 0.2;
 /// column must fit at this fraction). On desktop (height-limited) windows the
 /// adaptive computation returns this value exactly; on portrait phones it
 /// expands to fill available vertical space.
-const TABLEAU_FAN_FRAC: f32 = 0.25;
+const TABLEAU_FAN_FRAC: f32 = 0.18;
 
 /// Minimum fraction for face-down tableau cards. Scales proportionally with
 /// the adaptive face-up fraction so hit-testing and rendering stay in sync.
@@ -84,7 +84,7 @@ const TABLEAU_FAN_FRAC: f32 = 0.25;
 /// enough of each card back to read as a meaningful stack rather than a
 /// thin sliver. The ratio to TABLEAU_FAN_FRAC (0.80) is preserved by
 /// the adaptive scaling in `compute_layout`.
-const TABLEAU_FACEDOWN_FAN_FRAC: f32 = 0.20;
+const TABLEAU_FACEDOWN_FAN_FRAC: f32 = 0.14;
 
 /// Largest possible face-up tableau column in Klondike: a King down to an Ace
 /// after every face-down card has flipped on column 7. Layout sizing must keep
