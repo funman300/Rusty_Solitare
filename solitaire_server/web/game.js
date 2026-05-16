@@ -103,7 +103,8 @@ const hudMoves   = document.getElementById("hud-moves");
 const hudTimer   = document.getElementById("hud-timer");
 const hudStock   = document.getElementById("hud-stock");
 const hudSeed    = document.getElementById("hud-seed");
-const btnUndo    = document.getElementById("btn-undo");
+const btnUndo      = document.getElementById("btn-undo");
+const btnBoardUndo = document.getElementById("btn-board-undo");
 const btnNew     = document.getElementById("btn-new");
 const chkDraw3   = document.getElementById("chk-draw3");
 const btnTheme   = document.getElementById("btn-theme");
@@ -243,7 +244,8 @@ function render(s) {
     hudScore.textContent = `Score: ${s.score}`;
     hudMoves.textContent = `Moves: ${s.move_count}`;
     if (hudStock) hudStock.textContent = `Stock: ${s.stock.length}`;
-    btnUndo.disabled     = s.undo_stack_len === 0;
+    btnUndo.disabled           = s.undo_stack_len === 0;
+    btnBoardUndo.disabled      = s.undo_stack_len === 0;
 
     const visible = new Map();
     const addPile = (name, cards) =>
@@ -385,10 +387,9 @@ function flashIllegal(cardIds) {
 
 // ── Input ─────────────────────────────────────────────────────────────────────
 function attachHandlers() {
-    btnUndo.addEventListener("click", () => {
-        const r = game.undo();
-        if (r.ok) render(r.snapshot);
-    });
+    const doUndo = () => { const r = game.undo(); if (r.ok) render(r.snapshot); };
+    btnUndo.addEventListener("click", doUndo);
+    btnBoardUndo.addEventListener("click", doUndo);
     btnNew.addEventListener("click", () => startGame(randomSeed()));
     btnWinNew.addEventListener("click", () => startGame(randomSeed()));
     chkDraw3.addEventListener("change", () => {
@@ -404,7 +405,7 @@ function attachHandlers() {
 
     document.addEventListener("keydown", (e) => {
         if (e.target.tagName === "INPUT") return;
-        if (e.key === "z" || e.key === "Z") { const r = game.undo(); if (r.ok) render(r.snapshot); }
+        if (e.key === "z" || e.key === "Z") doUndo();
         if (e.key === "n" || e.key === "N") startGame(randomSeed());
     });
 

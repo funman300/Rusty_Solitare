@@ -98,6 +98,16 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 /* ── Board ───────────────────────────────────────────────────────────── */
 
+.board-undo {
+    position: absolute;
+    bottom: 24px;
+    right: 24px;
+    z-index: 50;
+    font-size: 15px;
+    padding: 8px 20px;
+    pointer-events: auto;
+}
+
 main {
     flex: 1;
     display: flex;
@@ -108,6 +118,7 @@ main {
 
 /* Full-bleed felt surface — flex:1 reliably fills main's remaining height. */
 #board {
+    position: relative;
     flex: 1;
     background: var(--felt);
     display: flex;
