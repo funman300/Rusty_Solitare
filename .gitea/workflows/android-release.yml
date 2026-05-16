@@ -92,7 +92,22 @@ jobs:
 
       - name: Upload APK to release
         run: |
+          BASE="${{ env.GITEA_URL }}/api/v1/repos/${{ env.REPO }}"
+          AUTH="Authorization: token ${{ secrets.CI_TOKEN }}"
+          RELEASE_ID="${{ steps.release.outputs.id }}"
+
+          # Remove any existing APK assets so re-runs don't accumulate duplicates.
+          curl -sf -H "$AUTH" "$BASE/releases/$RELEASE_ID/assets" \
+            | python3 -c "
+import sys, json
+for a in json.load(sys.stdin):
+    if a['name'].endswith('.apk'):
+        print(a['id'])
+" | while read AID; do
+            curl -sf -X DELETE -H "$AUTH" "$BASE/releases/$RELEASE_ID/assets/$AID"
+          done
+
           curl -sf -X POST \
-            -H "Authorization: token ${{ secrets.CI_TOKEN }}" \
+            -H "$AUTH" \
             -F "attachment=@${{ env.APK_OUT }};type=application/vnd.android.package-archive" \
-            "${{ env.GITEA_URL }}/api/v1/repos/${{ env.REPO }}/releases/${{ steps.release.outputs.id }}/assets"
+            "$BASE/releases/$RELEASE_ID/assets"
