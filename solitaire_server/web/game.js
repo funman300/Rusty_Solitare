@@ -663,5 +663,31 @@ function onBoardDblClick(e) {
     if (!smartMove(hit.pileName, fromIndex)) flashIllegal([cards[fromIndex].id]);
 }
 
+// ── Avatar ────────────────────────────────────────────────────────────────────
+async function loadAvatar() {
+    const token = localStorage.getItem("fs_token");
+    if (!token) return;
+    try {
+        const res = await fetch("/api/me", {
+            headers: { Authorization: "Bearer " + token },
+        });
+        if (!res.ok) return;
+        const me = await res.json();
+        const link = document.getElementById("hud-avatar");
+        const img  = document.getElementById("hud-avatar-img");
+        const init = document.getElementById("hud-avatar-initials");
+        link.style.display = "flex";
+        if (me.avatar_url) {
+            img.src = me.avatar_url;
+            img.style.display = "block";
+            init.style.display = "none";
+        } else {
+            img.style.display = "none";
+            init.textContent = (me.username || "P")[0].toUpperCase();
+        }
+    } catch { /* not signed in — avatar stays hidden */ }
+}
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 bootstrap().catch(console.error);
+loadAvatar();
