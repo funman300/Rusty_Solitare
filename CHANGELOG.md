@@ -6,6 +6,21 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-05-16
+
+### Fixed
+
+- **APK versionCode hardcoded to 1** (`AndroidManifest.xml`, `build_android_apk.sh`).
+  Every release shipped with `versionCode="1"` / `versionName="1.0"`, so Android
+  silently refused upgrades and Obtainium permanently showed a false update
+  notification. The CI now derives the version code from the release tag
+  (e.g. v0.29.0 → 2900) and stamps it into the APK via `aapt2 link
+  --version-code / --version-name`.
+- **CI kustomize install flaky** (`.gitea/workflows/docker-build.yml`).
+  The `curl | bash install_kustomize.sh` pattern hit GitHub API rate limits
+  on the shared runner IP, causing a `tar: no such file` failure. Replaced
+  with a direct pinned tarball download (kustomize v5.4.3).
+
 ## [0.28.0] — 2026-05-14
 
 ### Changed
