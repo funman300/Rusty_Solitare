@@ -62,6 +62,7 @@ const resultEl = document.getElementById("result");
 const btnPlay = document.getElementById("btn-play");
 const btnStep = document.getElementById("btn-step");
 const btnPrev = document.getElementById("btn-prev");
+const btnRestart = document.getElementById("btn-restart");
 
 let player = null;
 let replayJson = null;
@@ -122,6 +123,7 @@ function resetPlayer() {
     }
     player = new ReplayPlayer(replayJson);
     btnPrev.disabled = true;
+    btnRestart.disabled = true;
     btnStep.disabled = false;
     btnPlay.disabled = false;
     render(player.state());
@@ -134,6 +136,7 @@ function step() {
         return null;
     }
     btnPrev.disabled = false;
+    btnRestart.disabled = false;
     render(snap);
     return snap;
 }
@@ -319,12 +322,20 @@ function stepBack() {
     }
     render(player.state());
     btnPrev.disabled = player.step_idx() === 0;
+    btnRestart.disabled = player.step_idx() === 0;
     btnStep.disabled = false;
     btnPlay.disabled = false;
 }
 
 btnPrev.addEventListener("click", () => {
     if (player) stepBack();
+});
+
+btnRestart.addEventListener("click", () => {
+    if (!replayJson) return;
+    cardEls.forEach((el) => el.remove());
+    cardEls.clear();
+    resetPlayer();
 });
 
 bootstrap();
