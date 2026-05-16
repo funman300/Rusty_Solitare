@@ -13,7 +13,7 @@ ENV ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION} \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         openjdk-17-jdk-headless \
-        wget unzip curl ca-certificates git zip python3 \
+        build-essential wget unzip curl ca-certificates git zip python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Android SDK command-line tools
