@@ -16,6 +16,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential wget unzip curl ca-certificates git zip python3 \
     && rm -rf /var/lib/apt/lists/*
 
+# Node.js 20 — required by Gitea Actions composite actions (checkout, cache, etc.)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
 # Android SDK command-line tools
 RUN mkdir -p "$ANDROID_HOME/cmdline-tools" \
     && wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
