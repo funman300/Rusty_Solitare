@@ -484,13 +484,13 @@ fn load_card_images(asset_server: Option<Res<AssetServer>>, mut commands: Comman
     let faces: [[Handle<Image>; 13]; 4] = std::array::from_fn(|suit| {
         std::array::from_fn(|rank| {
             asset_server.load(format!(
-                "cards/faces/{}{}.png",
+                "cards/faces/classic/{}{}.png",
                 RANK_STRS[rank], SUIT_CHARS[suit]
             ))
         })
     });
     let backs = std::array::from_fn(|i| {
-        asset_server.load(format!("cards/backs/back_{i}.png"))
+        asset_server.load(format!("cards/backs/classic/back_{i}.png"))
     });
     commands.insert_resource(CardImageSet {
         faces,

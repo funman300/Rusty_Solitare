@@ -6,6 +6,20 @@ project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.31.0] — 2026-05-16
+
+### Fixed
+
+- **Face-down cards rendered as solid red squares on AMOLED phones** (Bug 1).
+  The dark theme's card back (`back.svg`) uses a near-black background
+  (`#151515`) which AMOLED screens render as fully-off pixels, leaving only a
+  tiny `#a54242` red badge visible — exactly what was reported. Fixed by
+  changing the fresh-install default theme from "dark" to "classic" (white
+  background with navy diamond pattern, clearly readable on all display types).
+  Also corrected stale asset paths in `load_card_images` (`cards/backs/back_N`
+  → `cards/backs/classic/back_N`, `cards/faces/XY` → `cards/faces/classic/XY`)
+  so the PNG fallback loads correctly when the embedded theme hasn't arrived yet.
+
 ## [0.30.0] — 2026-05-16
 
 ### Changed

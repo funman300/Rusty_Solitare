@@ -275,7 +275,7 @@ fn default_music_volume() -> f32 {
 }
 
 fn default_theme_id() -> String {
-    "dark".to_string()
+    "classic".to_string()
 }
 
 /// Default tooltip-hover dwell delay in seconds. Mirrors
@@ -402,11 +402,10 @@ impl Settings {
     /// their respective ranges after deserialization or hand-editing of
     /// `settings.json`.
     pub fn sanitized(self) -> Self {
-        // Migrate stale theme IDs: "default" was removed when the theme was
-        // renamed to "dark"; "classic" was briefly the default before "dark"
-        // was restored as the shipped default.
+        // Migrate stale theme IDs: "default" was the original name before it
+        // was renamed to "dark".
         let selected_theme_id = match self.selected_theme_id.as_str() {
-            "default" | "classic" => "dark".to_string(),
+            "default" => "dark".to_string(),
             _ => self.selected_theme_id,
         };
         Self {

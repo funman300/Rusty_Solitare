@@ -1785,9 +1785,8 @@ mod tests {
         let layout = compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
         // Tableau 6 has 7 cards.
         let (_, size) = pile_drop_rect(&PileType::Tableau(6), &layout, &game);
-        // Expected: card_height + 6 * fan. fan = 0.25 * card_height, so
-        // size.y = card_height * (1 + 6 * 0.25) = card_height * 2.5.
-        let expected = layout.card_size.y * 2.5;
+        // Expected: card_height + 6 fan steps.
+        let expected = layout.card_size.y * (1.0 + 6.0 * layout.tableau_fan_frac);
         assert!(
             (size.y - expected).abs() < 1e-3,
             "expected {expected}, got {}",
