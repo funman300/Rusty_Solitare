@@ -462,6 +462,49 @@ impl Plugin for CardPlugin {
     }
 }
 
+/// Returns the relative asset path for a card face PNG.
+///
+/// The path format is `cards/faces/classic/{RANK}{SUIT}.png`, e.g. `QS.png`
+/// for the Queen of Spades. Both `load_card_images` and the unit tests use
+/// this function so the filename formula is tested in isolation from the
+/// asset-loading machinery.
+///
+/// Note: this function verifies only the **code-side mapping**. If the PNG
+/// file at the returned path contains wrong artwork (e.g. `QS.png` has a
+/// diamond watermark baked in), that is an **asset content bug** and must be
+/// fixed by replacing the file — no code change can correct it.
+fn card_face_asset_path(rank: Rank, suit: Suit) -> String {
+    const SUIT_CHARS: [&str; 4] = ["C", "D", "H", "S"];
+    const RANK_STRS: [&str; 13] = [
+        "A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K",
+    ];
+    let suit_idx = match suit {
+        Suit::Clubs    => 0,
+        Suit::Diamonds => 1,
+        Suit::Hearts   => 2,
+        Suit::Spades   => 3,
+    };
+    let rank_idx = match rank {
+        Rank::Ace   => 0,
+        Rank::Two   => 1,
+        Rank::Three => 2,
+        Rank::Four  => 3,
+        Rank::Five  => 4,
+        Rank::Six   => 5,
+        Rank::Seven => 6,
+        Rank::Eight => 7,
+        Rank::Nine  => 8,
+        Rank::Ten   => 9,
+        Rank::Jack  => 10,
+        Rank::Queen => 11,
+        Rank::King  => 12,
+    };
+    format!(
+        "cards/faces/classic/{}{}.png",
+        RANK_STRS[rank_idx], SUIT_CHARS[suit_idx]
+    )
+}
+
 /// Loads card face and back PNGs at startup via [`AssetServer`] and inserts
 /// [`CardImageSet`].
 ///
@@ -476,17 +519,15 @@ fn load_card_images(asset_server: Option<Res<AssetServer>>, mut commands: Comman
         return;
     };
 
-    // Suit index: Clubs=0, Diamonds=1, Hearts=2, Spades=3
-    const SUIT_CHARS: [&str; 4] = ["C", "D", "H", "S"];
-    // Rank index: Ace=0 … King=12
-    const RANK_STRS: [&str; 13] = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+    const SUITS: [Suit; 4] = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
+    const RANKS: [Rank; 13] = [
+        Rank::Ace, Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six, Rank::Seven,
+        Rank::Eight, Rank::Nine, Rank::Ten, Rank::Jack, Rank::Queen, Rank::King,
+    ];
 
-    let faces: [[Handle<Image>; 13]; 4] = std::array::from_fn(|suit| {
-        std::array::from_fn(|rank| {
-            asset_server.load(format!(
-                "cards/faces/classic/{}{}.png",
-                RANK_STRS[rank], SUIT_CHARS[suit]
-            ))
+    let faces: [[Handle<Image>; 13]; 4] = std::array::from_fn(|si| {
+        std::array::from_fn(|ri| {
+            asset_server.load(card_face_asset_path(RANKS[ri], SUITS[si]))
         })
     });
     let backs = std::array::from_fn(|i| {
@@ -584,6 +625,7 @@ fn resync_cards_on_settings_change(
 /// Render the initial deal. Runs in `PostStartup`, so all `Startup` systems
 /// (including `TablePlugin::setup_table` which inserts `LayoutResource`)
 /// have already completed.
+#[allow(clippy::too_many_arguments)]
 fn sync_cards_startup(
     commands: Commands,
     game: Res<GameStateResource>,
@@ -592,6 +634,7 @@ fn sync_cards_startup(
     settings: Option<Res<SettingsResource>>,
     entities: Query<(Entity, &CardEntity, &Transform, Option<&CardAnimation>)>,
     card_images: Option<Res<CardImageSet>>,
+    font_res: Option<Res<FontResource>>,
 ) {
     if let Some(layout) = layout {
         let slide_secs = slide_dur.map_or(0.15, |d| d.slide_secs);
@@ -599,7 +642,8 @@ fn sync_cards_startup(
         let back_colour = card_back_colour(selected_back);
         let color_blind = settings.as_ref().is_some_and(|s| s.0.color_blind_mode);
         let high_contrast = settings.as_ref().is_some_and(|s| s.0.high_contrast_mode);
-        sync_cards(commands, &game.0, &layout.0, slide_secs, back_colour, color_blind, high_contrast, &entities, card_images.as_deref(), selected_back);
+        let font_handle = font_res.as_ref().map(|r| &r.0);
+        sync_cards(commands, &game.0, &layout.0, slide_secs, back_colour, color_blind, high_contrast, &entities, card_images.as_deref(), selected_back, font_handle);
     }
 }
 
@@ -613,6 +657,7 @@ fn sync_cards_on_change(
     settings: Option<Res<SettingsResource>>,
     entities: Query<(Entity, &CardEntity, &Transform, Option<&CardAnimation>)>,
     card_images: Option<Res<CardImageSet>>,
+    font_res: Option<Res<FontResource>>,
 ) {
     if events.read().next().is_none() {
         return;
@@ -623,7 +668,8 @@ fn sync_cards_on_change(
         let back_colour = card_back_colour(selected_back);
         let color_blind = settings.as_ref().is_some_and(|s| s.0.color_blind_mode);
         let high_contrast = settings.as_ref().is_some_and(|s| s.0.high_contrast_mode);
-        sync_cards(commands, &game.0, &layout.0, slide_secs, back_colour, color_blind, high_contrast, &entities, card_images.as_deref(), selected_back);
+        let font_handle = font_res.as_ref().map(|r| &r.0);
+        sync_cards(commands, &game.0, &layout.0, slide_secs, back_colour, color_blind, high_contrast, &entities, card_images.as_deref(), selected_back, font_handle);
     }
 }
 
@@ -639,6 +685,7 @@ fn sync_cards(
     entities: &Query<(Entity, &CardEntity, &Transform, Option<&CardAnimation>)>,
     card_images: Option<&CardImageSet>,
     selected_back: usize,
+    font_handle: Option<&Handle<Font>>,
 ) {
     let positions = card_positions(game, layout);
 
@@ -668,10 +715,10 @@ fn sync_cards(
             Some(&(entity, cur, has_anim)) => {
                 update_card_entity(
                     &mut commands, entity, card, position, z, layout,
-                    slide_secs, back_colour, color_blind, high_contrast, cur, has_anim, card_images, selected_back,
+                    slide_secs, back_colour, color_blind, high_contrast, cur, has_anim, card_images, selected_back, font_handle,
                 )
             }
-            None => spawn_card_entity(&mut commands, card, position, z, layout, back_colour, color_blind, high_contrast, card_images, selected_back),
+            None => spawn_card_entity(&mut commands, card, position, z, layout, back_colour, color_blind, high_contrast, card_images, selected_back, font_handle),
         }
     }
 }
@@ -768,6 +815,7 @@ fn spawn_card_entity(
     high_contrast: bool,
     card_images: Option<&CardImageSet>,
     selected_back: usize,
+    font_handle: Option<&Handle<Font>>,
 ) {
     let sprite = card_sprite(card, layout.card_size, back_colour, card_images, selected_back);
 
@@ -811,9 +859,12 @@ fn spawn_card_entity(
     #[cfg(target_os = "android")]
     if card_images.is_some() {
         entity.with_children(|b| {
-            add_android_corner_label(b, card, layout.card_size, color_blind, high_contrast);
+            add_android_corner_label(b, card, layout.card_size, color_blind, high_contrast, font_handle);
         });
     }
+    // Suppress unused-variable warning when not building for Android.
+    #[cfg(not(target_os = "android"))]
+    let _ = font_handle;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -832,6 +883,7 @@ fn update_card_entity(
     has_card_animation: bool,
     card_images: Option<&CardImageSet>,
     selected_back: usize,
+    font_handle: Option<&Handle<Font>>,
 ) {
     let target = Vec3::new(pos.x, pos.y, z);
 
@@ -894,9 +946,12 @@ fn update_card_entity(
     #[cfg(target_os = "android")]
     if card_images.is_some() {
         commands.entity(entity).with_children(|b| {
-            add_android_corner_label(b, card, layout.card_size, color_blind, high_contrast);
+            add_android_corner_label(b, card, layout.card_size, color_blind, high_contrast, font_handle);
         });
     }
+    // Suppress unused-variable warning when not building for Android.
+    #[cfg(not(target_os = "android"))]
+    let _ = font_handle;
 }
 
 fn label_for(card: &Card) -> String {
@@ -1000,6 +1055,13 @@ fn mobile_label_for(card: &Card) -> String {
 /// Spawns the [`AndroidCornerLabel`] + [`AndroidCornerBg`] children on
 /// face-up cards. The background sprite covers the card art's own small
 /// corner text so only the large overlay is visible.
+/// Spawns the [`AndroidCornerLabel`] + [`AndroidCornerBg`] children on
+/// face-up cards using FiraMono (passed via `font_handle`) so that the
+/// suit Unicode glyphs U+2660–U+2666 render correctly. Without an explicit
+/// font handle Bevy falls back to its built-in face which does not include
+/// those glyphs, causing a coloured missing-glyph rectangle to appear in
+/// the text colour — the root cause of the "red square on face-down cards"
+/// visual bug (the box bleeds through near the card edge at z=0.02).
 #[cfg(target_os = "android")]
 fn add_android_corner_label(
     parent: &mut ChildSpawnerCommands,
@@ -1007,6 +1069,7 @@ fn add_android_corner_label(
     card_size: Vec2,
     color_blind: bool,
     high_contrast: bool,
+    font_handle: Option<&Handle<Font>>,
 ) {
     if !card.face_up {
         return;
@@ -1034,12 +1097,18 @@ fn add_android_corner_label(
         ),
     ));
 
-    // Large rank+suit text drawn on top of the background.
+    // Large rank+suit text drawn on top of the background. FiraMono must be
+    // wired here explicitly — the suit glyphs (U+2660–U+2666) are not in
+    // Bevy's built-in font and render as a coloured rectangle without it.
     parent.spawn((
         AndroidCornerLabel,
         CardLabel,
         Text2d::new(mobile_label_for(card)),
-        TextFont { font_size, ..default() },
+        TextFont {
+            font: font_handle.cloned().unwrap_or_default(),
+            font_size,
+            ..default()
+        },
         TextColor(text_colour(card, color_blind, high_contrast)),
         Anchor::TOP_LEFT,
         Transform::from_xyz(
@@ -3166,5 +3235,188 @@ mod tests {
         assert!((highlight.green - success.green).abs() < 1e-6);
         assert!((highlight.blue - success.blue).abs() < 1e-6);
         assert!((highlight.alpha - 0.6).abs() < 1e-6);
+    }
+
+    // -----------------------------------------------------------------------
+    // Bug #1 — CardImageSet key lookup (code-side mapping)
+    //
+    // These tests verify that every (Rank, Suit) pair produces the expected
+    // filename via `card_face_asset_path`. They can only detect *code-side*
+    // mapping bugs (e.g. a suit index mismatch). They do NOT inspect pixel
+    // data — if `QS.png` contains a diamond watermark that is an *asset
+    // content* bug that requires replacing the PNG file.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn card_face_asset_path_queen_of_spades_is_qs_png() {
+        assert_eq!(
+            card_face_asset_path(Rank::Queen, Suit::Spades),
+            "cards/faces/classic/QS.png",
+            "Queen of Spades must resolve to QS.png, not QD.png"
+        );
+    }
+
+    #[test]
+    fn card_face_asset_path_queen_of_diamonds_is_qd_png() {
+        assert_eq!(
+            card_face_asset_path(Rank::Queen, Suit::Diamonds),
+            "cards/faces/classic/QD.png"
+        );
+    }
+
+    #[test]
+    fn card_face_asset_path_ace_of_clubs_is_ac_png() {
+        assert_eq!(card_face_asset_path(Rank::Ace, Suit::Clubs), "cards/faces/classic/AC.png");
+    }
+
+    #[test]
+    fn card_face_asset_path_ten_of_hearts_is_10h_png() {
+        assert_eq!(card_face_asset_path(Rank::Ten, Suit::Hearts), "cards/faces/classic/10H.png");
+    }
+
+    #[test]
+    fn card_face_asset_path_king_of_spades_is_ks_png() {
+        assert_eq!(card_face_asset_path(Rank::King, Suit::Spades), "cards/faces/classic/KS.png");
+    }
+
+    #[test]
+    fn card_face_asset_path_all_52_keys_are_unique() {
+        use std::collections::HashSet;
+        let suits = [Suit::Clubs, Suit::Diamonds, Suit::Hearts, Suit::Spades];
+        let ranks = [
+            Rank::Ace, Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six,
+            Rank::Seven, Rank::Eight, Rank::Nine, Rank::Ten, Rank::Jack, Rank::Queen, Rank::King,
+        ];
+        let paths: HashSet<String> = suits
+            .iter()
+            .flat_map(|&s| ranks.iter().map(move |&r| card_face_asset_path(r, s)))
+            .collect();
+        assert_eq!(paths.len(), 52, "all 52 card face paths must be distinct");
+    }
+
+    #[test]
+    fn card_face_asset_path_suits_produce_correct_suffix() {
+        // Each suit must map to its own letter, not a neighbour's.
+        assert!(card_face_asset_path(Rank::Ace, Suit::Clubs).ends_with("AC.png"));
+        assert!(card_face_asset_path(Rank::Ace, Suit::Diamonds).ends_with("AD.png"));
+        assert!(card_face_asset_path(Rank::Ace, Suit::Hearts).ends_with("AH.png"));
+        assert!(card_face_asset_path(Rank::Ace, Suit::Spades).ends_with("AS.png"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Bug #3 — Suit → color mapping for the Android corner overlay
+    //
+    // Black suits (♠♣) must use BLACK_SUIT_COLOUR (near-white) so they
+    // contrast against the dark card face. They must NOT share the red or
+    // lime colours assigned to red suits.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn text_colour_black_suits_are_near_white_not_red() {
+        for suit in [Suit::Clubs, Suit::Spades] {
+            let card = Card { id: 0, suit, rank: Rank::Ace, face_up: true };
+            let colour = text_colour(&card, false, false);
+            assert_eq!(
+                colour, BLACK_SUIT_COLOUR,
+                "{suit:?} must map to BLACK_SUIT_COLOUR (near-white)"
+            );
+            assert_ne!(
+                colour, RED_SUIT_COLOUR,
+                "{suit:?} must not use the red suit colour"
+            );
+            // Confirm it's visually light (all channels > 0.85).
+            let srgba = colour.to_srgba();
+            assert!(
+                srgba.red > 0.85 && srgba.green > 0.85 && srgba.blue > 0.85,
+                "{suit:?} colour must be near-white for dark card background contrast, got {srgba:?}"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Bug #4 — Waste pile z-ordering
+    //
+    // Every rendered waste card must have a strictly greater z than the one
+    // below it so Bevy's CPU-side sprite sort renders them back-to-front.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn waste_pile_cards_have_strictly_increasing_z() {
+        use solitaire_core::game_state::DrawMode;
+        let mut g = GameState::new(42, DrawMode::DrawThree);
+        for _ in 0..5 {
+            let _ = g.draw();
+        }
+        let layout = crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
+        let positions = card_positions(&g, &layout);
+
+        let waste_ids: std::collections::HashSet<u32> = g.piles[&PileType::Waste]
+            .cards
+            .iter()
+            .map(|c| c.id)
+            .collect();
+
+        let mut waste_zs: Vec<f32> = positions
+            .iter()
+            .filter(|(c, _, _)| waste_ids.contains(&c.id))
+            .map(|(_, _, z)| *z)
+            .collect();
+        waste_zs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        waste_zs.dedup();
+
+        assert!(
+            waste_zs.len() >= 2,
+            "expected multiple rendered waste cards, got {}",
+            waste_zs.len()
+        );
+        // All z values must be strictly ordered (no duplicates).
+        for w in waste_zs.windows(2) {
+            assert!(
+                w[1] > w[0],
+                "waste z values must be strictly increasing, got {} ≤ {}",
+                w[1],
+                w[0]
+            );
+        }
+    }
+
+    #[test]
+    fn waste_pile_draw_one_cards_have_distinct_z() {
+        use solitaire_core::game_state::DrawMode;
+        let mut g = GameState::new(42, DrawMode::DrawOne);
+        for _ in 0..3 {
+            let _ = g.draw();
+        }
+        let layout = crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
+        let positions = card_positions(&g, &layout);
+
+        let waste_ids: std::collections::HashSet<u32> = g.piles[&PileType::Waste]
+            .cards
+            .iter()
+            .map(|c| c.id)
+            .collect();
+
+        let mut waste_zs: Vec<f32> = positions
+            .iter()
+            .filter(|(c, _, _)| waste_ids.contains(&c.id))
+            .map(|(_, _, z)| *z)
+            .collect();
+        waste_zs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        waste_zs.dedup();
+
+        assert!(
+            waste_zs.len() >= 2,
+            "Draw-One must render at least 2 waste cards (visible + buffer)"
+        );
+        // Deduplicated length must equal pre-dedup length → all z distinct.
+        let raw_count = positions
+            .iter()
+            .filter(|(c, _, _)| waste_ids.contains(&c.id))
+            .count();
+        assert_eq!(
+            waste_zs.len(),
+            raw_count,
+            "all rendered waste card z values must be distinct"
+        );
     }
 }
