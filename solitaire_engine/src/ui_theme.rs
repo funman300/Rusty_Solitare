@@ -313,10 +313,10 @@ impl HighContrastBackground {
 /// `outline` from the design system. `#505050`.
 pub const BORDER_STRONG: Color = Color::srgba(0.314, 0.314, 0.314, 1.0);
 
-/// 2 px ring drawn around the focused interactive element. Cyan
+/// 2 px ring drawn around the focused interactive element. Brick-red
 /// (matches `ACCENT_PRIMARY`) at 85% alpha so the ring stays legible
 /// against both elevated surfaces and the modal scrim backdrop.
-/// `rgba(111, 194, 239, 0.85)`.
+/// `rgba(165, 66, 66, 0.85)`.
 pub const FOCUS_RING: Color = Color::srgba(0.647, 0.259, 0.259, 0.85);
 
 // ---------------------------------------------------------------------------
