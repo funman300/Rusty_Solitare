@@ -295,9 +295,9 @@ fn read_file_bytes() -> Result<Vec<u8>, TokenError> {
 fn write_file_bytes(data: &[u8]) -> Result<(), TokenError> {
     let path = token_file_path()
         .ok_or_else(|| TokenError::KeychainUnavailable("no data dir".into()))?;
-    let tmp = path.with_extension("tmp");
+    let tmp = path.with_extension("bin.tmp");
     std::fs::write(&tmp, data)
-        .map_err(|e| TokenError::Keyring(format!("write auth_tokens.tmp: {e}")))?;
+        .map_err(|e| TokenError::Keyring(format!("write auth_tokens.bin.tmp: {e}")))?;
     std::fs::rename(&tmp, &path)
         .map_err(|e| TokenError::Keyring(format!("rename auth_tokens: {e}")))
 }

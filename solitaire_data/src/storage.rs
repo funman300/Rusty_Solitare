@@ -122,7 +122,7 @@ pub fn delete_game_state_at(path: &Path) -> io::Result<()> {
     }
 }
 
-/// Remove any leftover `*.json.tmp` files in the app data directory.
+/// Remove any leftover `*.tmp` files in the app data directory.
 ///
 /// These can be left behind if the process crashes between the write and rename
 /// in an atomic save. Safe to call on startup; missing or unreadable entries
@@ -266,7 +266,7 @@ pub fn time_attack_session_with_now(remaining_secs: f32, wins: u32) -> TimeAttac
     }
 }
 
-/// Inner helper: delete `*.json.tmp` entries inside `dir`.
+/// Inner helper: delete `*.tmp` entries inside `dir`.
 ///
 /// Per-file errors (already deleted, permission denied) are silently ignored.
 fn cleanup_tmp_files_in(dir: &Path) {
@@ -276,7 +276,7 @@ fn cleanup_tmp_files_in(dir: &Path) {
             if path
                 .file_name()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n.ends_with(".json.tmp"))
+                .is_some_and(|n| n.ends_with(".tmp"))
             {
                 let _ = fs::remove_file(&path);
             }
