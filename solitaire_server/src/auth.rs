@@ -336,7 +336,7 @@ pub async fn get_me(
 
     Ok(Json(MeResponse {
         id: user.user_id,
-        username: row.username.unwrap_or_default(),
+        username: row.username.ok_or(AppError::Unauthorized)?,
         avatar_url: row.avatar_url,
     }))
 }
@@ -386,13 +386,19 @@ pub async fn upload_avatar(
     std::fs::create_dir_all("avatars").map_err(|e| AppError::Internal(e.to_string()))?;
     let filename = format!("{}.{}", user.user_id, ext);
     let path = std::path::Path::new("avatars").join(&filename);
-    // Remove stale files with other extensions first.
+    let tmp_path = std::path::Path::new("avatars").join(format!("{}.{}.tmp", user.user_id, ext));
+    // Write to a temp file then atomically rename so concurrent readers never
+    // see a partially-written avatar.
+    std::fs::write(&tmp_path, &body).map_err(|e| AppError::Internal(e.to_string()))?;
+    std::fs::rename(&tmp_path, &path).map_err(|e| AppError::Internal(e.to_string()))?;
+    // Remove stale files with other extensions after the atomic rename.
     for old_ext in &["jpg", "png", "webp", "gif"] {
-        let _ = std::fs::remove_file(
-            std::path::Path::new("avatars").join(format!("{}.{}", user.user_id, old_ext)),
-        );
+        if *old_ext != ext {
+            let _ = std::fs::remove_file(
+                std::path::Path::new("avatars").join(format!("{}.{}", user.user_id, old_ext)),
+            );
+        }
     }
-    std::fs::write(&path, &body).map_err(|e| AppError::Internal(e.to_string()))?;
 
     let avatar_url = format!("/avatars/{filename}");
     sqlx::query!(
@@ -412,7 +418,7 @@ pub async fn upload_avatar(
 
     Ok(Json(MeResponse {
         id: user.user_id,
-        username: username.unwrap_or_default(),
+        username: username.ok_or(AppError::Unauthorized)?,
         avatar_url: Some(avatar_url),
     }))
 }

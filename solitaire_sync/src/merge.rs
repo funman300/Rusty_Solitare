@@ -47,6 +47,15 @@ use crate::progress::{level_for_xp, DAILY_CHALLENGE_HISTORY_CAP};
 pub fn merge(local: &SyncPayload, remote: &SyncPayload) -> (SyncPayload, Vec<ConflictReport>) {
     let mut conflicts = Vec::new();
 
+    if local.user_id != remote.user_id {
+        conflicts.push(ConflictReport {
+            field: "user_id".to_string(),
+            local_value: local.user_id.to_string(),
+            remote_value: remote.user_id.to_string(),
+        });
+        return (local.clone(), conflicts);
+    }
+
     let stats = merge_stats(&local.stats, &remote.stats, &mut conflicts);
     let achievements = merge_achievements(&local.achievements, &remote.achievements);
     let progress = merge_progress(&local.progress, &remote.progress, &mut conflicts);

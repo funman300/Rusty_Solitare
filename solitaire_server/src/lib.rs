@@ -146,6 +146,7 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
         .route("/api/account", delete(auth::delete_account))
         .route("/api/me", get(auth::get_me))
         .route("/api/me/avatar", put(auth::upload_avatar))
+        .nest_service("/avatars", ServeDir::new("avatars"))
         .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             middleware::require_auth,
@@ -231,7 +232,6 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
         )
         .nest_service("/web", ServeDir::new("solitaire_server/web"))
         .nest_service("/assets", ServeDir::new("assets"))
-        .nest_service("/avatars", ServeDir::new("avatars"))
         .layer(axum_middleware::from_fn(security_headers));
 
     Router::new()

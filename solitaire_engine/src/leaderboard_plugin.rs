@@ -350,7 +350,7 @@ fn handle_opt_in_button(
                             None
                         }
                     })
-                    .map(str::to_string)
+                    .map(|n| n.chars().take(32).collect::<String>())
             })
             .unwrap_or_else(|| "Player".to_string());
 
