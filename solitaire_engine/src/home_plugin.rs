@@ -1103,7 +1103,7 @@ fn spawn_difficulty_section(parent: &mut ChildSpawnerCommands, ctx: &HomeContext
     let font_label = TextFont { font: font_handle.clone(), font_size: TYPE_BODY, ..default() };
     let font_chip = TextFont { font: font_handle, font_size: TYPE_CAPTION, ..default() };
 
-    let chevron = if ctx.difficulty_expanded { "▼" } else { "▶" };
+    let chevron = if ctx.difficulty_expanded { "v" } else { ">" };
 
     // Header row — click to toggle expand/collapse.
     parent

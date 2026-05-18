@@ -1598,6 +1598,7 @@ fn apply_stock_empty_indicator<F: bevy::ecs::query::QueryFilter>(
     pile_markers: &mut Query<(Entity, &PileMarker, &mut Sprite), F>,
     label_children: &Query<(Entity, &ChildOf), With<StockEmptyLabel>>,
     layout: &Layout,
+    font: Handle<Font>,
 ) {
     let stock_empty = game
         .piles
@@ -1623,7 +1624,7 @@ fn apply_stock_empty_indicator<F: bevy::ecs::query::QueryFilter>(
                     b.spawn((
                         StockEmptyLabel,
                         Text2d::new("↺"),
-                        TextFont { font_size, ..default() },
+                        TextFont { font: font.clone(), font_size, ..default() },
                         TextColor(TEXT_PRIMARY.with_alpha(0.7)),
                         Transform::from_xyz(0.0, 0.0, 0.1),
                     ));
@@ -1649,16 +1650,19 @@ fn update_stock_empty_indicator_startup(
     mut commands: Commands,
     game: Res<GameStateResource>,
     layout: Option<Res<LayoutResource>>,
+    font_res: Option<Res<FontResource>>,
     mut pile_markers: Query<(Entity, &PileMarker, &mut Sprite)>,
     label_children: Query<(Entity, &ChildOf), With<StockEmptyLabel>>,
 ) {
     let Some(layout) = layout else { return };
+    let font = font_res.as_ref().map(|f| f.0.clone()).unwrap_or_default();
     apply_stock_empty_indicator(
         &mut commands,
         &game.0,
         &mut pile_markers,
         &label_children,
         &layout.0,
+        font,
     );
 }
 
@@ -1669,6 +1673,7 @@ fn update_stock_empty_indicator(
     mut commands: Commands,
     game: Res<GameStateResource>,
     layout: Option<Res<LayoutResource>>,
+    font_res: Option<Res<FontResource>>,
     mut pile_markers: Query<(Entity, &PileMarker, &mut Sprite)>,
     label_children: Query<(Entity, &ChildOf), With<StockEmptyLabel>>,
 ) {
@@ -1676,12 +1681,14 @@ fn update_stock_empty_indicator(
         return;
     }
     let Some(layout) = layout else { return };
+    let font = font_res.as_ref().map(|f| f.0.clone()).unwrap_or_default();
     apply_stock_empty_indicator(
         &mut commands,
         &game.0,
         &mut pile_markers,
         &label_children,
         &layout.0,
+        font,
     );
 }
 
@@ -1892,6 +1899,7 @@ fn snap_cards_on_window_resize(
     game: Option<Res<GameStateResource>>,
     layout: Option<Res<LayoutResource>>,
     card_images: Option<Res<CardImageSet>>,
+    font_res: Option<Res<FontResource>>,
     entities: Query<
         (Entity, &CardEntity, &mut Sprite, &mut Transform),
         (Without<CardLabel>, Without<CardShadow>, Without<CardBackFrame>),
@@ -1940,12 +1948,14 @@ fn snap_cards_on_window_resize(
         frame_query,
     );
 
+    let font = font_res.as_ref().map(|f| f.0.clone()).unwrap_or_default();
     apply_stock_empty_indicator(
         &mut commands,
         &game.0,
         &mut pile_markers,
         &label_children,
         &layout.0,
+        font,
     );
 
     throttle.last_applied_secs = now;

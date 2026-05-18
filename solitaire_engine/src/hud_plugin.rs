@@ -20,7 +20,7 @@ use crate::daily_challenge_plugin::DailyChallengeResource;
 use crate::progress_plugin::ProgressResource;
 use crate::settings_plugin::SettingsResource;
 use crate::layout::HUD_BAND_HEIGHT;
-use crate::safe_area::{SafeAreaAnchoredBottom, SafeAreaAnchoredTop, SafeAreaInsets};
+use crate::safe_area::{SafeAreaAnchoredBottom, SafeAreaAnchoredTop};
 use crate::ui_theme::SPACE_2;
 use crate::ui_theme::{
     scaled_duration, ACCENT_PRIMARY, ACCENT_SECONDARY, BG_ELEVATED, BG_ELEVATED_HI,
@@ -486,13 +486,12 @@ impl Plugin for HudPlugin {
 /// The entity carries no `BackgroundColor` — the green felt shows through.
 /// A slim grey background is handled by each content section individually
 /// (the bottom action bar has its own `BG_HUD_BAND` background).
-fn spawn_hud_band(insets: Option<Res<SafeAreaInsets>>, mut commands: Commands) {
+fn spawn_hud_band(mut commands: Commands) {
     const BASE_TOP: f32 = 0.0;
-    let top_inset = insets.as_deref().copied().unwrap_or_default().top;
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(BASE_TOP + top_inset),
+            top: Val::Px(BASE_TOP),
             left: Val::Px(0.0),
             width: Val::Percent(100.0),
             height: Val::Px(HUD_BAND_HEIGHT),
@@ -525,10 +524,8 @@ fn spawn_hud_band(insets: Option<Res<SafeAreaInsets>>, mut commands: Commands) {
 /// make Score the visual protagonist.
 fn spawn_hud(
     font_res: Option<Res<FontResource>>,
-    insets: Option<Res<SafeAreaInsets>>,
     mut commands: Commands,
 ) {
-    let top_inset = insets.as_deref().copied().unwrap_or_default().top;
     let font_handle = font_res.as_ref().map(|f| f.0.clone()).unwrap_or_default();
     let font_score = TextFont {
         font: font_handle.clone(),
@@ -568,7 +565,7 @@ fn spawn_hud(
             Node {
                 position_type: PositionType::Absolute,
                 left: VAL_SPACE_3,
-                top: Val::Px(SPACE_2 + top_inset),
+                top: Val::Px(SPACE_2),
                 flex_direction: FlexDirection::Column,
                 // Cap the column at 50% of viewport so on narrow
                 // (mobile) widths the inner tier rows have a bounded
@@ -701,13 +698,11 @@ fn spawn_hud(
 /// `AvatarResource` or `SettingsResource` later changes.
 fn spawn_hud_avatar(
     font_res: Option<Res<FontResource>>,
-    insets: Option<Res<SafeAreaInsets>>,
     avatar: Option<Res<AvatarResource>>,
     settings: Option<Res<SettingsResource>>,
     mut commands: Commands,
 ) {
     const SIZE: f32 = 32.0;
-    let top_inset = insets.as_deref().copied().unwrap_or_default().top;
     let id = commands
         .spawn((
             HudAvatar,
@@ -715,7 +710,7 @@ fn spawn_hud_avatar(
             Tooltip::new("Your profile — tap to open."),
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(SPACE_2 + top_inset),
+                top: Val::Px(SPACE_2),
                 right: VAL_SPACE_3,
                 width: Val::Px(SIZE),
                 height: Val::Px(SIZE),
@@ -834,10 +829,8 @@ fn handle_avatar_button(
 /// on its own visual edge.
 fn spawn_action_buttons(
     font_res: Option<Res<FontResource>>,
-    insets: Option<Res<SafeAreaInsets>>,
     mut commands: Commands,
 ) {
-    let bottom_inset = insets.as_deref().copied().unwrap_or_default().bottom;
     let font = TextFont {
         font: font_res.as_ref().map(|f| f.0.clone()).unwrap_or_default(),
         font_size: TYPE_BODY,
@@ -873,13 +866,13 @@ fn spawn_action_buttons(
     );
 
     // Bottom bar: full-width, centered, sits above the gesture-navigation zone.
-    // `bottom` is set to `bottom_inset` initially; `SafeAreaAnchoredBottom` keeps
-    // it correct as Android insets arrive in later frames.
+    // `SafeAreaAnchoredBottom` applies the correct logical-pixel inset once
+    // Android reports it (frames 1-3); initial value is 0.0.
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(bottom_inset),
+                bottom: Val::Px(0.0),
                 left: Val::Px(0.0),
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Row,
