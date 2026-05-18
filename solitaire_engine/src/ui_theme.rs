@@ -401,8 +401,13 @@ pub const Z_BACKGROUND: i32 = -10;
 pub const Z_PILE_MARKER: i32 = -1;
 /// Base layer for HUD readouts (top-left).
 pub const Z_HUD: i32 = 50;
-/// Action bar + popovers — above HUD readouts so dropdowns can overlap.
-pub const Z_HUD_TOP: i32 = 60;
+/// Fullscreen transparent dismiss-backdrop spawned behind a HUD popover so
+/// tapping outside it light-dismisses the panel without blocking other input.
+pub const Z_HUD_POPOVER_BACKDROP: i32 = Z_HUD + 4;
+/// HUD popovers (Modes dropdown, etc.) — above the dismiss backdrop.
+pub const Z_HUD_POPOVER: i32 = Z_HUD + 5;
+/// Transient HUD annotations (score-delta floaters) — above popovers.
+pub const Z_HUD_TOP: i32 = Z_HUD + 10;
 pub const Z_MODAL_SCRIM: i32 = 200;
 pub const Z_MODAL_PANEL: i32 = 210;
 /// Pause overlay outranks normal modals — pausing should always be on top.
@@ -648,6 +653,8 @@ mod tests {
             Z_BACKGROUND,
             Z_PILE_MARKER,
             Z_HUD,
+            Z_HUD_POPOVER_BACKDROP,
+            Z_HUD_POPOVER,
             Z_HUD_TOP,
             Z_MODAL_SCRIM,
             Z_MODAL_PANEL,

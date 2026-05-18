@@ -371,6 +371,9 @@ pub enum MenuOption {
 /// Mirrors `ui_theme::Z_HUD` and is duplicated here only so the hud module
 /// can use it as a `const` without a non-const expression in `ZIndex(...)`.
 const Z_HUD: i32 = crate::ui_theme::Z_HUD;
+const Z_HUD_POPOVER_BACKDROP: i32 = crate::ui_theme::Z_HUD_POPOVER_BACKDROP;
+const Z_HUD_POPOVER: i32 = crate::ui_theme::Z_HUD_POPOVER;
+const Z_HUD_TOP: i32 = crate::ui_theme::Z_HUD_TOP;
 
 /// Idle / hover / pressed colours shared by every action button. Aliased
 /// to the theme tokens so the HUD picks up palette changes for free.
@@ -1184,7 +1187,7 @@ fn spawn_modes_popover(
                 ..default()
             },
             BackgroundColor(BG_ELEVATED),
-            ZIndex(Z_HUD + 5),
+            ZIndex(Z_HUD_POPOVER),
         ))
         .with_children(|panel| {
             for (option, label, tooltip) in rows {
@@ -1211,8 +1214,8 @@ fn spawn_modes_popover(
             }
         });
 
-    // Fullscreen transparent backdrop at Z_HUD+4 (below the popover at
-    // Z_HUD+5) so tapping outside the panel light-dismisses it.
+    // Fullscreen transparent backdrop at Z_HUD_POPOVER_BACKDROP (below the
+    // popover at Z_HUD_POPOVER) so tapping outside light-dismisses it.
     commands.spawn((
         ModesPopoverBackdrop,
         Button,
@@ -1225,7 +1228,7 @@ fn spawn_modes_popover(
             ..default()
         },
         BackgroundColor(Color::NONE),
-        ZIndex(Z_HUD + 4),
+        ZIndex(Z_HUD_POPOVER_BACKDROP),
     ));
 }
 
@@ -1382,7 +1385,7 @@ fn spawn_menu_popover(commands: &mut Commands, font_res: Option<&FontResource>) 
                 ..default()
             },
             BackgroundColor(BG_ELEVATED),
-            ZIndex(Z_HUD + 5),
+            ZIndex(Z_HUD_POPOVER),
         ))
         .with_children(|panel| {
             for (option, label, tooltip) in rows {
@@ -1423,7 +1426,7 @@ fn spawn_menu_popover(commands: &mut Commands, font_res: Option<&FontResource>) 
             ..default()
         },
         BackgroundColor(Color::NONE),
-        ZIndex(Z_HUD + 4),
+        ZIndex(Z_HUD_POPOVER_BACKDROP),
     ));
 }
 
@@ -1797,7 +1800,7 @@ fn detect_score_change(
             top: Val::Px(0.0),
             ..default()
         },
-        ZIndex(Z_HUD + 10),
+        ZIndex(Z_HUD_TOP),
         Text::new(format!("+{delta}")),
         font,
         TextColor(ACCENT_PRIMARY),
