@@ -8,9 +8,11 @@
 //! walks `ALL_ACHIEVEMENTS`, evaluates each `condition`, and emits an
 //! unlock event for any `AchievementDef` whose record is not yet unlocked.
 
+use serde::{Deserialize, Serialize};
+
 /// Fields needed by achievement conditions. Constructed by the engine from
 /// `StatsSnapshot`, the final `GameState`, and wall-clock time.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AchievementContext {
     /// Total number of games played (after this win has been recorded).
     pub games_played: u32,
