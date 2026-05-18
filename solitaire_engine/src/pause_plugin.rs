@@ -235,7 +235,7 @@ fn toggle_pause(
         // Snapshot current level and streak at pause time.
         let level = progress.as_deref().map(|p| p.0.level);
         let streak = stats.as_deref().map(|s| s.0.win_streak_current);
-        let draw_mode = settings.as_deref().map(|s| s.0.draw_mode.clone());
+        let draw_mode = settings.as_deref().map(|s| s.0.draw_mode);
         spawn_pause_screen(
             &mut commands,
             level,

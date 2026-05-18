@@ -73,7 +73,7 @@ fn main() {
     while found.len() < count {
         tried += 1;
         if matches!(
-            try_solve(seed, draw_mode.clone(), &cfg),
+            try_solve(seed, draw_mode, &cfg),
             SolverResult::Winnable
         ) {
             found.push(seed);

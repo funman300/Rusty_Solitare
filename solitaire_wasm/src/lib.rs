@@ -119,7 +119,7 @@ impl ReplayPlayer {
         let replay: Replay =
             serde_json::from_str(replay_json).map_err(|e| format!("invalid replay JSON: {e}"))?;
         let game =
-            GameState::new_with_mode(replay.seed, replay.draw_mode.clone(), replay.mode);
+            GameState::new_with_mode(replay.seed, replay.draw_mode, replay.mode);
         Ok(Self {
             game,
             moves: replay.moves,

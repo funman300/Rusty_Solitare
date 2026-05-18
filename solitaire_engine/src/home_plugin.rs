@@ -430,7 +430,7 @@ fn build_home_context<'a>(
         challenge_best: stats.map_or(0, |s| s.0.challenge_best_score),
         daily_today,
         draw_mode: settings
-            .map(|s| s.0.draw_mode.clone())
+            .map(|s| s.0.draw_mode)
             .unwrap_or(DrawMode::DrawOne),
         font_res,
         difficulty_expanded,

@@ -82,7 +82,7 @@ fn evaluate_weekly_goals(
         let ctx = WeeklyGoalContext {
             time_seconds: ev.time_seconds,
             used_undo: game.0.undo_count > 0,
-            draw_mode: game.0.draw_mode.clone(),
+            draw_mode: game.0.draw_mode,
         };
         for def in WEEKLY_GOALS {
             if !def.matches(&ctx) {

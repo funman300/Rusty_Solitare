@@ -96,7 +96,7 @@ fn main() {
                 continue;
             }
             let cfg = SolverConfig { move_budget, state_budget };
-            match try_solve(seed, draw_mode.clone(), &cfg) {
+            match try_solve(seed, draw_mode, &cfg) {
                 SolverResult::Winnable => {
                     buckets[i].push(seed);
                     eprintln!(

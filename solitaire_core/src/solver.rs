@@ -665,7 +665,7 @@ impl SolverState {
             foundation,
             stock,
             waste,
-            draw_mode: game.draw_mode.clone(),
+            draw_mode: game.draw_mode,
             just_drew: false,
             consecutive_draws: 0,
         }

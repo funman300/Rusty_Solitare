@@ -43,7 +43,7 @@ mod pile_map_serde {
 }
 
 /// Whether cards are drawn one at a time or three at a time from the stock.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DrawMode {
     /// Draw one card from stock per turn.
     DrawOne,

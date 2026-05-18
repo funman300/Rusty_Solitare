@@ -322,7 +322,7 @@ fn push_replay_on_win(
         }
         let replay = Replay::new(
             game.0.seed,
-            game.0.draw_mode.clone(),
+            game.0.draw_mode,
             game.0.mode,
             ev.time_seconds,
             ev.score,

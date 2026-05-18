@@ -338,7 +338,7 @@ fn tick_debounce_and_spawn_solver_task(
 
     let draw_mode = settings
         .as_ref()
-        .map_or(DrawMode::DrawOne, |s| s.0.draw_mode.clone());
+        .map_or(DrawMode::DrawOne, |s| s.0.draw_mode);
     let cfg = SolverConfig::default();
     let task = AsyncComputeTaskPool::get()
         .spawn(async move { try_solve(seed, draw_mode, &cfg) });

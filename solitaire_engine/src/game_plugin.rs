@@ -380,11 +380,11 @@ fn poll_pending_new_game_seed(
 
 /// Pure helper extracted for testability — `new_game_with_solver_*`
 /// engine tests in the same file exercise this path.
-pub(crate) fn choose_winnable_seed(initial_seed: u64, draw_mode: &DrawMode) -> u64 {
+pub(crate) fn choose_winnable_seed(initial_seed: u64, draw_mode: DrawMode) -> u64 {
     let cfg = SolverConfig::default();
     let mut seed = initial_seed;
     for _ in 0..SOLVER_DEAL_RETRY_CAP {
-        match try_solve(seed, draw_mode.clone(), &cfg) {
+        match try_solve(seed, draw_mode, &cfg) {
             SolverResult::Winnable | SolverResult::Inconclusive => return seed,
             SolverResult::Unwinnable => {
                 seed = seed.wrapping_add(1);
@@ -451,7 +451,7 @@ fn handle_new_game(
         // where SettingsPlugin is not installed.
         let draw_mode = settings
             .as_ref()
-            .map_or_else(|| game.0.draw_mode.clone(), |s| s.0.draw_mode.clone());
+            .map_or_else(|| game.0.draw_mode, |s| s.0.draw_mode);
         let mode = ev.mode.unwrap_or(game.0.mode);
 
         // Solver-backed retry: when the player has opted in to
@@ -473,9 +473,8 @@ fn handle_new_game(
             .as_ref()
             .is_some_and(|s| s.0.winnable_deals_only);
         if winnable_only && mode == GameMode::Classic && ev.seed.is_none() {
-            let dm = draw_mode.clone();
             let task = AsyncComputeTaskPool::get()
-                .spawn(async move { choose_winnable_seed(initial_seed, &dm) });
+                .spawn(async move { choose_winnable_seed(initial_seed, draw_mode) });
             pending_seed.inner = Some(PendingSeedTask {
                 handle: task,
                 mode: ev.mode,
@@ -970,7 +969,7 @@ pub fn record_replay_on_win(
         let win_move_index = recording.moves.len().checked_sub(1);
         let replay = Replay::new(
             game.0.seed,
-            game.0.draw_mode.clone(),
+            game.0.draw_mode,
             game.0.mode,
             ev.time_seconds,
             ev.score,
@@ -2647,7 +2646,7 @@ mod tests {
         // resolves as Inconclusive — the engine treats Inconclusive
         // as winnable (see `choose_winnable_seed` doc), so the
         // helper must return 395 when started at 394.
-        let chosen = choose_winnable_seed(394, &DrawMode::DrawOne);
+        let chosen = choose_winnable_seed(394, DrawMode::DrawOne);
         assert_eq!(
             chosen, 395,
             "seed 394 is Unwinnable; the next seed (395, Inconclusive) must be accepted"

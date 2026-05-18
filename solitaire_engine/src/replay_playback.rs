@@ -190,7 +190,7 @@ pub fn start_replay_playback(
 ) {
     use solitaire_core::game_state::GameState;
 
-    let fresh = GameState::new_with_mode(replay.seed, replay.draw_mode.clone(), replay.mode);
+    let fresh = GameState::new_with_mode(replay.seed, replay.draw_mode, replay.mode);
     commands.insert_resource(GameStateResource(fresh));
 
     // Initial `secs_to_next` uses the constant rather than reading
