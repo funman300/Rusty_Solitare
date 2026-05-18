@@ -247,7 +247,7 @@ impl GameState {
                 stock.cards.push(card);
             }
             self.recycle_count = self.recycle_count.saturating_add(1);
-            self.move_count += 1;
+            self.move_count = self.move_count.saturating_add(1);
             return Ok(());
         }
 
@@ -273,7 +273,7 @@ impl GameState {
             waste.cards.push(card);
         }
 
-        self.move_count += 1;
+        self.move_count = self.move_count.saturating_add(1);
         Ok(())
     }
 
@@ -381,7 +381,7 @@ impl GameState {
         self.piles.get_mut(&to).ok_or(MoveError::InvalidDestination)?.cards.append(&mut moved);
 
         self.score = (self.score + score_delta).max(0);
-        self.move_count += 1;
+        self.move_count = self.move_count.saturating_add(1);
 
         self.is_won = self.check_win();
         if !self.is_won {
