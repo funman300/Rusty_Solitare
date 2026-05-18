@@ -298,6 +298,11 @@ pub struct HelpButton;
 #[derive(Component, Debug)]
 pub struct HintButton;
 
+/// Android HUD label for the Hint button — shared with the help screen's
+/// controls reference so both always agree.
+#[cfg(target_os = "android")]
+pub(crate) const ANDROID_HINT_LABEL: &str = "!";
+
 /// Marker on the "Modes" action button. Click toggles the [`ModesPopover`]
 /// (a small dropdown panel) below the action bar. Each popover row starts
 /// the corresponding game mode.
@@ -856,7 +861,7 @@ fn spawn_action_buttons(
         /* undo */  "\u{2190}",  // ←  leftwards arrow (Arrows block, confirmed FiraMono)
         /* pause */ "||",        // || ASCII double-pipe — ‖ (U+2016) absent from FiraMono
         /* help */  "?",
-        /* hint */  "!",         // !  attention/alert — semantically: "look here"
+        /* hint */  ANDROID_HINT_LABEL,
         /* modes */ "M",          // plain ASCII — U+21BB and U+21C4 both render as tofu on FiraMono
         /* new */   "+",
     );

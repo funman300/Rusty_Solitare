@@ -9,6 +9,8 @@ use bevy::prelude::*;
 
 use crate::events::HelpRequestEvent;
 use crate::font_plugin::FontResource;
+#[cfg(target_os = "android")]
+use crate::hud_plugin::ANDROID_HINT_LABEL;
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
     ScrimDismissible,
@@ -158,7 +160,7 @@ const CONTROL_SECTIONS: &[ControlSection] = &[
             ControlRow { keys: "←", description: "Undo last move" },
             ControlRow { keys: "||", description: "Pause / resume" },
             ControlRow { keys: "?", description: "This help screen" },
-            ControlRow { keys: "→", description: "Show a hint" },
+            ControlRow { keys: ANDROID_HINT_LABEL, description: "Show a hint" },
             ControlRow { keys: "≡", description: "Open menu (Stats, Settings, Profile...)" },
         ],
     },
@@ -345,6 +347,29 @@ fn spawn_help_screen(commands: &mut Commands, font_res: Option<&FontResource>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression test for M-17: Android help screen showed "→" (right-arrow)
+    /// for the Hint button when the actual HUD button label is "!".
+    /// Verifies that the HUD Buttons section contains exactly one row whose
+    /// `keys` matches `ANDROID_HINT_LABEL`.
+    #[cfg(target_os = "android")]
+    #[test]
+    fn android_hint_row_matches_hud_label() {
+        use crate::hud_plugin::ANDROID_HINT_LABEL;
+        let hud_section = CONTROL_SECTIONS
+            .iter()
+            .find(|s| s.title == "HUD buttons")
+            .expect("HUD buttons section must exist");
+        let hint_row = hud_section
+            .rows
+            .iter()
+            .find(|r| r.description == "Show a hint")
+            .expect("hint row must exist");
+        assert_eq!(
+            hint_row.keys, ANDROID_HINT_LABEL,
+            "help hint row must match the HUD button label"
+        );
+    }
 
     fn headless_app() -> App {
         let mut app = App::new();
