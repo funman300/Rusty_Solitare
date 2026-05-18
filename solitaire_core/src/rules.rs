@@ -1,4 +1,4 @@
-use crate::card::Card;
+use crate::card::{Card, Rank};
 use crate::pile::Pile;
 
 /// Returns `true` if `card` can be placed on the foundation `pile`.
@@ -12,8 +12,8 @@ use crate::pile::Pile;
 #[must_use]
 pub fn can_place_on_foundation(card: &Card, pile: &Pile) -> bool {
     match pile.cards.last() {
-        None => card.rank.value() == 1,
-        Some(top) => card.suit == top.suit && card.rank.value() == top.rank.value() + 1,
+        None => card.rank == Rank::Ace,
+        Some(top) => card.suit == top.suit && card.rank.checked_sub(1) == Some(top.rank),
     }
 }
 
@@ -23,10 +23,10 @@ pub fn can_place_on_foundation(card: &Card, pile: &Pile) -> bool {
 #[must_use]
 pub fn can_place_on_tableau(card: &Card, pile: &Pile) -> bool {
     match pile.cards.last() {
-        None => card.rank.value() == 13,
+        None => card.rank == Rank::King,
         Some(top) => {
             top.face_up
-                && card.rank.value() + 1 == top.rank.value()
+                && card.rank.checked_add(1) == Some(top.rank)
                 && card.suit.is_red() != top.suit.is_red()
         }
     }
@@ -41,7 +41,7 @@ pub fn can_place_on_tableau(card: &Card, pile: &Pile) -> bool {
 #[must_use]
 pub fn is_valid_tableau_sequence(cards: &[Card]) -> bool {
     cards.windows(2).all(|w| {
-        w[0].rank.value() == w[1].rank.value() + 1 && w[0].suit.is_red() != w[1].suit.is_red()
+        w[0].rank.checked_sub(1) == Some(w[1].rank) && w[0].suit.is_red() != w[1].suit.is_red()
     })
 }
 

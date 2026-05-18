@@ -440,6 +440,91 @@ impl GameState {
         })
     }
 
+    /// Returns all currently valid `move_cards` calls as `(from, to, count)` triples.
+    ///
+    /// Does not include stock draws — callers check `piles[&PileType::Stock]` directly.
+    /// Every returned triple is guaranteed to succeed when passed to `move_cards`.
+    pub fn possible_instructions(&self) -> Vec<(PileType, PileType, usize)> {
+        if self.is_won {
+            return Vec::new();
+        }
+
+        let mut moves = Vec::new();
+
+        // Waste top card → foundation or tableau
+        if let Some(waste_top) = self.piles.get(&PileType::Waste).and_then(|p| p.cards.last()) {
+            for slot in 0..4_u8 {
+                if let Some(f) = self.piles.get(&PileType::Foundation(slot))
+                    && can_place_on_foundation(waste_top, f)
+                {
+                    moves.push((PileType::Waste, PileType::Foundation(slot), 1));
+                }
+            }
+            for dst in 0..7_usize {
+                if let Some(t) = self.piles.get(&PileType::Tableau(dst))
+                    && can_place_on_tableau(waste_top, t)
+                {
+                    moves.push((PileType::Waste, PileType::Tableau(dst), 1));
+                }
+            }
+        }
+
+        // Tableau sources
+        for src in 0..7_usize {
+            let Some(src_pile) = self.piles.get(&PileType::Tableau(src)) else { continue };
+            if src_pile.cards.is_empty() {
+                continue;
+            }
+            let run_len = src_pile.cards.iter().rev().take_while(|c| c.face_up).count();
+            if run_len == 0 {
+                continue;
+            }
+            for count in 1..=run_len {
+                let seq_start = src_pile.cards.len() - count;
+                if !is_valid_tableau_sequence(&src_pile.cards[seq_start..]) {
+                    continue;
+                }
+                let bottom = &src_pile.cards[seq_start];
+                if count == 1 {
+                    for slot in 0..4_u8 {
+                        if let Some(f) = self.piles.get(&PileType::Foundation(slot))
+                            && can_place_on_foundation(bottom, f)
+                        {
+                            moves.push((PileType::Tableau(src), PileType::Foundation(slot), 1));
+                        }
+                    }
+                }
+                for dst in 0..7_usize {
+                    if dst == src {
+                        continue;
+                    }
+                    if let Some(t) = self.piles.get(&PileType::Tableau(dst))
+                        && can_place_on_tableau(bottom, t)
+                    {
+                        moves.push((PileType::Tableau(src), PileType::Tableau(dst), count));
+                    }
+                }
+            }
+        }
+
+        // Foundation top → tableau (only when house rule is enabled)
+        if self.take_from_foundation {
+            for slot in 0..4_u8 {
+                let Some(f) = self.piles.get(&PileType::Foundation(slot)) else { continue };
+                let Some(top) = f.cards.last() else { continue };
+                for dst in 0..7_usize {
+                    if let Some(t) = self.piles.get(&PileType::Tableau(dst))
+                        && can_place_on_tableau(top, t)
+                    {
+                        moves.push((PileType::Foundation(slot), PileType::Tableau(dst), 1));
+                    }
+                }
+            }
+        }
+
+        moves
+    }
+
     /// Returns the next `(from, to)` move that advances auto-complete, or
     /// `None` if no such move exists (or `is_auto_completable` is not set).
     ///
@@ -1365,5 +1450,79 @@ mod tests {
             .move_cards(PileType::Foundation(0), PileType::Tableau(0), 2)
             .unwrap_err();
         assert!(matches!(err, MoveError::RuleViolation(_)));
+    }
+
+    // --- possible_instructions ---
+
+    #[test]
+    fn possible_instructions_empty_when_won() {
+        let mut g = new_game();
+        g.is_won = true;
+        assert!(g.possible_instructions().is_empty());
+    }
+
+    #[test]
+    fn possible_instructions_includes_ace_to_foundation() {
+        let mut g = new_game();
+        g.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+        g.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+        for i in 0..7 {
+            g.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+        }
+        g.piles.get_mut(&PileType::Tableau(0)).unwrap().cards.push(Card {
+            id: 1, suit: Suit::Clubs, rank: Rank::Ace, face_up: true,
+        });
+        let moves = g.possible_instructions();
+        assert!(
+            moves.contains(&(PileType::Tableau(0), PileType::Foundation(0), 1)),
+            "Ace must be moveable to empty foundation slot 0; got {moves:?}"
+        );
+    }
+
+    #[test]
+    fn possible_instructions_all_valid_on_fresh_game() {
+        // Every triple returned must actually succeed when applied to a clone of the state.
+        let g = new_game();
+        for (from, to, count) in g.possible_instructions() {
+            let mut clone = g.clone();
+            assert!(
+                clone.move_cards(from.clone(), to.clone(), count).is_ok(),
+                "instruction ({from:?}, {to:?}, {count}) from possible_instructions must succeed"
+            );
+        }
+    }
+
+    #[test]
+    fn possible_instructions_no_face_down_sources() {
+        let g = new_game();
+        for (from, _, count) in g.possible_instructions() {
+            if let PileType::Tableau(i) = from {
+                let pile = &g.piles[&PileType::Tableau(i)];
+                let run_len = pile.cards.iter().rev().take_while(|c| c.face_up).count();
+                assert!(
+                    count <= run_len,
+                    "count {count} exceeds face-up run {run_len} for Tableau({i})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn possible_instructions_waste_top_included() {
+        let mut g = new_game();
+        // Clear board, put a King on waste, and an empty tableau pile — waste→tableau must appear.
+        g.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+        for i in 0..7 {
+            g.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear();
+        }
+        g.piles.get_mut(&PileType::Waste).unwrap().cards.push(Card {
+            id: 99, suit: Suit::Spades, rank: Rank::King, face_up: true,
+        });
+        let moves = g.possible_instructions();
+        // King goes on any of the 7 empty tableau piles
+        assert!(
+            (0..7).any(|dst| moves.contains(&(PileType::Waste, PileType::Tableau(dst), 1))),
+            "King on waste must be moveable to an empty tableau column"
+        );
     }
 }

@@ -691,6 +691,22 @@ fn sync_cards(
 ) {
     let positions = card_positions(game, layout);
 
+    // The waste buffer card exists only to keep its entity alive while the new
+    // top card's slide animation plays — it must never be visible to the player.
+    // Without this, the buffer sits at waste_base uncovered during the animation
+    // and its rank/suit peek behind the incoming card.
+    let waste_buffer_id: Option<u32> = {
+        let visible = match game.draw_mode {
+            DrawMode::DrawOne => 1_usize,
+            DrawMode::DrawThree => 3_usize,
+        };
+        game.piles
+            .get(&PileType::Waste)
+            .filter(|w| w.cards.len() > visible)
+            .and_then(|w| w.cards.get(w.cards.len().saturating_sub(visible + 1)))
+            .map(|c| c.id)
+    };
+
     // Map card_id -> (Entity, current_translation, has_card_animation) for
     // in-place updates. The `has_card_animation` flag lets `update_card_entity`
     // skip the snap/slide path on cards that are already being driven by a
@@ -711,17 +727,26 @@ fn sync_cards(
         }
     }
 
-    // For each card in the current state: spawn or update its entity.
+    // For each card in the current state: spawn or update its entity, then
+    // apply visibility. The waste buffer card is hidden so it cannot peek
+    // behind the incoming top card during the draw slide animation.
     for (card, position, z) in positions {
-        match existing.get(&card.id) {
+        let entity = match existing.get(&card.id) {
             Some(&(entity, cur, has_anim)) => {
                 update_card_entity(
                     &mut commands, entity, card, position, z, layout,
                     slide_secs, back_colour, color_blind, high_contrast, cur, has_anim, card_images, selected_back, font_handle,
-                )
+                );
+                entity
             }
             None => spawn_card_entity(&mut commands, card, position, z, layout, back_colour, color_blind, high_contrast, card_images, selected_back, font_handle),
-        }
+        };
+        let visibility = if waste_buffer_id == Some(card.id) {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+        commands.entity(entity).insert(visibility);
     }
 }
 
@@ -831,7 +856,7 @@ fn spawn_card_entity(
     card_images: Option<&CardImageSet>,
     selected_back: usize,
     font_handle: Option<&Handle<Font>>,
-) {
+) -> Entity {
     let sprite = card_sprite(card, layout.card_size, back_colour, card_images, selected_back);
 
     let mut entity = commands.spawn((
@@ -840,6 +865,7 @@ fn spawn_card_entity(
         Transform::from_xyz(pos.x, pos.y, z),
         Visibility::default(),
     ));
+    let entity_id = entity.id();
     // Every card gets a subtle drop-shadow child so the play surface reads
     // as physical instead of flat. Spawned in idle state; the drag-tracking
     // system retunes its offset / alpha when this card joins the dragged
@@ -880,6 +906,7 @@ fn spawn_card_entity(
     // Suppress unused-variable warning when not building for Android.
     #[cfg(not(target_os = "android"))]
     let _ = font_handle;
+    entity_id
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2355,6 +2382,35 @@ mod tests {
             let second_last = &waste_rendered[waste_rendered.len() - 2];
             assert!(last.1.x > second_last.1.x, "top 2 waste cards must fan to distinct x positions");
         }
+    }
+
+    /// The waste buffer card (slot below top) must be at the *same* XY as the
+    /// top card so that hiding it (`Visibility::Hidden`) leaves no visible gap.
+    #[test]
+    fn waste_draw_one_buffer_card_at_same_xy_as_top() {
+        use solitaire_core::game_state::DrawMode;
+        let mut g = GameState::new(42, DrawMode::DrawOne);
+        // Draw 3 times so the waste pile has 3 cards and the buffer exists.
+        for _ in 0..3 {
+            let _ = g.draw();
+        }
+        let waste_ids: std::collections::HashSet<u32> =
+            g.piles[&PileType::Waste].cards.iter().map(|c| c.id).collect();
+        let layout = crate::layout::compute_layout(Vec2::new(1280.0, 800.0), 0.0, 0.0, true);
+        let positions = card_positions(&g, &layout);
+        let waste_rendered: Vec<_> = positions
+            .iter()
+            .filter(|(card, _, _)| waste_ids.contains(&card.id))
+            .collect();
+        // Buffer (slot 0) + top (slot 1) = 2 rendered waste cards.
+        assert_eq!(waste_rendered.len(), 2, "Draw-One with 3 waste cards must render exactly 2");
+        // Both must share the same XY so that hiding the buffer leaves no gap.
+        let (_, pos0, _) = waste_rendered[0];
+        let (_, pos1, _) = waste_rendered[1];
+        assert!(
+            (pos0.x - pos1.x).abs() < 1e-3 && (pos0.y - pos1.y).abs() < 1e-3,
+            "buffer and top card must be at the same XY; got buffer={pos0:?} top={pos1:?}"
+        );
     }
 
     #[test]
