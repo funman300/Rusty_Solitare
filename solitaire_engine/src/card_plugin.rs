@@ -742,6 +742,19 @@ fn card_positions<'a>(game: &'a GameState, layout: &Layout) -> Vec<(&'a Card, Ve
         PileType::Tableau(6),
     ];
 
+    // Compute the Draw-Three waste fan step proportional to the column spacing
+    // (waste_x − stock_x = card_width + h_gap) rather than a fixed fraction of
+    // card_width.  On desktop (H_GAP_DIVISOR=4) col_step = 1.25×cw and
+    // 0.224 × 1.25 = 0.28 — identical to the previous constant.  On Android
+    // (H_GAP_DIVISOR=32) col_step ≈ 1.031×cw so fan_step ≈ 0.231×cw, keeping
+    // the top fanned card's centre within the waste column's own horizontal
+    // footprint instead of spilling into the adjacent gap.
+    let waste_fan_step = {
+        let s = layout.pile_positions.get(&PileType::Stock).copied().unwrap_or_default();
+        let w = layout.pile_positions.get(&PileType::Waste).copied().unwrap_or_default();
+        (w.x - s.x).abs() * 0.224
+    };
+
     for pile_type in piles {
         let Some(base) = layout.pile_positions.get(&pile_type) else {
             continue;
@@ -783,7 +796,7 @@ fn card_positions<'a>(game: &'a GameState, layout: &Layout) -> Vec<(&'a Card, Ve
                 // normally — no card is hidden, so the shift is 0.
                 let visible = 3_usize;
                 let hidden = rendered_len.saturating_sub(visible);
-                slot.saturating_sub(hidden) as f32 * layout.card_size.x * 0.28
+                slot.saturating_sub(hidden) as f32 * waste_fan_step
             } else {
                 0.0
             };
@@ -3376,6 +3389,49 @@ mod tests {
                 "waste z values must be strictly increasing, got {} ≤ {}",
                 w[1],
                 w[0]
+            );
+        }
+    }
+
+    /// Regression: on tight layouts (e.g. Android H_GAP_DIVISOR=32) the
+    /// Draw-Three waste fan must be proportional to column spacing so that no
+    /// fanned card ever bleeds left into the stock column.
+    ///
+    /// The invariant holds structurally (x_offset ≥ 0), but this test pins
+    /// the formula so a future change that accidentally introduces negative
+    /// offsets or flips the fan direction is caught immediately.
+    #[test]
+    fn waste_cards_do_not_overlap_stock_column_on_portrait() {
+        use solitaire_core::game_state::DrawMode;
+        let mut g = GameState::new(42, DrawMode::DrawThree);
+        for _ in 0..5 {
+            let _ = g.draw();
+        }
+
+        // Android-portrait window.  In host tests H_GAP_DIVISOR uses the
+        // desktop value (4), but the no-overlap invariant must hold on any
+        // screen size and gap ratio.
+        let window = Vec2::new(900.0, 2000.0);
+        let layout = crate::layout::compute_layout(window, 32.0, 110.0, true);
+
+        let stock_x = layout.pile_positions[&PileType::Stock].x;
+        let stock_right_edge = stock_x + layout.card_size.x / 2.0;
+
+        let waste_ids: std::collections::HashSet<u32> = g.piles[&PileType::Waste]
+            .cards
+            .iter()
+            .map(|c| c.id)
+            .collect();
+
+        let positions = card_positions(&g, &layout);
+        for (card, pos, _) in positions.iter().filter(|(c, _, _)| waste_ids.contains(&c.id)) {
+            let left_edge = pos.x - layout.card_size.x / 2.0;
+            assert!(
+                left_edge >= stock_right_edge - 1e-3,
+                "waste card {} left edge {:.2} overlaps stock right edge {:.2} on portrait window",
+                card.id,
+                left_edge,
+                stock_right_edge,
             );
         }
     }

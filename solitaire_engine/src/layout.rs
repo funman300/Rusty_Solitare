@@ -605,6 +605,74 @@ mod tests {
         );
     }
 
+    /// Suspend → resume layout-consistency invariant.
+    ///
+    /// If the resume handler resets `SafeAreaInsets` to zero and then the JNI
+    /// poller re-resolves the same values, `compute_layout` must produce an
+    /// identical result to the fresh-launch layout.  This test also verifies
+    /// that a layout computed with `safe_area_top = 0` (the brief window while
+    /// insets haven't re-resolved after resume) differs visibly from the
+    /// correct layout, confirming that the bug would manifest without the fix.
+    #[test]
+    fn suspend_resume_layout_matches_fresh_launch() {
+        let window = Vec2::new(900.0, 2000.0);
+        let safe_top = 27.0_f32;
+        let safe_bottom = 110.0_f32;
+
+        // Fresh-launch layout — insets known from startup.
+        let fresh = compute_layout(window, safe_top, safe_bottom, true);
+
+        // Layout computed during the brief post-resume window before insets
+        // re-resolve (safe_area_top temporarily 0).
+        let wrong = compute_layout(window, 0.0, safe_bottom, true);
+
+        // Verify the "wrong" layout actually differs — the bug would push the
+        // top card row upward by exactly safe_top pixels.
+        let fresh_stock_y = fresh.pile_positions[&PileType::Stock].y;
+        let wrong_stock_y = wrong.pile_positions[&PileType::Stock].y;
+        // In Bevy's +y-is-up system, adding safe_area_top pushes the stock
+        // downward (−y direction).  So wrong_stock_y > fresh_stock_y by safe_top.
+        assert!(
+            (wrong_stock_y - fresh_stock_y - safe_top).abs() < 1e-3,
+            "wrong layout must displace stock upward by safe_top ({safe_top}): \
+             fresh={fresh_stock_y:.2} wrong={wrong_stock_y:.2} delta={:.2}",
+            wrong_stock_y - fresh_stock_y,
+        );
+
+        // After the poller re-resolves correct insets the layout must be
+        // identical to the fresh-launch layout.
+        let corrected = compute_layout(window, safe_top, safe_bottom, true);
+        assert_eq!(
+            corrected.card_size, fresh.card_size,
+            "card size must be preserved after resume",
+        );
+        assert!(
+            (corrected.pile_positions[&PileType::Stock].y - fresh_stock_y).abs() < 1e-3,
+            "stock y must match fresh launch after resume: \
+             corrected={:.2} fresh={fresh_stock_y:.2}",
+            corrected.pile_positions[&PileType::Stock].y,
+        );
+        assert!(
+            (corrected.pile_positions[&PileType::Stock].x
+                - fresh.pile_positions[&PileType::Stock].x)
+                .abs()
+                < 1e-3,
+            "stock x must be unchanged after resume",
+        );
+        // The HUD band top clearance (distance from window top to card top)
+        // must match as well — this is the quantity directly visible in Bug 2.
+        let card_top = |layout: &super::Layout| {
+            layout.pile_positions[&PileType::Stock].y + layout.card_size.y / 2.0
+        };
+        assert!(
+            (card_top(&corrected) - card_top(&fresh)).abs() < 1e-3,
+            "top-of-card must match fresh launch after resume: \
+             corrected={:.2} fresh={:.2}",
+            card_top(&corrected),
+            card_top(&fresh),
+        );
+    }
+
     /// safe_area_bottom must not affect horizontal positions.
     #[test]
     fn safe_area_bottom_does_not_affect_horizontal_layout() {

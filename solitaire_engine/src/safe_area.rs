@@ -18,6 +18,7 @@
 //! changes flow through automatically.
 
 use bevy::prelude::*;
+use bevy::window::{AppLifecycle, WindowResized};
 
 use crate::ui_modal::ModalScrim;
 
@@ -65,14 +66,25 @@ pub struct SafeAreaInsetsPlugin;
 
 impl Plugin for SafeAreaInsetsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SafeAreaInsets>()
+        // Both message types may already be registered by GamePlugin / TablePlugin;
+        // add_message is idempotent.
+        app.add_message::<AppLifecycle>()
+            .add_message::<WindowResized>()
+            .init_resource::<SafeAreaInsets>()
             .add_systems(
                 Update,
-                (apply_safe_area_anchors, apply_safe_area_bottom_anchors, apply_safe_area_to_modal_scrims),
+                (
+                    apply_safe_area_anchors,
+                    apply_safe_area_bottom_anchors,
+                    apply_safe_area_to_modal_scrims,
+                    on_app_resumed,
+                ),
             );
 
         #[cfg(target_os = "android")]
-        app.add_systems(Update, android::refresh_insets);
+        app.init_resource::<android::SafeAreaPollTries>()
+            .add_systems(Update, android::refresh_insets)
+            .add_systems(Update, android::rearm_on_resumed);
     }
 }
 
@@ -142,10 +154,50 @@ fn apply_safe_area_to_modal_scrims(
     }
 }
 
+/// Emits a synthetic `WindowResized` on `AppLifecycle::WillResume` so that
+/// `on_window_resized` (in `table_plugin`) recomputes the board layout with
+/// whatever `SafeAreaInsets` are current at that moment.
+///
+/// On Android the `android::rearm_on_resumed` system runs in the same frame
+/// and resets both `SafeAreaPollTries` and `SafeAreaInsets` to zero, causing
+/// `refresh_insets` to re-poll JNI over the next few frames.  When it resolves
+/// the correct values, `on_safe_area_changed` in `table_plugin` emits a second
+/// synthetic `WindowResized` and the layout converges to the right position.
+///
+/// On non-Android targets this handler still fires — it ensures that a resume
+/// event always refreshes the layout (e.g., after a minimise/restore on
+/// desktop) even though insets are always zero.
+fn on_app_resumed(
+    mut lifecycle: MessageReader<AppLifecycle>,
+    windows: Query<(Entity, &Window)>,
+    mut resize_events: MessageWriter<WindowResized>,
+) {
+    for event in lifecycle.read() {
+        if !matches!(event, AppLifecycle::WillResume) {
+            continue;
+        }
+        let Some((entity, window)) = windows.iter().next() else {
+            return;
+        };
+        resize_events.write(WindowResized {
+            window: entity,
+            width: window.resolution.width(),
+            height: window.resolution.height(),
+        });
+    }
+}
+
 #[cfg(target_os = "android")]
 mod android {
-    use super::SafeAreaInsets;
+    use super::{AppLifecycle, SafeAreaInsets};
     use bevy::prelude::*;
+
+    /// Tracks how many frames `refresh_insets` has polled.  Stored as a
+    /// `Resource` (not `Local`) so that `rearm_on_resumed` can reset it to 0
+    /// when `AppLifecycle::WillResume` fires, causing the poller to re-query JNI
+    /// after a background/foreground cycle.
+    #[derive(Resource, Default)]
+    pub(super) struct SafeAreaPollTries(pub u32);
 
     /// Polls Android for safe-area insets until we get a non-zero
     /// reading, then stops. `getRootWindowInsets()` returns `null` (or
@@ -153,22 +205,22 @@ mod android {
     /// is typically frame 1–3 of a fresh launch.
     pub(super) fn refresh_insets(
         mut insets: ResMut<SafeAreaInsets>,
-        mut tries: Local<u32>,
+        mut poll: ResMut<SafeAreaPollTries>,
     ) {
         // Cap retries so we don't burn CPU forever on edge-to-edge
         // devices that genuinely report zero insets.
         const MAX_TRIES: u32 = 120; // ~2 seconds @ 60 fps
 
-        if *tries >= MAX_TRIES || insets.is_populated() {
+        if poll.0 >= MAX_TRIES || insets.is_populated() {
             return;
         }
-        *tries += 1;
+        poll.0 += 1;
 
         match query_insets() {
             Ok(v) if v.is_populated() => {
                 info!(
                     "safe_area: insets resolved top={} bottom={} left={} right={} (after {} frames)",
-                    v.top, v.bottom, v.left, v.right, *tries
+                    v.top, v.bottom, v.left, v.right, poll.0
                 );
                 *insets = v;
             }
@@ -177,9 +229,31 @@ mod android {
             }
             Err(e) => {
                 // Don't spam — log once and let polling continue silently.
-                if *tries == 1 {
+                if poll.0 == 1 {
                     warn!("safe_area: JNI query failed (will retry): {e}");
                 }
+            }
+        }
+    }
+
+    /// Resets the inset poller and clears cached insets on
+    /// `AppLifecycle::WillResume` so that `refresh_insets` re-queries JNI in the
+    /// frames immediately after the app returns to the foreground.
+    ///
+    /// Clearing `SafeAreaInsets` to the default (all-zero) fires
+    /// `on_safe_area_changed` in `table_plugin`, which emits a synthetic
+    /// `WindowResized`.  `on_window_resized` then recomputes the layout;
+    /// once `refresh_insets` resolves the real values a second synthetic
+    /// `WindowResized` fires and the layout converges to the correct position.
+    pub(super) fn rearm_on_resumed(
+        mut lifecycle: MessageReader<AppLifecycle>,
+        mut poll: ResMut<SafeAreaPollTries>,
+        mut insets: ResMut<SafeAreaInsets>,
+    ) {
+        for event in lifecycle.read() {
+            if matches!(event, AppLifecycle::WillResume) {
+                poll.0 = 0;
+                *insets = SafeAreaInsets::default();
             }
         }
     }
