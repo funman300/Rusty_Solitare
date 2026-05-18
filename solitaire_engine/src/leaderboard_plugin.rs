@@ -375,7 +375,7 @@ fn poll_opt_in_task(
         }
         Err(e) => {
             warn!("leaderboard opt-in failed: {e}");
-            toast.write(InfoToastEvent("Leaderboard update failed".to_string()));
+            toast.write(InfoToastEvent("Failed to join leaderboard".to_string()));
         }
     }
 }
@@ -415,7 +415,7 @@ fn poll_opt_out_task(
         }
         Err(e) => {
             warn!("leaderboard opt-out failed: {e}");
-            toast.write(InfoToastEvent("Leaderboard update failed".to_string()));
+            toast.write(InfoToastEvent("Failed to leave leaderboard".to_string()));
         }
     }
 }
