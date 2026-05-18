@@ -309,6 +309,9 @@ impl SyncProvider for SolitaireServerClient {
     async fn opt_in_leaderboard(&self, display_name: &str) -> Result<(), SyncError> {
         let token = self.access_token()?;
         let url = format!("{}/api/leaderboard/opt-in", self.base_url);
+        // Enforce the server's 32-char column limit at the client boundary so
+        // the server never receives an over-length name regardless of caller.
+        let display_name: String = display_name.chars().take(32).collect();
 
         let resp = self
             .client

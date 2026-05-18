@@ -746,7 +746,7 @@ fn handle_display_name_confirm(
         return;
     }
     if let Some(mut settings) = settings {
-        let trimmed = buf.0.trim().to_string();
+        let trimmed: String = buf.0.trim().chars().take(32).collect();
         settings.0.leaderboard_display_name = if trimmed.is_empty() {
             None
         } else {
