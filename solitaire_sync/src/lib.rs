@@ -12,7 +12,7 @@ pub mod progress;
 pub mod stats;
 
 pub use achievements::AchievementRecord;
-pub use merge::merge;
+pub use merge::{merge, merge_at};
 pub use progress::{level_for_xp, PlayerProgress};
 pub use stats::StatsSnapshot;
 

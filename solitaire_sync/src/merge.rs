@@ -3,12 +3,17 @@
 //! All functions are free of I/O and side effects — safe to call from any
 //! context including unit tests and the Bevy main thread.
 
-use chrono::{NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 
 use crate::{AchievementRecord, ConflictReport, PlayerProgress, StatsSnapshot, SyncPayload};
 use crate::progress::{level_for_xp, DAILY_CHALLENGE_HISTORY_CAP};
 
 /// Merge two [`SyncPayload`]s into a single authoritative result.
+///
+/// `resolved_at` is recorded as `last_modified` on the merged payload and all
+/// sub-structs. Pass an explicit timestamp when the caller needs deterministic
+/// output (e.g. server handlers); use [`merge`] as a convenience wrapper that
+/// captures the current time automatically.
 ///
 /// The merge strategy is additive and conflict-free for most fields:
 /// - Counters: take the maximum (games_played, games_won, etc.)
@@ -20,6 +25,38 @@ use crate::progress::{level_for_xp, DAILY_CHALLENGE_HISTORY_CAP};
 /// Fields that cannot be merged deterministically (e.g. diverged streak
 /// counts) are recorded in [`ConflictReport`] entries returned alongside
 /// the merged payload. Data is never silently discarded.
+pub fn merge_at(
+    local: &SyncPayload,
+    remote: &SyncPayload,
+    resolved_at: DateTime<Utc>,
+) -> (SyncPayload, Vec<ConflictReport>) {
+    let mut conflicts = Vec::new();
+
+    if local.user_id != remote.user_id {
+        conflicts.push(ConflictReport {
+            field: "user_id".to_string(),
+            local_value: local.user_id.to_string(),
+            remote_value: remote.user_id.to_string(),
+        });
+        return (local.clone(), conflicts);
+    }
+
+    let stats = merge_stats(&local.stats, &remote.stats, resolved_at, &mut conflicts);
+    let achievements = merge_achievements(&local.achievements, &remote.achievements);
+    let progress = merge_progress(&local.progress, &remote.progress, resolved_at, &mut conflicts);
+
+    let merged = SyncPayload {
+        user_id: local.user_id,
+        stats,
+        achievements,
+        progress,
+        last_modified: resolved_at,
+    };
+
+    (merged, conflicts)
+}
+
+/// Convenience wrapper around [`merge_at`] that captures the current UTC time.
 ///
 /// # Examples
 /// ```
@@ -45,30 +82,7 @@ use crate::progress::{level_for_xp, DAILY_CHALLENGE_HISTORY_CAP};
 /// assert!(conflicts.is_empty());
 /// ```
 pub fn merge(local: &SyncPayload, remote: &SyncPayload) -> (SyncPayload, Vec<ConflictReport>) {
-    let mut conflicts = Vec::new();
-
-    if local.user_id != remote.user_id {
-        conflicts.push(ConflictReport {
-            field: "user_id".to_string(),
-            local_value: local.user_id.to_string(),
-            remote_value: remote.user_id.to_string(),
-        });
-        return (local.clone(), conflicts);
-    }
-
-    let stats = merge_stats(&local.stats, &remote.stats, &mut conflicts);
-    let achievements = merge_achievements(&local.achievements, &remote.achievements);
-    let progress = merge_progress(&local.progress, &remote.progress, &mut conflicts);
-
-    let merged = SyncPayload {
-        user_id: local.user_id,
-        stats,
-        achievements,
-        progress,
-        last_modified: Utc::now(),
-    };
-
-    (merged, conflicts)
+    merge_at(local, remote, Utc::now())
 }
 
 // ---------------------------------------------------------------------------
@@ -78,6 +92,7 @@ pub fn merge(local: &SyncPayload, remote: &SyncPayload) -> (SyncPayload, Vec<Con
 fn merge_stats(
     local: &StatsSnapshot,
     remote: &StatsSnapshot,
+    resolved_at: DateTime<Utc>,
     conflicts: &mut Vec<ConflictReport>,
 ) -> StatsSnapshot {
     // win_streak_current cannot be merged deterministically — record conflict
@@ -137,7 +152,7 @@ fn merge_stats(
             local.challenge_fastest_win_seconds,
             remote.challenge_fastest_win_seconds,
         ),
-        last_modified: Utc::now(),
+        last_modified: resolved_at,
     }
 }
 
@@ -222,6 +237,7 @@ fn merge_achievements(
 fn merge_progress(
     local: &PlayerProgress,
     remote: &PlayerProgress,
+    resolved_at: DateTime<Utc>,
     conflicts: &mut Vec<ConflictReport>,
 ) -> PlayerProgress {
     // daily_challenge_streak cannot be merged deterministically.
@@ -312,7 +328,7 @@ fn merge_progress(
         challenge_index,
         daily_challenge_history,
         daily_challenge_longest_streak,
-        last_modified: Utc::now(),
+        last_modified: resolved_at,
     }
 }
 

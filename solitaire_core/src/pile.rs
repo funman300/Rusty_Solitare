@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use crate::card::{Card, Suit};
 
 /// Identifies which pile on the board a set of cards belongs to.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum PileType {
     /// The face-down draw pile.
     Stock,

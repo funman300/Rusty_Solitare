@@ -111,12 +111,12 @@ impl MatomoClient {
 }
 
 fn url_encode(s: &str) -> String {
-    s.chars()
-        .flat_map(|c| match c {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => {
-                vec![c]
+    s.bytes()
+        .flat_map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                vec![b as char]
             }
-            c => format!("%{:02X}", c as u32).chars().collect(),
+            b => format!("%{b:02X}").chars().collect(),
         })
         .collect()
 }

@@ -31,7 +31,8 @@ mod pile_map_serde {
     use crate::pile::{Pile, PileType};
 
     pub fn serialize<S: Serializer>(map: &HashMap<PileType, Pile>, s: S) -> Result<S::Ok, S::Error> {
-        let entries: Vec<(&PileType, &Pile)> = map.iter().collect();
+        let mut entries: Vec<(&PileType, &Pile)> = map.iter().collect();
+        entries.sort_by_key(|(k, _)| *k);
         entries.serialize(s)
     }
 
@@ -154,6 +155,7 @@ pub struct GameState {
     /// [`GAME_STATE_SCHEMA_VERSION`].
     #[serde(default = "schema_v1")]
     pub schema_version: u32,
+    #[serde(skip)]
     undo_stack: VecDeque<StateSnapshot>,
 }
 
