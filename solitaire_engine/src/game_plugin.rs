@@ -1079,9 +1079,7 @@ fn check_no_moves(
 ) {
     // Reset the debounce flag on every state change so if something changes
     // we re-evaluate on the next state change.
-    let had_event = events.read().next().is_some();
-    // Drain remaining events to avoid leaking.
-    events.clear();
+    let had_event = events.read().count() > 0;
 
     if !had_event {
         return;

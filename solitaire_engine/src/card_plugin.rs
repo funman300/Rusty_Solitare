@@ -451,7 +451,9 @@ impl Plugin for CardPlugin {
                     clear_right_click_highlights_on_state_change.after(GameMutation),
                     clear_right_click_highlights_on_pause,
                     update_stock_empty_indicator.after(GameMutation),
-                    update_stock_count_badge.after(GameMutation),
+                    update_stock_count_badge
+                        .after(GameMutation)
+                        .run_if(resource_changed::<crate::GameStateResource>),
                     collect_resize_events.after(LayoutSystem::UpdateOnResize),
                     snap_cards_on_window_resize.after(collect_resize_events),
                 ),

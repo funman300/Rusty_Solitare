@@ -401,8 +401,10 @@ impl Plugin for SettingsPlugin {
                     update_anim_speed_text,
                     update_color_blind_text,
                     update_high_contrast_text,
-                    update_high_contrast_borders,
-                    update_high_contrast_backgrounds,
+                    update_high_contrast_borders
+                        .run_if(resource_changed::<SettingsResource>),
+                    update_high_contrast_backgrounds
+                        .run_if(resource_changed::<SettingsResource>),
                     update_reduce_motion_text,
                     update_tooltip_delay_text,
                     update_time_bonus_multiplier_text,

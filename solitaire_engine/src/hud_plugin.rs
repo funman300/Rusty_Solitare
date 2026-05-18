@@ -417,7 +417,13 @@ impl Plugin for HudPlugin {
             .add_systems(Update, (update_hud_avatar, handle_avatar_button))
             .add_systems(Update, update_won_previously.after(GameMutation))
             .add_systems(Update, announce_auto_complete.after(GameMutation))
-            .add_systems(Update, update_selection_hud)
+            .add_systems(
+                Update,
+                update_selection_hud.run_if(
+                    resource_exists_and_changed::<SelectionState>
+                        .or(resource_exists_and_changed::<GameStateResource>),
+                ),
+            )
             .add_systems(Update, update_hud_typography)
             .add_systems(
                 Update,

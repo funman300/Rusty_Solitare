@@ -454,8 +454,8 @@ fn handle_settings_toast(
     for ev in events.read() {
         let sfx = ev.0.sfx_volume;
         let music = ev.0.music_volume;
-        let sfx_changed = last_sfx.is_none_or(|prev| (prev - sfx).abs() > f32::EPSILON);
-        let music_changed = last_music.is_none_or(|prev| (prev - music).abs() > f32::EPSILON);
+        let sfx_changed = last_sfx.is_none_or(|prev| (prev - sfx).abs() > 0.001);
+        let music_changed = last_music.is_none_or(|prev| (prev - music).abs() > 0.001);
         *last_sfx = Some(sfx);
         *last_music = Some(music);
         if sfx_changed {

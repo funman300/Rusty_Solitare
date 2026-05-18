@@ -80,7 +80,7 @@ impl Plugin for CursorPlugin {
             Update,
             (
                 update_cursor_icon,
-                update_drop_highlights,
+                update_drop_highlights.run_if(resource_changed::<crate::resources::DragState>),
                 update_drop_target_overlays,
             ),
         );

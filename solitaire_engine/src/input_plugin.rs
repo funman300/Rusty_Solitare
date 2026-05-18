@@ -1162,7 +1162,9 @@ fn find_draggable_at(
                 (i, pile_cards.cards.len())
             } else {
                 if i != pile_cards.cards.len() - 1 {
-                    return None;
+                    // Non-top card on a non-tableau pile — not draggable; skip
+                    // this pile and continue searching remaining piles.
+                    break;
                 }
                 (i, i + 1)
             };
