@@ -238,6 +238,12 @@ pub struct Settings {
     /// field existed deserialize cleanly to `None` via `#[serde(default)]`.
     #[serde(default)]
     pub leaderboard_display_name: Option<String>,
+    /// `true` once the player has successfully opted in to the leaderboard on
+    /// the server. Used to decide whether a display-name change should also
+    /// push an update via `opt_in_leaderboard`. Older `settings.json` files
+    /// deserialize cleanly to `false` via `#[serde(default)]`.
+    #[serde(default)]
+    pub leaderboard_opted_in: bool,
     /// When `true`, the player may drag the top card of a foundation pile back
     /// onto a compatible tableau column. Enabled by default (standard Klondike
     /// rules). Older `settings.json` files without this key deserialize to
@@ -387,6 +393,7 @@ impl Default for Settings {
             replay_move_interval_secs: default_replay_move_interval_secs(),
             last_difficulty: None,
             leaderboard_display_name: None,
+            leaderboard_opted_in: false,
             take_from_foundation: true,
             analytics_enabled: false,
             matomo_url: None,

@@ -15,7 +15,7 @@ use bevy::tasks::{futures_lite::future, AsyncComputeTaskPool, Task};
 use solitaire_data::{save_settings_to, settings::SyncBackend};
 use solitaire_sync::LeaderboardEntry;
 
-use crate::events::{InfoToastEvent, ToggleLeaderboardRequestEvent};
+use crate::events::{InfoToastEvent, ToggleLeaderboardRequestEvent, WarningToastEvent};
 use crate::font_plugin::FontResource;
 use crate::settings_plugin::{SettingsResource, SettingsStoragePath};
 use crate::sync_plugin::SyncProviderResource;
@@ -138,6 +138,7 @@ impl Plugin for LeaderboardPlugin {
             .init_resource::<OptOutTask>()
             .init_resource::<DisplayNameBuffer>()
             .add_message::<ToggleLeaderboardRequestEvent>()
+            .add_message::<WarningToastEvent>()
             // `MouseWheel` and `KeyboardInput` are emitted by Bevy's input
             // plugin under `DefaultPlugins`; register them explicitly so all
             // leaderboard systems run cleanly under `MinimalPlugins` in tests.
@@ -159,6 +160,7 @@ impl Plugin for LeaderboardPlugin {
                     handle_display_name_text_input,
                     handle_display_name_confirm,
                     handle_display_name_cancel,
+                    update_leaderboard_public_name_label,
                 )
                     .chain(),
             )
@@ -361,10 +363,13 @@ fn handle_opt_in_button(
     }
 }
 
-/// Polls the opt-in task; fires an `InfoToastEvent` on completion or failure.
+/// Polls the opt-in task; fires a toast and persists opted-in state on completion.
 fn poll_opt_in_task(
     mut task_res: ResMut<OptInTask>,
     mut toast: MessageWriter<InfoToastEvent>,
+    mut warn_toast: MessageWriter<WarningToastEvent>,
+    settings: Option<ResMut<SettingsResource>>,
+    settings_path: Option<Res<SettingsStoragePath>>,
 ) {
     let Some(task) = task_res.0.as_mut() else { return };
     let Some(result) = future::block_on(future::poll_once(task)) else { return };
@@ -372,10 +377,18 @@ fn poll_opt_in_task(
     match result {
         Ok(()) => {
             toast.write(InfoToastEvent("Opted in to leaderboard".to_string()));
+            if let Some(mut s) = settings {
+                s.0.leaderboard_opted_in = true;
+                if let Some(path) = settings_path.as_ref().and_then(|p| p.0.as_ref())
+                    && let Err(e) = save_settings_to(path, &s.0)
+                {
+                    warn!("failed to save settings after opt-in: {e}");
+                }
+            }
         }
         Err(e) => {
             warn!("leaderboard opt-in failed: {e}");
-            toast.write(InfoToastEvent("Failed to join leaderboard".to_string()));
+            warn_toast.write(WarningToastEvent("Failed to join leaderboard".to_string()));
         }
     }
 }
@@ -401,10 +414,13 @@ fn handle_opt_out_button(
     }
 }
 
-/// Polls the opt-out task; fires an `InfoToastEvent` on completion or failure.
+/// Polls the opt-out task; fires a toast and clears opted-in state on completion.
 fn poll_opt_out_task(
     mut task_res: ResMut<OptOutTask>,
     mut toast: MessageWriter<InfoToastEvent>,
+    mut warn_toast: MessageWriter<WarningToastEvent>,
+    settings: Option<ResMut<SettingsResource>>,
+    settings_path: Option<Res<SettingsStoragePath>>,
 ) {
     let Some(task) = task_res.0.as_mut() else { return };
     let Some(result) = future::block_on(future::poll_once(task)) else { return };
@@ -412,10 +428,18 @@ fn poll_opt_out_task(
     match result {
         Ok(()) => {
             toast.write(InfoToastEvent("Opted out of leaderboard".to_string()));
+            if let Some(mut s) = settings {
+                s.0.leaderboard_opted_in = false;
+                if let Some(path) = settings_path.as_ref().and_then(|p| p.0.as_ref())
+                    && let Err(e) = save_settings_to(path, &s.0)
+                {
+                    warn!("failed to save settings after opt-out: {e}");
+                }
+            }
         }
         Err(e) => {
             warn!("leaderboard opt-out failed: {e}");
-            toast.write(InfoToastEvent("Failed to leave leaderboard".to_string()));
+            warn_toast.write(WarningToastEvent("Failed to leave leaderboard".to_string()));
         }
     }
 }
@@ -427,6 +451,12 @@ fn poll_opt_out_task(
 /// Marker on the "Done" button inside the Leaderboard modal.
 #[derive(Component, Debug)]
 pub struct LeaderboardCloseButton;
+
+/// Marker on the "Public name: …" label inside the leaderboard panel so it
+/// can be updated reactively when the player changes their display name
+/// without a full panel rebuild.
+#[derive(Component, Debug)]
+struct LeaderboardPublicNameText;
 
 fn spawn_leaderboard_screen(
     commands: &mut Commands,
@@ -481,6 +511,7 @@ fn spawn_leaderboard_screen(
                     None => "Public name: (same as username)".to_string(),
                 };
                 row.spawn((
+                    LeaderboardPublicNameText,
                     Text::new(label),
                     font_caption.clone(),
                     TextColor(TEXT_SECONDARY),
@@ -733,7 +764,9 @@ fn handle_display_name_text_input(
     }
 }
 
-/// Saves the typed display name to `SettingsResource` and closes the modal.
+/// Saves the typed display name to `SettingsResource`, closes the modal, and
+/// pushes the new name to the server when the player is already opted in.
+#[allow(clippy::too_many_arguments)]
 fn handle_display_name_confirm(
     button_q: Query<&Interaction, (Changed<Interaction>, With<DisplayNameConfirmButton>)>,
     screens: Query<Entity, With<DisplayNameModal>>,
@@ -741,6 +774,8 @@ fn handle_display_name_confirm(
     buf: Res<DisplayNameBuffer>,
     settings: Option<ResMut<SettingsResource>>,
     settings_path: Option<Res<SettingsStoragePath>>,
+    provider: Option<Res<SyncProviderResource>>,
+    mut task_res: ResMut<OptInTask>,
 ) {
     if !button_q.iter().any(|i| *i == Interaction::Pressed) {
         return;
@@ -750,12 +785,46 @@ fn handle_display_name_confirm(
         settings.0.leaderboard_display_name = if trimmed.is_empty() {
             None
         } else {
-            Some(trimmed)
+            Some(trimmed.clone())
         };
         if let Some(path) = settings_path.as_ref().and_then(|p| p.0.as_ref())
             && let Err(e) = save_settings_to(path, &settings.0)
         {
             warn!("failed to save settings: {e}");
+        }
+
+        // Push updated name to the server when already opted in and no task
+        // is in flight. The server's opt-in endpoint is an upsert, so calling
+        // it a second time only updates the display_name column.
+        let is_remote = provider
+            .as_ref()
+            .is_some_and(|p| p.0.backend_name() != "local");
+        if settings.0.leaderboard_opted_in && is_remote && task_res.0.is_none() {
+            let display_name = settings
+                .0
+                .leaderboard_display_name
+                .clone()
+                .unwrap_or_else(|| {
+                    if let solitaire_data::settings::SyncBackend::SolitaireServer {
+                        ref username,
+                        ..
+                    } = settings.0.sync_backend
+                    {
+                        username.chars().take(32).collect()
+                    } else {
+                        "Player".to_string()
+                    }
+                });
+            if let Some(p) = provider {
+                let provider = p.0.clone();
+                let task = AsyncComputeTaskPool::get().spawn(async move {
+                    provider
+                        .opt_in_leaderboard(&display_name)
+                        .await
+                        .map_err(|e| e.to_string())
+                });
+                task_res.0 = Some(task);
+            }
         }
     }
     for entity in &screens {
@@ -855,6 +924,25 @@ fn spawn_display_name_modal(
             );
         });
     });
+}
+
+/// Keeps the "Public name: …" label in the leaderboard panel in sync with
+/// `SettingsResource` after the player saves a new display name.  No-op when
+/// the panel is closed (`labels.is_empty()` exits immediately).
+fn update_leaderboard_public_name_label(
+    settings: Option<Res<SettingsResource>>,
+    mut labels: Query<&mut Text, With<LeaderboardPublicNameText>>,
+) {
+    if labels.is_empty() {
+        return;
+    }
+    let new_label = match settings.as_ref().and_then(|s| s.0.leaderboard_display_name.as_deref()) {
+        Some(n) => format!("Public name: {n}"),
+        None => "Public name: (same as username)".to_string(),
+    };
+    for mut text in &mut labels {
+        text.0 = new_label.clone();
+    }
 }
 
 /// Accepts printable ASCII characters (0x20–0x7e) for the display-name field.
@@ -1047,5 +1135,172 @@ mod tests {
     fn format_secs_pads_seconds_with_leading_zero() {
         // 65 seconds = 1:05, not 1:5
         assert_eq!(format_secs(65), "1:05");
+    }
+
+    // -------------------------------------------------------------------------
+    // Bug-fix regression tests
+    // -------------------------------------------------------------------------
+
+    fn headless_app_with_settings() -> App {
+        let mut app = headless_app();
+        app.insert_resource(SettingsResource(solitaire_data::settings::Settings::default()));
+        app
+    }
+
+    /// Bug 1: opt-in errors must fire `WarningToastEvent`, not `InfoToastEvent`.
+    #[test]
+    fn opt_in_error_fires_warning_toast() {
+        use bevy::ecs::message::Messages;
+
+        let mut app = headless_app_with_settings();
+
+        // Inject a pre-resolved failed task directly into OptInTask.
+        let failed_task = AsyncComputeTaskPool::get()
+            .spawn(async { Err::<(), String>("network error".to_string()) });
+        app.world_mut().resource_mut::<OptInTask>().0 = Some(failed_task);
+
+        // Allow the task to complete and be polled.
+        for _ in 0..5 {
+            app.update();
+        }
+
+        let msgs = app.world().resource::<Messages<WarningToastEvent>>();
+        let mut cursor = msgs.get_cursor();
+        assert!(
+            cursor.read(msgs).next().is_some(),
+            "WarningToastEvent must be fired when opt-in fails"
+        );
+    }
+
+    /// Bug 1: opt-out errors must fire `WarningToastEvent`, not `InfoToastEvent`.
+    #[test]
+    fn opt_out_error_fires_warning_toast() {
+        use bevy::ecs::message::Messages;
+
+        let mut app = headless_app_with_settings();
+
+        let failed_task = AsyncComputeTaskPool::get()
+            .spawn(async { Err::<(), String>("network error".to_string()) });
+        app.world_mut().resource_mut::<OptOutTask>().0 = Some(failed_task);
+
+        for _ in 0..5 {
+            app.update();
+        }
+
+        let msgs = app.world().resource::<Messages<WarningToastEvent>>();
+        let mut cursor = msgs.get_cursor();
+        assert!(
+            cursor.read(msgs).next().is_some(),
+            "WarningToastEvent must be fired when opt-out fails"
+        );
+    }
+
+    /// Bug 2: successful opt-in must set `leaderboard_opted_in = true` in Settings.
+    #[test]
+    fn opt_in_success_sets_opted_in_flag() {
+        let mut app = headless_app_with_settings();
+
+        // Confirm the flag starts false.
+        assert!(!app
+            .world()
+            .resource::<SettingsResource>()
+            .0
+            .leaderboard_opted_in);
+
+        let ok_task = AsyncComputeTaskPool::get().spawn(async { Ok::<(), String>(()) });
+        app.world_mut().resource_mut::<OptInTask>().0 = Some(ok_task);
+
+        for _ in 0..5 {
+            app.update();
+        }
+
+        assert!(
+            app.world()
+                .resource::<SettingsResource>()
+                .0
+                .leaderboard_opted_in,
+            "leaderboard_opted_in must be true after successful opt-in"
+        );
+    }
+
+    /// Bug 2: successful opt-out must clear `leaderboard_opted_in`.
+    #[test]
+    fn opt_out_success_clears_opted_in_flag() {
+        let mut app = headless_app_with_settings();
+
+        // Seed as opted in.
+        app.world_mut()
+            .resource_mut::<SettingsResource>()
+            .0
+            .leaderboard_opted_in = true;
+
+        let ok_task = AsyncComputeTaskPool::get().spawn(async { Ok::<(), String>(()) });
+        app.world_mut().resource_mut::<OptOutTask>().0 = Some(ok_task);
+
+        for _ in 0..5 {
+            app.update();
+        }
+
+        assert!(
+            !app.world()
+                .resource::<SettingsResource>()
+                .0
+                .leaderboard_opted_in,
+            "leaderboard_opted_in must be false after successful opt-out"
+        );
+    }
+
+    /// Bug 3: `LeaderboardPublicNameText` label must reflect a display-name
+    /// change applied to `SettingsResource` without a panel rebuild.
+    #[test]
+    fn public_name_label_updates_reactively() {
+        let mut app = headless_app_with_settings();
+
+        // Open the panel.
+        press(&mut app, KeyCode::KeyL);
+        app.update();
+
+        // Verify the label starts with the default copy.
+        let initial: String = app
+            .world_mut()
+            .query_filtered::<&Text, With<LeaderboardPublicNameText>>()
+            .iter(app.world())
+            .next()
+            .expect("LeaderboardPublicNameText must exist while panel is open")
+            .0
+            .clone();
+        assert!(
+            initial.contains("same as username"),
+            "initial label should say '(same as username)' when no display name is set"
+        );
+
+        // Clear just-pressed state so `toggle_leaderboard_screen` doesn't
+        // re-fire in the next frame (MinimalPlugins has no input-tick system).
+        {
+            let mut input = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            input.release(KeyCode::KeyL);
+            input.clear();
+        }
+
+        // Update the display name in SettingsResource.
+        app.world_mut()
+            .resource_mut::<SettingsResource>()
+            .0
+            .leaderboard_display_name = Some("TestPlayer".to_string());
+
+        app.update();
+
+        let updated: String = app
+            .world_mut()
+            .query_filtered::<&Text, With<LeaderboardPublicNameText>>()
+            .iter(app.world())
+            .next()
+            .expect("LeaderboardPublicNameText must still exist")
+            .0
+            .clone();
+        assert!(
+            updated.contains("TestPlayer"),
+            "label must reflect new display name after settings change"
+        );
     }
 }
