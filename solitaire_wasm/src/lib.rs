@@ -193,16 +193,24 @@ impl ReplayPlayer {
     }
 
     /// Snapshot the current `GameState` as a JS object (see `StateSnapshot`).
-    pub fn state(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.snapshot()).unwrap_or(JsValue::NULL)
+    ///
+    /// Throws a JS string exception on serialisation failure (should never
+    /// occur in practice — `StateSnapshot` contains only primitive types).
+    pub fn state(&self) -> Result<JsValue, JsValue> {
+        serde_wasm_bindgen::to_value(&self.snapshot())
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Apply the next move; returns the post-step snapshot, or `null`
     /// once the move list is exhausted.
-    pub fn step(&mut self) -> JsValue {
+    ///
+    /// Returns `null` (not an exception) when the replay is finished.
+    /// Throws a JS string exception on serialisation failure.
+    pub fn step(&mut self) -> Result<JsValue, JsValue> {
         match self.step_native() {
-            Some(snap) => serde_wasm_bindgen::to_value(&snap).unwrap_or(JsValue::NULL),
-            None => JsValue::NULL,
+            Some(snap) => serde_wasm_bindgen::to_value(&snap)
+                .map_err(|e| JsValue::from_str(&e.to_string())),
+            None => Ok(JsValue::NULL),
         }
     }
 
@@ -364,8 +372,11 @@ impl SolitaireGame {
     }
 
     /// Full pile snapshot as a JS object.
-    pub fn state(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.snap()).unwrap_or(JsValue::NULL)
+    ///
+    /// Throws a JS string exception on serialisation failure.
+    pub fn state(&self) -> Result<JsValue, JsValue> {
+        serde_wasm_bindgen::to_value(&self.snap())
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// The seed used to deal this game.
