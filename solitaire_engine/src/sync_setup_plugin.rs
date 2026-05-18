@@ -53,6 +53,7 @@ use crate::events::{
 };
 use crate::font_plugin::FontResource;
 use crate::settings_plugin::{SettingsResource, SettingsScreen, SettingsStoragePath};
+use crate::resources::TokioRuntimeResource;
 use crate::sync_plugin::SyncProviderResource;
 use crate::ui_modal::spawn_modal;
 use crate::ui_theme::{
@@ -301,6 +302,7 @@ fn handle_auth_button(
     login_q: Query<&Interaction, (Changed<Interaction>, With<SyncLoginButton>)>,
     register_q: Query<&Interaction, (Changed<Interaction>, With<SyncRegisterButton>)>,
     fields: Query<(&SyncFieldKind, &SyncFieldBuffer)>,
+    rt: Res<TokioRuntimeResource>,
     mut pending: ResMut<PendingAuthTask>,
     mut error_nodes: Query<(&mut Text, &mut TextColor), With<SyncAuthError>>,
     mut busy_nodes: Query<&mut Visibility, With<SyncBusyOverlay>>,
@@ -363,26 +365,23 @@ fn handle_auth_button(
     let is_register = register_clicked;
     let client = SolitaireServerClient::new(url.clone(), username.clone());
     let pw = password.clone();
+    let rt = rt.0.clone();
 
     let task = AsyncComputeTaskPool::get().spawn(async move {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| SyncError::Network(format!("tokio rt: {e}")))?
-            .block_on(async {
-                let (access_token, refresh_token) = if is_register {
-                    client.register(&pw).await?
-                } else {
-                    client.login(&pw).await?
-                };
-                // Fetch avatar URL immediately while we have the fresh token.
-                let avatar_url = client
-                    .fetch_me_with_token(&access_token)
-                    .await
-                    .ok()
-                    .and_then(|(_, url)| url);
-                Ok((access_token, refresh_token, avatar_url))
-            })
+        rt.block_on(async {
+            let (access_token, refresh_token) = if is_register {
+                client.register(&pw).await?
+            } else {
+                client.login(&pw).await?
+            };
+            // Fetch avatar URL immediately while we have the fresh token.
+            let avatar_url = client
+                .fetch_me_with_token(&access_token)
+                .await
+                .ok()
+                .and_then(|(_, url)| url);
+            Ok((access_token, refresh_token, avatar_url))
+        })
     });
 
     pending.task = Some(task);
@@ -575,6 +574,7 @@ fn handle_delete_cancel(
 fn handle_delete_confirm(
     confirm_q: Query<&Interaction, (Changed<Interaction>, With<DeleteConfirmButton>)>,
     provider: Res<SyncProviderResource>,
+    rt: Res<TokioRuntimeResource>,
     mut pending: ResMut<PendingDeleteTask>,
     screen: Query<Entity, With<DeleteConfirmScreen>>,
     mut commands: Commands,
@@ -587,12 +587,9 @@ fn handle_delete_confirm(
         commands.entity(entity).despawn();
     }
     let provider = provider.0.clone();
+    let rt = rt.0.clone();
     pending.0 = Some(AsyncComputeTaskPool::get().spawn(async move {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| SyncError::Network(format!("tokio rt: {e}")))?
-            .block_on(provider.delete_account())
+        rt.block_on(provider.delete_account())
     }));
 }
 

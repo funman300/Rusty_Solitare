@@ -12,7 +12,7 @@ use solitaire_core::game_state::GameMode;
 use solitaire_data::{matomo_client::MatomoClient, settings::SyncBackend, Settings};
 
 use crate::events::{AchievementUnlockedEvent, ForfeitEvent, GameWonEvent, NewGameRequestEvent};
-use crate::resources::GameStateResource;
+use crate::resources::{GameStateResource, TokioRuntimeResource};
 use crate::settings_plugin::{SettingsChangedEvent, SettingsResource};
 
 // ---------------------------------------------------------------------------
@@ -45,6 +45,7 @@ pub struct AnalyticsPlugin;
 impl Plugin for AnalyticsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AnalyticsResource>()
+            .init_resource::<TokioRuntimeResource>()
             .add_systems(Startup, init_analytics)
             .add_systems(
                 Update,
@@ -80,28 +81,28 @@ fn react_to_settings_change(
 fn on_game_won(
     mut wins: MessageReader<GameWonEvent>,
     analytics: Res<AnalyticsResource>,
-    settings: Res<SettingsResource>,
+    rt: Res<TokioRuntimeResource>,
 ) {
     let Some(client) = analytics.client.clone() else {
         return;
     };
     for ev in wins.read() {
         client.event("Game", "Won", None, Some(ev.score as f64));
-        fire_flush(client.clone(), &settings.0);
+        fire_flush(client.clone(), rt.0.clone());
     }
 }
 
 fn on_forfeit(
     mut forfeits: MessageReader<ForfeitEvent>,
     analytics: Res<AnalyticsResource>,
-    settings: Res<SettingsResource>,
+    rt: Res<TokioRuntimeResource>,
 ) {
     let Some(client) = analytics.client.clone() else {
         return;
     };
     for _ev in forfeits.read() {
         client.event("Game", "Forfeit", None, None);
-        fire_flush(client.clone(), &settings.0);
+        fire_flush(client.clone(), rt.0.clone());
     }
 }
 
@@ -137,14 +138,14 @@ fn on_achievement_unlocked(
 fn tick_flush_timer(
     time: Res<Time>,
     mut analytics: ResMut<AnalyticsResource>,
-    settings: Res<SettingsResource>,
+    rt: Res<TokioRuntimeResource>,
 ) {
     analytics.flush_timer.tick(time.delta());
     if !analytics.flush_timer.just_finished() {
         return;
     }
     if let Some(client) = analytics.client.clone() {
-        fire_flush(client, &settings.0);
+        fire_flush(client, rt.0.clone());
     }
 }
 
@@ -164,15 +165,10 @@ fn client_for(settings: &Settings) -> Option<Arc<MatomoClient>> {
     Some(Arc::new(MatomoClient::new(url, settings.matomo_site_id, uid)))
 }
 
-fn fire_flush(client: Arc<MatomoClient>, _settings: &Settings) {
+fn fire_flush(client: Arc<MatomoClient>, rt: Arc<tokio::runtime::Runtime>) {
     AsyncComputeTaskPool::get()
         .spawn(async move {
-            if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                rt.block_on(client.flush());
-            }
+            rt.block_on(client.flush());
         })
         .detach();
 }

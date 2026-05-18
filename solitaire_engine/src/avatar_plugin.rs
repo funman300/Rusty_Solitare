@@ -21,6 +21,8 @@ use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::tasks::{futures_lite::future, AsyncComputeTaskPool, Task};
 
+use crate::resources::TokioRuntimeResource;
+
 /// Stores the loaded avatar [`Handle<Image>`], or `None` when no avatar
 /// has been fetched yet (new account, no internet, or fetch in progress).
 #[derive(Resource, Default)]
@@ -46,6 +48,7 @@ pub struct AvatarPlugin;
 impl Plugin for AvatarPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AvatarFetchEvent>()
+            .init_resource::<TokioRuntimeResource>()
             .init_resource::<AvatarResource>()
             .init_resource::<PendingAvatarTask>()
             .add_systems(Update, (handle_avatar_fetch, poll_avatar_task));
@@ -54,28 +57,26 @@ impl Plugin for AvatarPlugin {
 
 fn handle_avatar_fetch(
     mut events: MessageReader<AvatarFetchEvent>,
+    rt: Res<TokioRuntimeResource>,
     mut pending: ResMut<PendingAvatarTask>,
 ) {
     for ev in events.read() {
         // Cancel any in-flight task and restart with the new URL.
         let url = ev.url.clone();
+        let rt = rt.0.clone();
         pending.0 = Some(AsyncComputeTaskPool::get().spawn(async move {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .ok()?
-                .block_on(async move {
-                    let client = reqwest::Client::new();
-                    let bytes = client
-                        .get(&url)
-                        .send()
-                        .await
-                        .ok()?
-                        .bytes()
-                        .await
-                        .ok()?;
-                    Some(bytes.to_vec())
-                })
+            rt.block_on(async move {
+                let client = reqwest::Client::new();
+                let bytes = client
+                    .get(&url)
+                    .send()
+                    .await
+                    .ok()?
+                    .bytes()
+                    .await
+                    .ok()?;
+                Some(bytes.to_vec())
+            })
         }));
     }
 }

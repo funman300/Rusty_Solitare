@@ -1,5 +1,7 @@
 //! Bevy resources owned by the engine crate.
 
+use std::sync::Arc;
+
 use bevy::math::Vec2;
 use bevy::prelude::Resource;
 use chrono::{DateTime, Utc};
@@ -111,3 +113,26 @@ pub struct HintCycleIndex(pub usize);
 /// returns to the same position in the list without re-scrolling.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SettingsScrollPos(pub f32);
+
+/// Shared Tokio runtime used by all async-task closures that need HTTP I/O.
+///
+/// Bevy's `AsyncComputeTaskPool` uses `async-executor` (not Tokio), so spawned
+/// closures that call `reqwest`/`hyper` need a Tokio reactor. A single
+/// multi-threaded runtime is built once at startup and its `Arc` cloned cheaply
+/// into every network task — safe for concurrent `block_on` calls from multiple
+/// worker threads.
+#[derive(Resource, Clone)]
+pub struct TokioRuntimeResource(pub Arc<tokio::runtime::Runtime>);
+
+impl Default for TokioRuntimeResource {
+    fn default() -> Self {
+        // Building the Tokio runtime is startup-time initialization; failure
+        // here means the OS refused to create threads, which is unrecoverable.
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("failed to build shared Tokio runtime");
+        Self(Arc::new(rt))
+    }
+}

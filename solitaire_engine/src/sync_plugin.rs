@@ -31,7 +31,7 @@ use crate::events::{
 };
 use crate::game_plugin::RecordingReplay;
 use crate::progress_plugin::{ProgressResource, ProgressStoragePath};
-use crate::resources::{GameStateResource, SyncStatus, SyncStatusResource};
+use crate::resources::{GameStateResource, SyncStatus, SyncStatusResource, TokioRuntimeResource};
 use crate::stats_plugin::{LatestReplayPath, ReplayHistoryResource, StatsResource, StatsStoragePath};
 
 // ---------------------------------------------------------------------------
@@ -101,6 +101,7 @@ impl SyncPlugin {
 impl Plugin for SyncPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(SyncProviderResource(self.provider.clone()))
+            .init_resource::<TokioRuntimeResource>()
             .init_resource::<SyncStatusResource>()
             .init_resource::<PullTaskResult>()
             .init_resource::<PullTask>()
@@ -130,19 +131,14 @@ impl Plugin for SyncPlugin {
 /// Startup system: spawns the async pull task and sets status to `Syncing`.
 fn start_pull(
     provider: Res<SyncProviderResource>,
+    rt: Res<TokioRuntimeResource>,
     mut task_res: ResMut<PullTask>,
     mut status: ResMut<SyncStatusResource>,
 ) {
     let provider = provider.0.clone();
+    let rt = rt.0.clone();
     let task = AsyncComputeTaskPool::get().spawn(async move {
-        // Bevy's AsyncComputeTaskPool uses async-executor (not Tokio), but
-        // reqwest/hyper require a Tokio reactor for DNS and HTTP I/O. Provide
-        // a short-lived single-threaded runtime for this network round-trip.
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| SyncError::Network(format!("tokio rt: {e}")))?
-            .block_on(provider.pull())
+        rt.block_on(provider.pull())
     });
     task_res.0 = Some(task);
     status.0 = SyncStatus::Syncing;
@@ -153,6 +149,7 @@ fn start_pull(
 fn handle_manual_sync_request(
     mut events: MessageReader<ManualSyncRequestEvent>,
     provider: Res<SyncProviderResource>,
+    rt: Res<TokioRuntimeResource>,
     mut task_res: ResMut<PullTask>,
     mut status: ResMut<SyncStatusResource>,
 ) {
@@ -164,12 +161,9 @@ fn handle_manual_sync_request(
         return; // Already pulling — ignore.
     }
     let provider = provider.0.clone();
+    let rt = rt.0.clone();
     let task = AsyncComputeTaskPool::get().spawn(async move {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| SyncError::Network(format!("tokio rt: {e}")))?
-            .block_on(provider.pull())
+        rt.block_on(provider.pull())
     });
     task_res.0 = Some(task);
     status.0 = SyncStatus::Syncing;
@@ -274,6 +268,7 @@ fn poll_pull_result(
 fn push_on_exit(
     mut exit_events: MessageReader<AppExit>,
     provider: Res<SyncProviderResource>,
+    rt: Res<TokioRuntimeResource>,
     stats: Res<StatsResource>,
     achievements: Res<AchievementsResource>,
     progress: Res<ProgressResource>,
@@ -284,21 +279,7 @@ fn push_on_exit(
     exit_events.clear();
 
     let payload = build_payload(&stats.0, &achievements.0, &progress.0);
-    let provider = provider.0.clone();
-
-    // Prefer an existing tokio runtime; fall back to a temporary one for
-    // environments (e.g. tests, Android's non-Tokio async executor) where
-    // reqwest/hyper would otherwise panic with "no reactor running".
-    let result = match tokio::runtime::Handle::try_current() {
-        Ok(handle) => handle.block_on(provider.push(&payload)),
-        Err(_) => match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt.block_on(provider.push(&payload)),
-            Err(e) => Err(SyncError::Network(format!("tokio rt on exit: {e}"))),
-        },
-    };
+    let result = rt.0.block_on(provider.0.push(&payload));
     match result {
         Ok(_) => {}
         // `UnsupportedPlatform` is the expected response of
@@ -327,6 +308,7 @@ fn push_on_exit(
 fn push_replay_on_win(
     mut wins: MessageReader<GameWonEvent>,
     provider: Res<SyncProviderResource>,
+    rt: Res<TokioRuntimeResource>,
     game: Res<GameStateResource>,
     recording: Res<RecordingReplay>,
     mut pending: ResMut<PendingReplayUpload>,
@@ -348,12 +330,9 @@ fn push_replay_on_win(
             recording.moves.clone(),
         );
         let provider = provider.0.clone();
+        let rt = rt.0.clone();
         let task = AsyncComputeTaskPool::get().spawn(async move {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| SyncError::Network(format!("tokio rt: {e}")))?
-                .block_on(provider.push_replay(&replay))
+            rt.block_on(provider.push_replay(&replay))
         });
         // If a previous upload is still in flight, drop it — the most
         // recent win is the one whose share link the player will care
