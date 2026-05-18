@@ -14,7 +14,6 @@ use chrono::{Datelike, NaiveDate};
 pub use solitaire_sync::progress::level_for_xp;
 pub use solitaire_sync::PlayerProgress;
 
-const APP_DIR_NAME: &str = "ferrous_solitaire";
 const FILE_NAME: &str = "progress.json";
 
 /// Deterministic seed derived from a date, identical for all players globally.
@@ -46,7 +45,7 @@ pub fn xp_for_win(time_seconds: u64, used_undo: bool) -> u64 {
 
 /// Platform-specific default path for `progress.json`.
 pub fn progress_file_path() -> Option<PathBuf> {
-    crate::data_dir().map(|d| d.join(APP_DIR_NAME).join(FILE_NAME))
+    crate::data_dir().map(|d| d.join(crate::APP_DIR_NAME).join(FILE_NAME))
 }
 
 /// Load progress from an explicit path. Returns `default()` if missing/corrupt.

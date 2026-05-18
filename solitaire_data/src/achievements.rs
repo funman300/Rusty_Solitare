@@ -10,12 +10,11 @@ use std::path::{Path, PathBuf};
 
 pub use solitaire_sync::AchievementRecord;
 
-const APP_DIR_NAME: &str = "ferrous_solitaire";
 const FILE_NAME: &str = "achievements.json";
 
 /// Platform-specific default path for `achievements.json`.
 pub fn achievements_file_path() -> Option<PathBuf> {
-    crate::data_dir().map(|d| d.join(APP_DIR_NAME).join(FILE_NAME))
+    crate::data_dir().map(|d| d.join(crate::APP_DIR_NAME).join(FILE_NAME))
 }
 
 /// Load achievements from an explicit path. Returns `Vec::new()` if the file

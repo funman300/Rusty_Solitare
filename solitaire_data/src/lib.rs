@@ -168,3 +168,6 @@ pub use matomo_client::MatomoClient;
 
 pub mod platform;
 pub use platform::data_dir;
+
+/// Application data subdirectory name, shared by all persistence modules.
+pub(crate) const APP_DIR_NAME: &str = "ferrous_solitaire";

@@ -13,7 +13,6 @@ use solitaire_core::game_state::{GameState, GAME_STATE_SCHEMA_VERSION};
 
 use crate::stats::StatsSnapshot;
 
-const APP_DIR_NAME: &str = "ferrous_solitaire";
 const STATS_FILE_NAME: &str = "stats.json";
 const GAME_STATE_FILE_NAME: &str = "game_state.json";
 const TIME_ATTACK_SESSION_FILE_NAME: &str = "time_attack_session.json";
@@ -21,7 +20,7 @@ const TIME_ATTACK_SESSION_FILE_NAME: &str = "time_attack_session.json";
 /// Returns the platform-specific path to `stats.json`, or `None` if
 /// `crate::data_dir()` is unavailable (e.g. minimal Linux containers).
 pub fn stats_file_path() -> Option<PathBuf> {
-    crate::data_dir().map(|d| d.join(APP_DIR_NAME).join(STATS_FILE_NAME))
+    crate::data_dir().map(|d| d.join(crate::APP_DIR_NAME).join(STATS_FILE_NAME))
 }
 
 /// Load stats from an explicit path. Returns `StatsSnapshot::default()` if
@@ -71,7 +70,7 @@ pub fn save_stats(stats: &StatsSnapshot) -> io::Result<()> {
 /// Returns the platform-specific path to `game_state.json`, or `None` if
 /// `crate::data_dir()` is unavailable.
 pub fn game_state_file_path() -> Option<PathBuf> {
-    crate::data_dir().map(|d| d.join(APP_DIR_NAME).join(GAME_STATE_FILE_NAME))
+    crate::data_dir().map(|d| d.join(crate::APP_DIR_NAME).join(GAME_STATE_FILE_NAME))
 }
 
 /// Load an in-progress `GameState` from `path`. Returns `None` if the file is
@@ -130,7 +129,7 @@ pub fn delete_game_state_at(path: &Path) -> io::Result<()> {
 /// are silently skipped.
 pub fn cleanup_orphaned_tmp_files() -> io::Result<()> {
     let dir = match crate::data_dir() {
-        Some(d) => d.join(APP_DIR_NAME),
+        Some(d) => d.join(crate::APP_DIR_NAME),
         None => return Ok(()),
     };
 
@@ -181,7 +180,7 @@ pub struct TimeAttackSession {
 /// Returns the platform-specific path to `time_attack_session.json`, or
 /// `None` if `crate::data_dir()` is unavailable.
 pub fn time_attack_session_path() -> Option<PathBuf> {
-    crate::data_dir().map(|d| d.join(APP_DIR_NAME).join(TIME_ATTACK_SESSION_FILE_NAME))
+    crate::data_dir().map(|d| d.join(crate::APP_DIR_NAME).join(TIME_ATTACK_SESSION_FILE_NAME))
 }
 
 /// Save a Time Attack session atomically. Mirrors `save_game_state_to`'s

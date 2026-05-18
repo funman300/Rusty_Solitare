@@ -9,6 +9,7 @@ use crate::pile::Pile;
 ///   [`Pile::claimed_suit`](crate::pile::Pile::claimed_suit)).
 /// - When the pile is non-empty, the next card must match the top card's
 ///   suit and be exactly one rank higher.
+#[must_use]
 pub fn can_place_on_foundation(card: &Card, pile: &Pile) -> bool {
     match pile.cards.last() {
         None => card.rank.value() == 1,
@@ -19,6 +20,7 @@ pub fn can_place_on_foundation(card: &Card, pile: &Pile) -> bool {
 /// Returns `true` if `card` (or the bottom card of a sequence) can be placed on `pile` in the tableau.
 ///
 /// Tableau rules: Kings go on empty piles; otherwise alternating colour, one rank lower.
+#[must_use]
 pub fn can_place_on_tableau(card: &Card, pile: &Pile) -> bool {
     match pile.cards.last() {
         None => card.rank.value() == 13,
@@ -36,6 +38,7 @@ pub fn can_place_on_tableau(card: &Card, pile: &Pile) -> bool {
 /// only validates the sequence's *internal* structure, which the tableau
 /// move path must enforce so a player can't smuggle an arbitrary stack
 /// onto another column when the bottom card happens to land legally.
+#[must_use]
 pub fn is_valid_tableau_sequence(cards: &[Card]) -> bool {
     cards.windows(2).all(|w| {
         w[0].rank.value() == w[1].rank.value() + 1 && w[0].suit.is_red() != w[1].suit.is_red()

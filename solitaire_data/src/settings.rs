@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use solitaire_core::game_state::{DifficultyLevel, DrawMode};
 
-const APP_DIR_NAME: &str = "ferrous_solitaire";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 
 /// Animation playback speed for card transitions.
@@ -479,7 +478,7 @@ impl Settings {
 /// Returns the platform-specific path to `settings.json`, or `None` if
 /// the platform's data directory is unavailable.
 pub fn settings_file_path() -> Option<PathBuf> {
-    crate::data_dir().map(|d| d.join(APP_DIR_NAME).join(SETTINGS_FILE_NAME))
+    crate::data_dir().map(|d| d.join(crate::APP_DIR_NAME).join(SETTINGS_FILE_NAME))
 }
 
 /// Load settings from an explicit path. Returns `Settings::default()` if the

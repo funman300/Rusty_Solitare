@@ -29,7 +29,6 @@ use serde::{Deserialize, Serialize};
 use solitaire_core::game_state::{DrawMode, GameMode};
 use solitaire_core::pile::PileType;
 
-const APP_DIR_NAME: &str = "ferrous_solitaire";
 const LATEST_REPLAY_FILE_NAME: &str = "latest_replay.json";
 const REPLAY_HISTORY_FILE_NAME: &str = "replays.json";
 
@@ -279,14 +278,14 @@ impl ReplayHistory {
             in migrate_legacy_latest_replay"
 )]
 pub fn latest_replay_path() -> Option<PathBuf> {
-    crate::data_dir().map(|d| d.join(APP_DIR_NAME).join(LATEST_REPLAY_FILE_NAME))
+    crate::data_dir().map(|d| d.join(crate::APP_DIR_NAME).join(LATEST_REPLAY_FILE_NAME))
 }
 
 /// Returns the platform-specific path to `replays.json`, the rolling
 /// history file, or `None` if `crate::data_dir()` is unavailable (e.g.
 /// minimal Linux containers).
 pub fn replay_history_path() -> Option<PathBuf> {
-    crate::data_dir().map(|d| d.join(APP_DIR_NAME).join(REPLAY_HISTORY_FILE_NAME))
+    crate::data_dir().map(|d| d.join(crate::APP_DIR_NAME).join(REPLAY_HISTORY_FILE_NAME))
 }
 
 /// Save a [`Replay`] atomically to `path` using the standard `.tmp` →
