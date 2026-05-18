@@ -26,8 +26,8 @@ use solitaire_sync::{merge, SyncPayload, SyncResponse};
 
 use crate::achievement_plugin::{AchievementsResource, AchievementsStoragePath};
 use crate::events::{
-    GameWonEvent, InfoToastEvent, ManualSyncRequestEvent, SyncCompleteEvent,
-    SyncConfigureRequestEvent,
+    GameWonEvent, ManualSyncRequestEvent, SyncCompleteEvent, SyncConfigureRequestEvent,
+    WarningToastEvent,
 };
 use crate::game_plugin::RecordingReplay;
 use crate::progress_plugin::{ProgressResource, ProgressStoragePath};
@@ -109,7 +109,7 @@ impl Plugin for SyncPlugin {
             .add_message::<ManualSyncRequestEvent>()
             .add_message::<SyncCompleteEvent>()
             .add_message::<SyncConfigureRequestEvent>()
-            .add_message::<InfoToastEvent>()
+            .add_message::<WarningToastEvent>()
             .add_systems(Startup, start_pull)
             .add_systems(
                 Update,
@@ -191,7 +191,7 @@ fn poll_pull_result(
     progress_path: Res<ProgressStoragePath>,
     mut complete_writer: MessageWriter<SyncCompleteEvent>,
     mut configure_sync: MessageWriter<SyncConfigureRequestEvent>,
-    mut toast: MessageWriter<InfoToastEvent>,
+    mut warning_toast: MessageWriter<WarningToastEvent>,
 ) {
     let Some(task) = task_res.0.as_mut() else {
         return;
@@ -245,13 +245,13 @@ fn poll_pull_result(
                 SyncError::Serialization(_) => format!("Unexpected server response: {e}"),
                 SyncError::UnsupportedPlatform => unreachable!("handled above"),
             };
+            warning_toast.write(WarningToastEvent(msg.clone()));
             // On auth failure, reopen the Connect modal so the player can
             // re-enter credentials without having to navigate through Settings.
             // `open_sync_setup_modal` is idempotent — it ignores the event when
             // the modal is already on screen, so repeated pull failures don't
             // stack multiple modals.
             if matches!(e, SyncError::Auth(_)) {
-                toast.write(InfoToastEvent("Session expired — please reconnect".to_string()));
                 configure_sync.write(SyncConfigureRequestEvent);
             }
             status.0 = SyncStatus::Error(msg.clone());
@@ -547,6 +547,33 @@ mod tests {
         assert!(
             matches!(status, SyncStatus::Error(_)),
             "expected Error status after failing pull, got {status:?}"
+        );
+    }
+
+    #[test]
+    fn pull_failure_fires_warning_toast() {
+        use bevy::ecs::message::Messages;
+        let mut app = headless_app_with(FailingProvider);
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            app.update();
+            if matches!(
+                app.world().resource::<SyncStatusResource>().0,
+                SyncStatus::Error(_)
+            ) {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        let msgs = app.world().resource::<Messages<WarningToastEvent>>();
+        let mut cursor = msgs.get_cursor();
+        assert!(
+            cursor.read(msgs).next().is_some(),
+            "a WarningToastEvent must fire when the pull fails"
         );
     }
 
