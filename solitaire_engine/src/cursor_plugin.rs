@@ -38,7 +38,7 @@ use solitaire_core::game_state::{DrawMode, GameState};
 use solitaire_core::pile::PileType;
 use solitaire_core::rules::{can_place_on_foundation, can_place_on_tableau};
 
-use crate::card_plugin::{RightClickHighlight, TABLEAU_FAN_FRAC};
+use crate::card_plugin::RightClickHighlight;
 use crate::layout::{Layout, LayoutResource};
 use crate::resources::{DragState, GameStateResource};
 use crate::table_plugin::{PileMarker, PILE_MARKER_DEFAULT_COLOUR};
@@ -387,7 +387,7 @@ fn drop_overlay_rect(pile: &PileType, layout: &Layout, game: &GameState) -> (Vec
     if matches!(pile, PileType::Tableau(_)) {
         let card_count = game.piles.get(pile).map_or(0, |p| p.cards.len());
         if card_count > 1 {
-            let fan = -layout.card_size.y * TABLEAU_FAN_FRAC;
+            let fan = -layout.card_size.y * layout.tableau_fan_frac;
             let bottom_card_centre_y = centre.y + fan * (card_count - 1) as f32;
             let top_edge = centre.y + layout.card_size.y / 2.0;
             let bottom_edge = bottom_card_centre_y - layout.card_size.y / 2.0;
@@ -478,7 +478,7 @@ fn tableau_or_stack_pos(
     if is_tableau {
         Vec2::new(
             base.x,
-            base.y - layout.card_size.y * TABLEAU_FAN_FRAC * (index as f32),
+            base.y - layout.card_size.y * layout.tableau_fan_frac * (index as f32),
         )
     } else if matches!(pile, PileType::Waste) && game.draw_mode == DrawMode::DrawThree {
         let pile_len = game.piles.get(pile).map_or(0, |p| p.cards.len());

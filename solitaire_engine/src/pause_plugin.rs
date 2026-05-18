@@ -437,10 +437,15 @@ fn close_forfeit_modal(
 /// The player reaches these overlays via the HUD menu while paused, which
 /// causes both the pause modal and the overlay to be live simultaneously.
 /// That is always unintentional — the overlay should own the screen.
+/// Query filter for modals that are not part of the pause flow.
+/// Excludes both `PauseScreen` (the pause modal itself) and
+/// `ForfeitConfirmScreen` (spawned from within the pause flow).
+type NonPauseFamilyScrim = (With<ModalScrim>, Without<PauseScreen>, Without<ForfeitConfirmScreen>);
+
 fn auto_resume_on_overlay(
     mut commands: Commands,
     pause_screens: Query<Entity, With<PauseScreen>>,
-    other_modal_scrims: Query<Entity, (With<ModalScrim>, Without<PauseScreen>)>,
+    other_modal_scrims: Query<Entity, NonPauseFamilyScrim>,
     mut paused: ResMut<PausedResource>,
 ) {
     if pause_screens.is_empty() || other_modal_scrims.is_empty() {
@@ -449,7 +454,9 @@ fn auto_resume_on_overlay(
     for entity in &pause_screens {
         commands.entity(entity).despawn();
     }
-    paused.0 = false;
+    if paused.0 {
+        paused.0 = false;
+    }
 }
 
 /// Spawns the pause modal using the standard `ui_modal` scaffold —

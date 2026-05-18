@@ -35,6 +35,7 @@ use crate::stats_plugin::StatsResource;
 use crate::ui_focus::{Disabled, FocusGroup, Focusable};
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
+    ModalButton,
     ScrimDismissible,
 };
 use crate::ui_theme::{
@@ -373,6 +374,7 @@ fn toggle_home_screen(
     daily: Option<Res<DailyChallengeResource>>,
     font_res: Option<Res<FontResource>>,
     screens: Query<Entity, With<HomeScreen>>,
+    other_modal_scrims: Query<(), (With<crate::ui_modal::ModalScrim>, Without<HomeScreen>)>,
     diff_expanded: Res<DifficultyExpanded>,
 ) {
     if !keys.just_pressed(KeyCode::KeyM) {
@@ -380,7 +382,7 @@ fn toggle_home_screen(
     }
     if let Ok(entity) = screens.single() {
         commands.entity(entity).despawn();
-    } else {
+    } else if other_modal_scrims.is_empty() {
         spawn_home_screen(
             &mut commands,
             build_home_context(
@@ -1348,6 +1350,7 @@ fn spawn_mode_card(
             // bevy::ui — the click handler queries on `&Interaction`
             // which Button drives.
             Button,
+            ModalButton(ButtonVariant::Secondary),
             Node {
                 flex_direction: FlexDirection::Column,
                 row_gap: VAL_SPACE_2,

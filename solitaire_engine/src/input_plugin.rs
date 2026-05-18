@@ -940,10 +940,10 @@ fn touch_end_drag(
             continue;
         }
 
-        // Uncommitted tap — cancel cleanly.
+        // Uncommitted tap — cancel cleanly. No StateChangedEvent: nothing
+        // changed. The mouse path (end_drag) follows the same convention.
         if !drag.committed {
             drag.clear();
-            changed.write(StateChangedEvent);
             return;
         }
 

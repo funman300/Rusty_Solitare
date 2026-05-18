@@ -156,7 +156,13 @@ impl Plugin for SelectionPlugin {
                         .in_set(SelectionKeySet)
                         .before(GameMutation),
                     clear_selection_on_state_change.after(GameMutation),
-                    update_selection_highlight.after(GameMutation),
+                    update_selection_highlight
+                        .after(GameMutation)
+                        .run_if(
+                            resource_changed::<SelectionState>
+                                .or(resource_changed::<KeyboardDragState>)
+                                .or(resource_changed::<crate::GameStateResource>),
+                        ),
                 ),
             );
     }
