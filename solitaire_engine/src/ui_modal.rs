@@ -212,6 +212,13 @@ where
             // modal at `Z_PAUSE` (220) in some scenes.
             GlobalZIndex(z_panel),
             ZIndex(z_panel),
+            // B0004: ModalCard carries Transform (for the scale animation).
+            // Bevy's GlobalTransform hook fires B0004 when a child has
+            // GlobalTransform but the parent does not. Adding Identity
+            // Transform here gives the scrim GlobalTransform so the check
+            // passes. UI layout still uses UiTransform; this has no layout
+            // effect.
+            Transform::default(),
         ))
         .with_children(|root| {
             root.spawn((
