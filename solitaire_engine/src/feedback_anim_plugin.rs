@@ -228,10 +228,15 @@ impl Plugin for FeedbackAnimPlugin {
 fn start_shake_anim(
     mut events: MessageReader<MoveRejectedEvent>,
     game: Res<GameStateResource>,
+    settings: Option<Res<SettingsResource>>,
     card_entities: Query<(Entity, &CardEntity, &Transform)>,
     mut commands: Commands,
 ) {
+    let reduce_motion = settings.as_deref().is_some_and(|s| s.0.reduce_motion_mode);
     for ev in events.read() {
+        if reduce_motion {
+            continue;
+        }
         let dest_pile = &ev.to;
         // Collect the card ids that belong to the destination pile.
         let Some(pile) = game.0.piles.get(dest_pile) else { continue };
@@ -489,11 +494,16 @@ pub fn foundation_flourish_scale(elapsed_secs: f32, duration_secs: f32) -> f32 {
 fn start_foundation_flourish(
     mut events: MessageReader<FoundationCompletedEvent>,
     game: Res<GameStateResource>,
+    settings: Option<Res<SettingsResource>>,
     card_entities: Query<(Entity, &CardEntity)>,
     mut pile_markers: Query<(Entity, &PileMarker, &Sprite, Option<&FoundationMarkerFlourish>)>,
     mut commands: Commands,
 ) {
+    let reduce_motion = settings.as_deref().is_some_and(|s| s.0.reduce_motion_mode);
     for ev in events.read() {
+        if reduce_motion {
+            continue;
+        }
         let pile_type = PileType::Foundation(ev.slot);
         // Top card of the completed foundation is the King.
         let Some(king_id) = game
@@ -785,7 +795,7 @@ mod tests {
     #[test]
     fn deal_stagger_jitter_varies_across_card_ids() {
         // 52 cards should produce more than a couple distinct jitter factors;
-        // a constant function would return one value for all ids.
+        // a constant function would return one function for all ids.
         use std::collections::HashSet;
         let unique: HashSet<u64> = (0u32..52)
             .map(|id| (deal_stagger_jitter(id) * 1e6) as i64 as u64)
@@ -795,5 +805,97 @@ mod tests {
             "expected > 10 distinct jitter factors for 52 cards, got {}",
             unique.len()
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Reduce-motion gates — ShakeAnim, FoundationFlourish
+    // -----------------------------------------------------------------------
+
+    /// `start_shake_anim` must not insert `ShakeAnim` when `reduce_motion_mode`
+    /// is on, even when the event targets a pile that has card entities present.
+    #[test]
+    fn shake_anim_skipped_under_reduce_motion() {
+        use bevy::ecs::message::Messages;
+        use solitaire_core::game_state::{DrawMode, GameState};
+        use solitaire_data::Settings;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(FeedbackAnimPlugin);
+        app.insert_resource(GameStateResource(GameState::new(1, DrawMode::DrawOne)));
+        app.insert_resource(SettingsResource(Settings {
+            reduce_motion_mode: true,
+            ..Settings::default()
+        }));
+        app.update();
+
+        // Pick a card from Tableau(0) so the event refers to a real pile.
+        let dest_pile = PileType::Tableau(0);
+        let card_id = app
+            .world()
+            .resource::<GameStateResource>()
+            .0
+            .piles
+            .get(&dest_pile)
+            .and_then(|p| p.cards.last())
+            .map(|c| c.id)
+            .expect("Tableau(0) should have at least one card in a fresh game");
+
+        // Spawn a minimal CardEntity matching that id so the system would
+        // find it and insert ShakeAnim if the gate were absent.
+        app.world_mut().spawn((
+            CardEntity { card_id },
+            Transform::default(),
+        ));
+
+        app.world_mut()
+            .resource_mut::<Messages<MoveRejectedEvent>>()
+            .write(MoveRejectedEvent {
+                from: PileType::Stock,
+                to: dest_pile,
+                count: 1,
+            });
+        app.update();
+
+        let shake_count = app
+            .world_mut()
+            .query::<&ShakeAnim>()
+            .iter(app.world())
+            .count();
+        assert_eq!(shake_count, 0, "ShakeAnim must not be inserted under reduce-motion");
+    }
+
+    /// `start_foundation_flourish` must not insert `FoundationFlourish` when
+    /// `reduce_motion_mode` is on.
+    #[test]
+    fn foundation_flourish_skipped_under_reduce_motion() {
+        use bevy::ecs::message::Messages;
+        use solitaire_core::game_state::{DrawMode, GameState};
+        use solitaire_data::Settings;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(FeedbackAnimPlugin);
+        app.insert_resource(GameStateResource(GameState::new(1, DrawMode::DrawOne)));
+        app.insert_resource(SettingsResource(Settings {
+            reduce_motion_mode: true,
+            ..Settings::default()
+        }));
+        app.update();
+
+        app.world_mut()
+            .resource_mut::<Messages<FoundationCompletedEvent>>()
+            .write(FoundationCompletedEvent {
+                slot: 0,
+                suit: solitaire_core::card::Suit::Spades,
+            });
+        app.update();
+
+        let flourish_count = app
+            .world_mut()
+            .query::<&FoundationFlourish>()
+            .iter(app.world())
+            .count();
+        assert_eq!(flourish_count, 0, "FoundationFlourish must not be inserted under reduce-motion");
     }
 }

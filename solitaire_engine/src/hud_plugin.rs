@@ -1755,6 +1755,11 @@ fn detect_score_change(
         return;
     }
 
+    let reduce_motion = settings.as_deref().is_some_and(|s| s.0.reduce_motion_mode);
+    if reduce_motion {
+        return;
+    }
+
     let speed = settings
         .as_ref()
         .map(|s| s.0.animation_speed)
@@ -1928,6 +1933,9 @@ fn start_streak_flourish(
     let Some(latest) = events.read().last() else {
         return;
     };
+    if settings.as_deref().is_some_and(|s| s.0.reduce_motion_mode) {
+        return;
+    }
     let speed = settings
         .as_ref()
         .map(|s| s.0.animation_speed)
@@ -3009,6 +3017,35 @@ mod tests {
     fn streak_flourish_scale_zero_duration_is_one() {
         assert!((streak_flourish_scale(0.0, 0.0) - 1.0).abs() < 1e-5);
         assert!((streak_flourish_scale(0.5, 0.0) - 1.0).abs() < 1e-5);
+    }
+
+    // -----------------------------------------------------------------------
+    // Reduce-motion gates — ScorePulse, ScoreFloater, StreakFlourish
+    // -----------------------------------------------------------------------
+
+    /// Under `Settings::reduce_motion_mode`, a score bump must NOT spawn
+    /// a `ScorePulse` on the readout or a `ScoreFloater` on the stage.
+    #[test]
+    fn score_change_skips_pulse_and_floater_under_reduce_motion() {
+        use solitaire_data::Settings;
+        let mut app = headless_app();
+        app.insert_resource(SettingsResource(Settings {
+            reduce_motion_mode: true,
+            ..Settings::default()
+        }));
+        // +100 would normally create both a ScorePulse and a ScoreFloater.
+        app.world_mut().resource_mut::<GameStateResource>().0.score = 100;
+        app.update();
+        assert_eq!(
+            count_with::<ScorePulse>(&mut app),
+            0,
+            "ScorePulse must not spawn under reduce-motion"
+        );
+        assert_eq!(
+            count_with::<ScoreFloater>(&mut app),
+            0,
+            "ScoreFloater must not spawn under reduce-motion"
+        );
     }
 
     // -----------------------------------------------------------------------
