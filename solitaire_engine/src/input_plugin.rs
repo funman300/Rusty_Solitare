@@ -717,13 +717,12 @@ fn end_drag(
                 let ok = match &target {
                     PileType::Foundation(_) => {
                         count == 1
-                            && can_place_on_foundation(
-                                &bottom_card,
-                                &game.0.piles[&target],
-                            )
+                            && game.0.piles.get(&target)
+                                   .is_some_and(|p| can_place_on_foundation(&bottom_card, p))
                     }
                     PileType::Tableau(_) => {
-                        can_place_on_tableau(&bottom_card, &game.0.piles[&target])
+                        game.0.piles.get(&target)
+                            .is_some_and(|p| can_place_on_tableau(&bottom_card, p))
                     }
                     _ => false,
                 };
@@ -972,10 +971,12 @@ fn touch_end_drag(
                     let ok = match &target {
                         PileType::Foundation(_) => {
                             count == 1
-                                && can_place_on_foundation(&bottom_card, &game.0.piles[&target])
+                                && game.0.piles.get(&target)
+                                       .is_some_and(|p| can_place_on_foundation(&bottom_card, p))
                         }
                         PileType::Tableau(_) => {
-                            can_place_on_tableau(&bottom_card, &game.0.piles[&target])
+                            game.0.piles.get(&target)
+                                .is_some_and(|p| can_place_on_tableau(&bottom_card, p))
                         }
                         _ => false,
                     };

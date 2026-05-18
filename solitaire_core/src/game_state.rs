@@ -224,10 +224,10 @@ impl GameState {
             return Err(MoveError::GameAlreadyWon);
         }
 
-        let stock_len = self.piles[&PileType::Stock].cards.len();
+        let stock_len = self.piles.get(&PileType::Stock).ok_or(MoveError::InvalidSource)?.cards.len();
 
         if stock_len == 0 {
-            let waste_len = self.piles[&PileType::Waste].cards.len();
+            let waste_len = self.piles.get(&PileType::Waste).ok_or(MoveError::InvalidSource)?.cards.len();
             if waste_len == 0 {
                 return Err(MoveError::StockEmpty);
             }
@@ -428,14 +428,13 @@ impl GameState {
     pub fn check_auto_complete(&self) -> bool {
         // Stock must be empty; waste may still have cards (they are resolved
         // by draw() calls inside next_auto_complete_move / auto_complete_step).
-        if !self.piles[&PileType::Stock].cards.is_empty() {
+        if self.piles.get(&PileType::Stock).is_none_or(|p| !p.cards.is_empty()) {
             return false;
         }
         (0..7).all(|i| {
-            self.piles[&PileType::Tableau(i)]
-                .cards
-                .iter()
-                .all(|c| c.face_up)
+            self.piles
+                .get(&PileType::Tableau(i))
+                .is_some_and(|p| p.cards.iter().all(|c| c.face_up))
         })
     }
 
@@ -461,7 +460,8 @@ impl GameState {
         // Check waste top first — when stock is exhausted the waste may still
         // contain cards that can go directly to a foundation.
         let waste = PileType::Waste;
-        if let Some((card, slot)) = self.piles[&waste].cards.last()
+        if let Some((card, slot)) = self.piles.get(&waste)
+            .and_then(|p| p.cards.last())
             .and_then(|c| self.foundation_slot_for(c).map(|s| (c, s)))
         {
             let _ = card; // borrow ends here
@@ -469,7 +469,8 @@ impl GameState {
         }
         for i in 0..7 {
             let tableau = PileType::Tableau(i);
-            if let Some(slot) = self.piles[&tableau].cards.last()
+            if let Some(slot) = self.piles.get(&tableau)
+                .and_then(|p| p.cards.last())
                 .and_then(|c| self.foundation_slot_for(c))
             {
                 return Some((tableau, PileType::Foundation(slot)));
@@ -487,7 +488,7 @@ impl GameState {
         let mut candidate: Option<u8> = None;
         let mut empty_slot: Option<u8> = None;
         for slot in 0..4_u8 {
-            let pile = &self.piles[&PileType::Foundation(slot)];
+            let Some(pile) = self.piles.get(&PileType::Foundation(slot)) else { continue };
             if pile.cards.is_empty() {
                 if empty_slot.is_none() {
                     empty_slot = Some(slot);
@@ -501,7 +502,8 @@ impl GameState {
             if card.rank.value() == 1 { empty_slot } else { None }
         });
         target.filter(|&slot| {
-            can_place_on_foundation(card, &self.piles[&PileType::Foundation(slot)])
+            self.piles.get(&PileType::Foundation(slot))
+                .is_some_and(|p| can_place_on_foundation(card, p))
         })
     }
 

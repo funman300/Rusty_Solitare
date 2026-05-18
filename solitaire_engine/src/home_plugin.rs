@@ -589,6 +589,7 @@ fn handle_home_draw_mode_buttons(
     one_buttons: Query<&Interaction, (With<HomeDrawOneButton>, Changed<Interaction>)>,
     three_buttons: Query<&Interaction, (With<HomeDrawThreeButton>, Changed<Interaction>)>,
     screens: Query<Entity, With<HomeScreen>>,
+    other_modal_scrims: Query<(), (With<crate::ui_modal::ModalScrim>, Without<HomeScreen>)>,
     mut settings: Option<ResMut<SettingsResource>>,
     storage_path: Option<Res<SettingsStoragePath>>,
     mut changed: MessageWriter<SettingsChangedEvent>,
@@ -599,6 +600,12 @@ fn handle_home_draw_mode_buttons(
     diff_expanded: Res<DifficultyExpanded>,
 ) {
     if screens.is_empty() {
+        return;
+    }
+    // Don't respawn while another modal sits on top — the despawn queues
+    // immediately but executes at end of frame, so a respawn in the same
+    // frame would create a second concurrent ModalScrim.
+    if !other_modal_scrims.is_empty() {
         return;
     }
     let want_one = one_buttons.iter().any(|i| *i == Interaction::Pressed);
@@ -658,6 +665,7 @@ fn handle_home_difficulty_toggle(
     mut commands: Commands,
     toggles: Query<&Interaction, (With<HomeDifficultyToggle>, Changed<Interaction>)>,
     screens: Query<Entity, With<HomeScreen>>,
+    other_modal_scrims: Query<(), (With<crate::ui_modal::ModalScrim>, Without<HomeScreen>)>,
     mut diff_expanded: ResMut<DifficultyExpanded>,
     progress: Option<Res<ProgressResource>>,
     stats: Option<Res<StatsResource>>,
@@ -666,6 +674,9 @@ fn handle_home_difficulty_toggle(
     font_res: Option<Res<FontResource>>,
 ) {
     if screens.is_empty() {
+        return;
+    }
+    if !other_modal_scrims.is_empty() {
         return;
     }
     if !toggles.iter().any(|i| *i == Interaction::Pressed) {

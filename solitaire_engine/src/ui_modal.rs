@@ -603,7 +603,7 @@ pub fn dismiss_modal_on_scrim_click(
     mut commands: Commands,
     mouse: Option<Res<ButtonInput<MouseButton>>>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    scrims: Query<Entity, (With<ModalScrim>, With<ScrimDismissible>)>,
+    scrims: Query<(Entity, &Children), (With<ModalScrim>, With<ScrimDismissible>)>,
     cards: Query<(&UiGlobalTransform, &ComputedNode), With<ModalCard>>,
 ) {
     let Some(mouse) = mouse else { return };
@@ -620,15 +620,19 @@ pub fn dismiss_modal_on_scrim_click(
     // Topmost-only: bail after the first dismissible scrim. Stacked
     // dismissible modals are not currently a real case, but this guard
     // keeps the behaviour predictable if they ever arise.
-    let Some(scrim_entity) = scrims.iter().next() else {
+    let Some((scrim_entity, scrim_children)) = scrims.iter().next() else {
         return;
     };
 
-    let cursor_over_card = cards.iter().any(|(transform, computed)| {
-        let inv = computed.inverse_scale_factor;
-        let size_logical = computed.size() * inv;
-        let centre_logical = transform.translation * inv;
-        cursor_is_inside_rect(cursor, centre_logical, size_logical)
+    // Only test the ModalCard(s) that belong to THIS scrim, not cards
+    // from any other concurrently-open modal.
+    let cursor_over_card = scrim_children.iter().any(|child| {
+        cards.get(child).is_ok_and(|(transform, computed)| {
+            let inv = computed.inverse_scale_factor;
+            let size_logical = computed.size() * inv;
+            let centre_logical = transform.translation * inv;
+            cursor_is_inside_rect(cursor, centre_logical, size_logical)
+        })
     });
 
     if !cursor_over_card {
