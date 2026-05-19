@@ -300,6 +300,7 @@ function render(s) {
     board.querySelectorAll(".card.drop-target").forEach(e => e.classList.remove("drop-target"));
 
     if (s.is_auto_completable && !s.is_won && !acTimer) {
+        stopTimer(); // freeze elapsed time at the moment the player's last move completes
         acTimer = setInterval(doAutoCompleteStep, 380);
     }
     if (s.is_won) {
