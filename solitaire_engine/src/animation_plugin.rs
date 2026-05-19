@@ -72,6 +72,17 @@ const TIME_ATTACK_TOAST_SECS: f32 = 5.0;
 const CHALLENGE_TOAST_SECS: f32 = 3.0;
 const VOLUME_TOAST_SECS: f32 = 1.4;
 
+/// Z added to a card's render depth while its `CardAnim` is in-flight.
+///
+/// Foundation and tableau cards share x,y during the slide (destination equals
+/// a slot that already holds a card). Without this lift the incoming card's
+/// bottom-right corner overlaps the stationary card's top-left, which the
+/// player perceives as a single card with mismatched rank/suit indices.
+///
+/// 50.0 sits comfortably above the highest pile depth (~1.04) and well below
+/// `DRAG_Z` (500), so a dragged card always renders above an animated one.
+const CARD_ANIM_Z_LIFT: f32 = 50.0;
+
 /// Per-card stagger interval for the win cascade at Normal speed (seconds).
 ///
 /// Sourced from `ui_theme::MOTION_CASCADE_STAGGER_SECS` so all motion timing
@@ -254,7 +265,11 @@ fn advance_card_anims(
         // shared `CardAnim` struct stays a simple linear-tween container — the
         // upgrade is one extra `sample_curve` call per advancing animation.
         let s = sample_curve(MotionCurve::SmoothSnap, t);
-        transform.translation = anim.start.lerp(anim.target, s);
+        let mut pos = anim.start.lerp(anim.target, s);
+        // Elevate z during transit so the moving card always renders in front
+        // of any card already resting at the destination position.
+        pos.z = anim.target.z + CARD_ANIM_Z_LIFT;
+        transform.translation = pos;
         if t >= 1.0 {
             transform.translation = anim.target;
             commands.entity(entity).remove::<CardAnim>();
