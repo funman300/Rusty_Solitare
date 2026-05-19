@@ -193,7 +193,7 @@ impl GameState {
             is_auto_completable: false,
             undo_count: 0,
             recycle_count: 0,
-            take_from_foundation: false,
+            take_from_foundation: true,
             schema_version: GAME_STATE_SCHEMA_VERSION,
             undo_stack: VecDeque::new(),
         }
@@ -1408,9 +1408,9 @@ mod tests {
     }
 
     #[test]
-    fn take_from_foundation_disabled_by_default() {
+    fn take_from_foundation_enabled_by_default() {
         let g = setup_take_from_foundation_game();
-        assert!(!g.take_from_foundation, "take_from_foundation is off by default (non-standard rule)");
+        assert!(g.take_from_foundation, "take_from_foundation is on by default (standard Klondike rule)");
     }
 
     #[test]
