@@ -13,7 +13,7 @@ use crate::font_plugin::FontResource;
 use crate::hud_plugin::ANDROID_HINT_LABEL;
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
-    ScrimDismissible,
+    ModalScrim, ScrimDismissible,
 };
 use crate::ui_theme::{SPACE_2, TEXT_PRIMARY, TEXT_SECONDARY, TYPE_BODY, VAL_SPACE_2, VAL_SPACE_3, Z_MODAL_PANEL};
 #[cfg(not(target_os = "android"))]
@@ -67,6 +67,7 @@ fn toggle_help_screen(
     keys: Res<ButtonInput<KeyCode>>,
     mut requests: MessageReader<HelpRequestEvent>,
     screens: Query<Entity, With<HelpScreen>>,
+    other_modal_scrims: Query<(), (With<ModalScrim>, Without<HelpScreen>)>,
     font_res: Option<Res<FontResource>>,
 ) {
     // Either F1 or a click on the HUD "Help" button (which fires
@@ -77,7 +78,7 @@ fn toggle_help_screen(
     }
     if let Ok(entity) = screens.single() {
         commands.entity(entity).despawn();
-    } else {
+    } else if other_modal_scrims.is_empty() {
         spawn_help_screen(&mut commands, font_res.as_deref());
     }
 }

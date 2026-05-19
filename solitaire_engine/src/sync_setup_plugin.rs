@@ -55,7 +55,7 @@ use crate::font_plugin::FontResource;
 use crate::settings_plugin::{SettingsResource, SettingsScreen, SettingsStoragePath};
 use crate::resources::TokioRuntimeResource;
 use crate::sync_plugin::SyncProviderResource;
-use crate::ui_modal::spawn_modal;
+use crate::ui_modal::{spawn_modal, ModalScrim};
 use crate::ui_theme::{
     ACCENT_PRIMARY, BG_ELEVATED, BG_ELEVATED_HI,
     BORDER_SUBTLE, HighContrastBorder, RADIUS_SM, STATE_DANGER, TEXT_DISABLED,
@@ -208,6 +208,7 @@ impl Plugin for SyncSetupPlugin {
 fn open_sync_setup_modal(
     mut events: MessageReader<SyncConfigureRequestEvent>,
     existing: Query<(), With<SyncSetupScreen>>,
+    other_modal_scrims: Query<(), (With<ModalScrim>, Without<SyncSetupScreen>)>,
     mut commands: Commands,
     mut focused: ResMut<SyncFocusedField>,
     font_res: Option<Res<FontResource>>,
@@ -218,6 +219,9 @@ fn open_sync_setup_modal(
     events.clear();
     if !existing.is_empty() {
         return; // Already open.
+    }
+    if !other_modal_scrims.is_empty() {
+        return; // Another modal is already visible.
     }
     *focused = SyncFocusedField::Url;
     spawn_sync_setup_modal(&mut commands, font_res.as_deref());
@@ -354,9 +358,10 @@ fn handle_auth_button(
         return;
     }
 
-    // Clear error and show busy indicator.
-    for (mut text, _) in &mut error_nodes {
-        text.0 = "Connecting…".to_string();
+    // Clear previous error and show busy indicator.
+    for (mut text, mut color) in &mut error_nodes {
+        text.0 = String::new();
+        color.0 = TEXT_SECONDARY;
     }
     for mut vis in &mut busy_nodes {
         *vis = Visibility::Visible;
@@ -540,6 +545,7 @@ fn handle_logout(
 fn open_delete_confirm_modal(
     mut events: MessageReader<DeleteAccountRequestEvent>,
     existing: Query<(), With<DeleteConfirmScreen>>,
+    other_modal_scrims: Query<(), (With<ModalScrim>, Without<DeleteConfirmScreen>)>,
     mut commands: Commands,
     font_res: Option<Res<FontResource>>,
 ) {
@@ -549,6 +555,9 @@ fn open_delete_confirm_modal(
     events.clear();
     if !existing.is_empty() {
         return;
+    }
+    if !other_modal_scrims.is_empty() {
+        return; // Another modal is already visible.
     }
     spawn_delete_confirm_modal(&mut commands, font_res.as_deref());
 }
@@ -675,19 +684,30 @@ fn spawn_sync_setup_modal(commands: &mut Commands, font_res: Option<&FontResourc
                 font_res,
             );
 
-            // Error / status line.
+            // Error / status line — two distinct children so visibility and
+            // text can be controlled independently.
             body.spawn(Node {
                 min_height: Val::Px(18.0),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: VAL_SPACE_2,
                 ..default()
             })
             .with_children(|row| {
+                // Busy indicator: shown while the auth task is in flight.
                 row.spawn((
-                    SyncAuthError,
                     SyncBusyOverlay,
-                    Text::new(String::new()),
+                    Text::new("…"),
                     make_font(font_res, TYPE_CAPTION),
                     TextColor(TEXT_SECONDARY),
                     Visibility::Hidden,
+                ));
+                // Error / status text: always laid out, empty when idle.
+                row.spawn((
+                    SyncAuthError,
+                    Text::new(String::new()),
+                    make_font(font_res, TYPE_CAPTION),
+                    TextColor(TEXT_SECONDARY),
                 ));
             });
 

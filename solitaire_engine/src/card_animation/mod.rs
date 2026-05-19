@@ -142,6 +142,13 @@ impl Plugin for CardAnimationPlugin {
                     update_frame_time_diagnostics,
                     // Advance active animations.
                     advance_card_animations,
+                    // Flush deferred commands so `CardAnimation` removals from
+                    // `advance_card_animations` are visible before the chain
+                    // system runs. Without this, the chain sees the component
+                    // still present in the same frame it was removed (deferred
+                    // commands aren't applied until the next ApplyDeferred
+                    // point), causing a 1-frame gap between every chain step.
+                    ApplyDeferred,
                     // After each animation finishes, pop the next chain segment.
                     advance_animation_chains,
                     // Interaction visuals (run after animation for final positions).

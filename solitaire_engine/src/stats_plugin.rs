@@ -220,7 +220,13 @@ impl Plugin for StatsPlugin {
             )
             .add_systems(
                 Update,
-                handle_forfeit.before(GameMutation),
+                // handle_forfeit must run before update_stats_on_new_game so
+                // the NewGameRequestEvent it emits is not visible to
+                // update_stats_on_new_game in the same frame — otherwise
+                // record_abandoned() fires twice on every forfeit (#21).
+                handle_forfeit
+                    .before(GameMutation)
+                    .before(update_stats_on_new_game),
             )
             .add_systems(Update, toggle_stats_screen.after(GameMutation))
             .add_systems(Update, handle_stats_close_button)

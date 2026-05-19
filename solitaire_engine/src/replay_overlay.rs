@@ -28,7 +28,7 @@ use chrono::Datelike;
 
 use crate::font_plugin::FontResource;
 use crate::layout::LayoutResource;
-use crate::events::{DrawRequestEvent, MoveRequestEvent, UndoRequestEvent};
+use crate::events::{DrawRequestEvent, MoveRequestEvent, StateChangedEvent, UndoRequestEvent};
 use crate::replay_playback::{
     step_backwards_replay_playback, step_replay_playback, stop_replay_playback,
     toggle_pause_replay_playback, ReplayPlaybackState,
@@ -476,6 +476,7 @@ impl Plugin for ReplayOverlayPlugin {
             .add_message::<MoveRequestEvent>()
             .add_message::<DrawRequestEvent>()
             .add_message::<UndoRequestEvent>()
+            .add_message::<StateChangedEvent>()
             .add_systems(
                 Update,
                 (
@@ -1884,6 +1885,7 @@ fn handle_pause_keyboard(
 /// resets to 0 on key release so the next fresh press fires
 /// immediately. This matches the mockup's `[← →] scrub`
 /// terminology while keeping single-press = single-step semantics.
+#[allow(clippy::too_many_arguments)]
 fn handle_arrow_keyboard(
     keys: Option<Res<ButtonInput<KeyCode>>>,
     time: Res<Time>,
@@ -1892,9 +1894,21 @@ fn handle_arrow_keyboard(
     mut moves_writer: MessageWriter<MoveRequestEvent>,
     mut draws_writer: MessageWriter<DrawRequestEvent>,
     mut undo_writer: MessageWriter<UndoRequestEvent>,
+    mut state_changed: MessageReader<StateChangedEvent>,
+    // `true` while a backward step is in-flight: cursor was decremented and
+    // `UndoRequestEvent` was written, but `handle_undo` hasn't applied it yet.
+    // Cleared when `StateChangedEvent` confirms the game state has caught up.
+    // Prevents rapid ← presses from accumulating multiple cursor decrements
+    // before any undo is applied (Bug #16).
+    mut back_pending: Local<bool>,
 ) {
     let Some(keys) = keys else { return };
     let dt = time.delta_secs();
+
+    // Clear the in-flight flag once the game confirms the undo landed.
+    if state_changed.read().count() > 0 {
+        *back_pending = false;
+    }
 
     // Right (forward step) — initial press fires immediately;
     // held repeats fire when the accumulator crosses the interval.
@@ -1911,14 +1925,28 @@ fn handle_arrow_keyboard(
         hold.right_held_secs = 0.0;
     }
 
-    // Left (backwards step) — symmetric to the right path.
+    // Left (backwards step) — gate on `back_pending` so at most one undo
+    // is in-flight at a time. The cursor is only decremented inside
+    // `step_backwards_replay_playback`, which also writes `UndoRequestEvent`.
+    // `back_pending` is set after a successful step and cleared above when
+    // `StateChangedEvent` confirms the undo was applied.
     if keys.just_pressed(KeyCode::ArrowLeft) {
-        step_backwards_replay_playback(&mut state, &mut undo_writer);
+        if !*back_pending {
+            let fired = step_backwards_replay_playback(&mut state, &mut undo_writer);
+            if fired {
+                *back_pending = true;
+            }
+        }
         hold.left_held_secs = 0.0;
     } else if keys.pressed(KeyCode::ArrowLeft) {
         hold.left_held_secs += dt;
         if hold.left_held_secs >= SCRUB_REPEAT_INTERVAL_SECS {
-            step_backwards_replay_playback(&mut state, &mut undo_writer);
+            if !*back_pending {
+                let fired = step_backwards_replay_playback(&mut state, &mut undo_writer);
+                if fired {
+                    *back_pending = true;
+                }
+            }
             hold.left_held_secs = 0.0;
         }
     } else {

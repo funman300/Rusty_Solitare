@@ -510,6 +510,7 @@ fn toggle_settings_screen(
 fn sync_settings_panel_visibility(
     screen: Res<SettingsScreen>,
     panels: Query<Entity, With<SettingsPanel>>,
+    other_modal_scrims: Query<(), (With<ModalScrim>, Without<SettingsPanel>)>,
     scroll_nodes: Query<&ScrollPosition, With<SettingsScrollNode>>,
     mut scroll_pos: ResMut<SettingsScrollPos>,
     mut commands: Commands,
@@ -525,7 +526,7 @@ fn sync_settings_panel_visibility(
         return;
     }
     if screen.0 {
-        if panels.is_empty() {
+        if panels.is_empty() && other_modal_scrims.is_empty() {
             let status_label = sync_status
                 .map_or_else(|| "Status: local only".to_string(), |s| sync_status_label(&s.0));
             let unlocked_backs = progress

@@ -870,12 +870,12 @@ fn spawn_action_buttons(
     );
     #[cfg(not(target_os = "android"))]
     let labels = (
-        "Menu \u{25BE}",
+        "Menu \u{2193}",
         "Undo",
         "Pause",
         "Help",
         "Hint",
-        "Modes \u{25BE}",
+        "Modes \u{2193}",
         "New Game",
     );
 

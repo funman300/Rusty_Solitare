@@ -101,7 +101,6 @@ impl SyncPlugin {
 impl Plugin for SyncPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(SyncProviderResource(self.provider.clone()))
-            .init_resource::<TokioRuntimeResource>()
             .init_resource::<SyncStatusResource>()
             .init_resource::<PullTaskResult>()
             .init_resource::<PullTask>()
@@ -109,18 +108,30 @@ impl Plugin for SyncPlugin {
             .add_message::<ManualSyncRequestEvent>()
             .add_message::<SyncCompleteEvent>()
             .add_message::<SyncConfigureRequestEvent>()
-            .add_message::<WarningToastEvent>()
-            .add_systems(Startup, start_pull)
-            .add_systems(
-                Update,
-                (
-                    poll_pull_result,
-                    handle_manual_sync_request,
-                    push_replay_on_win,
-                    poll_replay_upload_result,
-                ),
-            )
-            .add_systems(Last, push_on_exit);
+            .add_message::<WarningToastEvent>();
+
+        // Build the shared Tokio runtime; disable all network sync if the OS
+        // refuses to create threads (resource-limited environments, sandboxed
+        // Android builds, etc.).
+        match TokioRuntimeResource::new() {
+            Ok(rt) => {
+                app.insert_resource(rt)
+                    .add_systems(Startup, start_pull)
+                    .add_systems(
+                        Update,
+                        (
+                            poll_pull_result,
+                            handle_manual_sync_request,
+                            push_replay_on_win,
+                            poll_replay_upload_result,
+                        ),
+                    )
+                    .add_systems(Last, push_on_exit);
+            }
+            Err(e) => {
+                warn!("sync: failed to create Tokio runtime — network sync disabled: {e}");
+            }
+        }
     }
 }
 

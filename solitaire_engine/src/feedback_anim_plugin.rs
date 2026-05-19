@@ -210,10 +210,15 @@ impl Plugin for FeedbackAnimPlugin {
                     start_shake_anim.after(GameMutation),
                     tick_shake_anim,
                     start_settle_anim.after(GameMutation),
+                    // tick_foundation_flourish writes the full Transform.scale
+                    // (Vec3); tick_settle_anim writes only scale.y on top of
+                    // it. Ordering ensures the settle's y-only write always
+                    // applies last so it wins on the ~0.15 s overlap when both
+                    // components are present on the same King entity.
+                    tick_foundation_flourish.before(tick_settle_anim),
                     tick_settle_anim,
                     start_deal_anim.after(GameMutation),
                     start_foundation_flourish.after(GameMutation),
-                    tick_foundation_flourish,
                 ),
             );
     }

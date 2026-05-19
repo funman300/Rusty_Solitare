@@ -72,9 +72,14 @@ fn detect_auto_complete(
     if game.0.is_auto_completable && !state.active {
         state.active = true;
         state.cooldown = 0.0; // fire first move immediately
-    } else if !game.0.is_auto_completable {
-        state.active = false;
     }
+    // Intentionally no `else if !is_auto_completable` branch here.
+    // Deactivating on every frame where `is_auto_completable` is false
+    // would hard-stop the sequence mid-flight whenever `next_auto_complete_move`
+    // transiently returns `None` (e.g. while the previous move is still
+    // in-flight). The `is_won` check above already handles the definitive
+    // end-of-game case; `drive_auto_complete` simply retries next tick
+    // when no move is available yet.
 }
 
 /// Plays a distinct chime the moment auto-complete first activates.

@@ -24,6 +24,7 @@ use crate::progress_plugin::ProgressResource;
 use crate::resources::GameStateResource;
 use crate::settings_plugin::SettingsResource;
 use crate::stats_plugin::{StatsResource, StatsUpdate};
+use crate::ui_modal::ModalScrim;
 use crate::ui_theme::{
     scaled_duration, ACCENT_PRIMARY, BG_BASE, BG_ELEVATED, MOTION_SCORE_BREAKDOWN_FADE_SECS,
     MOTION_SCORE_BREAKDOWN_STAGGER_SECS, MOTION_WIN_SHAKE_AMPLITUDE, MOTION_WIN_SHAKE_SECS,
@@ -757,6 +758,7 @@ fn spawn_overlay(
     commands
         .spawn((
             WinSummaryOverlay,
+            ModalScrim,
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Percent(0.0),
@@ -769,6 +771,7 @@ fn spawn_overlay(
                 ..default()
             },
             BackgroundColor(SCRIM),
+            GlobalZIndex(Z_WIN_CASCADE),
             ZIndex(Z_WIN_CASCADE),
         ))
         .with_children(|root| {

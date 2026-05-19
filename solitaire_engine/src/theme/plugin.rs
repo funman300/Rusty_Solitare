@@ -182,12 +182,16 @@ fn sync_card_image_set_with_active_theme(
     mut events: MessageReader<AssetEvent<CardTheme>>,
     active: Option<Res<ActiveTheme>>,
     themes: Res<Assets<CardTheme>>,
+    asset_server: Option<Res<AssetServer>>,
     mut card_image_set: Option<ResMut<CardImageSet>>,
     mut state_events: MessageWriter<StateChangedEvent>,
 ) {
     let Some(active) = active else { return };
     let active_id = active.0.id();
+
     let mut should_sync = false;
+
+    // Consume asset events — covers the normal first-load path.
     for ev in events.read() {
         let id = match ev {
             AssetEvent::LoadedWithDependencies { id }
@@ -198,6 +202,22 @@ fn sync_card_image_set_with_active_theme(
             should_sync = true;
         }
     }
+
+    // A→B→A switch: Bevy does not re-fire LoadedWithDependencies for a
+    // handle whose asset is already cached. Detect this by checking that
+    // `ActiveTheme` itself changed this frame (the resource was just
+    // replaced by `react_to_settings_theme_change`) and the underlying
+    // asset is already fully loaded. If so, sync immediately rather than
+    // waiting for an event that will never arrive.
+    if !should_sync
+        && active.is_changed()
+        && asset_server
+            .as_ref()
+            .is_some_and(|as_| as_.is_loaded_with_dependencies(active.0.id()))
+    {
+        should_sync = true;
+    }
+
     if !should_sync {
         return;
     }

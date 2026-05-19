@@ -390,7 +390,10 @@ pub async fn upload_avatar(
     // Write to a temp file then atomically rename so concurrent readers never
     // see a partially-written avatar.
     std::fs::write(&tmp_path, &body).map_err(|e| AppError::Internal(e.to_string()))?;
-    std::fs::rename(&tmp_path, &path).map_err(|e| AppError::Internal(e.to_string()))?;
+    if let Err(e) = std::fs::rename(&tmp_path, &path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(AppError::Internal(e.to_string()));
+    }
     // Remove stale files with other extensions after the atomic rename.
     for old_ext in &["jpg", "png", "webp", "gif"] {
         if *old_ext != ext {

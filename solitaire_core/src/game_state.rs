@@ -193,7 +193,7 @@ impl GameState {
             is_auto_completable: false,
             undo_count: 0,
             recycle_count: 0,
-            take_from_foundation: true,
+            take_from_foundation: false,
             schema_version: GAME_STATE_SCHEMA_VERSION,
             undo_stack: VecDeque::new(),
         }
@@ -407,7 +407,7 @@ impl GameState {
         self.score = if self.mode == GameMode::Zen {
             0
         } else {
-            (snapshot.score + scoring_undo()).max(0)
+            (self.score + scoring_undo()).max(0)
         };
         self.move_count = snapshot.move_count;
         self.is_won = false;
@@ -416,12 +416,25 @@ impl GameState {
         Ok(())
     }
 
-    /// Returns `true` when all four foundation slots each contain 13 cards.
+    /// Returns `true` when all four foundation slots each contain a valid A→K
+    /// sequence of a single suit.
+    ///
+    /// Counting 13 cards is not sufficient — a corrupt save could produce 13
+    /// arbitrary cards per pile and permanently lock the game via `GameAlreadyWon`.
     pub fn check_win(&self) -> bool {
-        (0..4_u8).all(|slot| {
-            self.piles
-                .get(&PileType::Foundation(slot))
-                .is_some_and(|p| p.cards.len() == 13)
+        (0..4_u8).all(|slot| self.is_valid_foundation_pile(slot))
+    }
+
+    fn is_valid_foundation_pile(&self, slot: u8) -> bool {
+        let Some(pile) = self.piles.get(&PileType::Foundation(slot)) else {
+            return false;
+        };
+        if pile.cards.len() != 13 {
+            return false;
+        }
+        let suit = pile.cards[0].suit;
+        pile.cards.iter().enumerate().all(|(i, card)| {
+            card.suit == suit && card.rank.value() == (i as u8 + 1)
         })
     }
 
@@ -1395,12 +1408,9 @@ mod tests {
     }
 
     #[test]
-    fn take_from_foundation_allowed_by_default() {
-        let mut g = setup_take_from_foundation_game();
-        assert!(g.take_from_foundation, "standard Klondike allows take-from-foundation by default");
-        g.move_cards(PileType::Foundation(0), PileType::Tableau(0), 1).unwrap();
-        assert_eq!(g.piles[&PileType::Foundation(0)].cards.len(), 1);
-        assert_eq!(g.piles[&PileType::Tableau(0)].cards.len(), 2);
+    fn take_from_foundation_disabled_by_default() {
+        let g = setup_take_from_foundation_game();
+        assert!(!g.take_from_foundation, "take_from_foundation is off by default (non-standard rule)");
     }
 
     #[test]

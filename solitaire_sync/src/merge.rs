@@ -108,23 +108,27 @@ fn merge_stats(
     let merged_games_won = local.games_won.max(remote.games_won);
     let merged_games_played = local.games_played.max(remote.games_played);
 
-    // Recompute average time from the merged totals. If no wins yet, keep 0.
+    // Carry the average time from whichever side contributed merged_games_won.
+    // Taking max(total_time)/max(wins) misattributes time when the side with
+    // more wins has a lower total — use the winning side's average directly.
     let avg_time_seconds = if merged_games_won == 0 {
         0
+    } else if local.games_won >= remote.games_won {
+        local.avg_time_seconds
     } else {
-        // Use whichever side has more wins to approximate total time, then blend.
-        // We don't have total_time stored, so we reconstruct it from avg * count.
-        let local_total = local.avg_time_seconds as u128 * local.games_won as u128;
-        let remote_total = remote.avg_time_seconds as u128 * remote.games_won as u128;
-        // Take max total time (conservative — avoids underestimating total play time).
-        let best_total = local_total.max(remote_total);
-        (best_total / merged_games_won as u128) as u64
+        remote.avg_time_seconds
     };
+
+    // Derive games_lost from the merged played/won counts so the invariant
+    // games_won + games_lost <= games_played is always satisfied. Computing
+    // max(local.games_lost, remote.games_lost) independently can push
+    // games_won + games_lost above games_played after a divergent merge.
+    let merged_games_lost = merged_games_played.saturating_sub(merged_games_won);
 
     StatsSnapshot {
         games_played: merged_games_played,
         games_won: merged_games_won,
-        games_lost: local.games_lost.max(remote.games_lost),
+        games_lost: merged_games_lost,
         win_streak_current: local.win_streak_current.max(remote.win_streak_current),
         win_streak_best: local.win_streak_best.max(remote.win_streak_best),
         avg_time_seconds,
@@ -454,14 +458,28 @@ mod tests {
     }
 
     #[test]
-    fn stats_games_lost_takes_max() {
+    fn stats_games_lost_derived_from_played_minus_won() {
+        // games_lost must equal games_played - games_won so the invariant
+        // games_won + games_lost <= games_played is always satisfied.
         let mut local = default_payload();
+        local.stats.games_played = 20;
+        local.stats.games_won = 8;
         local.stats.games_lost = 12;
         let mut remote = default_payload();
-        remote.stats.games_lost = 8;
+        remote.stats.games_played = 15;
+        remote.stats.games_won = 10;
+        remote.stats.games_lost = 5;
 
+        // merged: games_played = max(20, 15) = 20; games_won = max(8, 10) = 10
+        // games_lost must be 20 - 10 = 10, NOT max(12, 5) = 12
         let (merged, _) = merge(&local, &remote);
-        assert_eq!(merged.stats.games_lost, 12);
+        assert_eq!(merged.stats.games_played, 20);
+        assert_eq!(merged.stats.games_won, 10);
+        assert_eq!(merged.stats.games_lost, 10);
+        assert!(
+            merged.stats.games_won + merged.stats.games_lost <= merged.stats.games_played,
+            "games_won + games_lost must never exceed games_played"
+        );
     }
 
     #[test]
@@ -502,11 +520,10 @@ mod tests {
 
     #[test]
     fn stats_avg_time_recomputed_from_merged_totals() {
-        // local: 4 wins averaging 100s each (total = 400s)
-        // remote: 6 wins averaging 200s each (total = 1200s)
-        // merged_games_won = max(4, 6) = 6
-        // best_total = max(400, 1200) = 1200
-        // avg = 1200 / 6 = 200
+        // local: 4 wins averaging 100s each
+        // remote: 6 wins averaging 200s each
+        // merged_games_won = max(4, 6) = 6  →  remote contributed the wins
+        // avg_time_seconds must be remote's 200s, not a blend of totals
         let mut local = default_payload();
         local.stats.games_won = 4;
         local.stats.avg_time_seconds = 100;

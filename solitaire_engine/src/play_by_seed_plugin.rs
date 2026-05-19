@@ -411,7 +411,11 @@ fn handle_confirm(
     new_game.write(NewGameRequestEvent {
         seed: Some(seed),
         mode: None,
-        confirmed: false,
+        // The player explicitly clicked Play (or pressed Enter) after typing
+        // a seed — treat this as an affirmative confirmation so the
+        // abandon-current-game dialog is not shown on top of the already-
+        // dismissed seed dialog.
+        confirmed: true,
     });
 
     for entity in &screen {
@@ -566,7 +570,9 @@ mod tests {
         assert_eq!(fired.len(), 1);
         assert_eq!(fired[0].seed, Some(42));
         assert_eq!(fired[0].mode, None);
-        assert!(!fired[0].confirmed);
+        // confirmed: true — the player explicitly clicked Play, so no
+        // abandon-current-game dialog should appear.
+        assert!(fired[0].confirmed);
 
         // Dialog should be gone.
         assert!(!dialog_present(&mut app));

@@ -47,6 +47,7 @@ use crate::game_plugin::{ConfirmNewGameScreen, GameMutation, RestorePromptScreen
 use crate::pause_plugin::PausedResource;
 use crate::progress_plugin::ProgressResource;
 use crate::layout::{Layout, LayoutResource};
+use crate::replay_playback::ReplayPlaybackState;
 use crate::resources::{DragState, GameInputConsumedResource, GameStateResource, HintCycleIndex};
 use crate::selection_plugin::SelectionState;
 use crate::time_attack_plugin::TimeAttackResource;
@@ -175,8 +176,17 @@ fn handle_keyboard_core(
     mut zen_requests: MessageReader<StartZenRequestEvent>,
     confirm_screens: Query<(), With<ConfirmNewGameScreen>>,
     restore_prompts: Query<(), With<RestorePromptScreen>>,
+    replay_state: Option<Res<ReplayPlaybackState>>,
 ) {
     if paused.is_some_and(|p| p.0) {
+        return;
+    }
+
+    // During replay playback (Playing or Completed) all game-input shortcuts
+    // are suppressed. The replay overlay owns Space (pause/resume) and the
+    // arrow keys (step). Letting game input through would mutate
+    // `GameStateResource` and corrupt replay determinism.
+    if replay_state.is_some_and(|r| !matches!(*r, ReplayPlaybackState::Inactive)) {
         return;
     }
 

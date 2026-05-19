@@ -35,7 +35,7 @@ use crate::{error::AppError, middleware::AuthenticatedUser, AppState};
 /// the desktop client's transitive dependencies.
 #[derive(Debug, Deserialize)]
 struct ReplayHeader {
-    seed: i64,
+    seed: u64,
     draw_mode: String,
     mode: String,
     time_seconds: i64,
@@ -94,6 +94,9 @@ pub async fn upload(
     let id = Uuid::new_v4().to_string();
     let received_at = Utc::now().to_rfc3339();
     let replay_json = serde_json::to_string(&payload)?;
+    // SQLite INTEGER columns bind as i64. Reinterpret the u64 bits — the
+    // database stores the same 8 bytes; high-bit seeds round-trip correctly.
+    let seed_i64 = header.seed as i64;
 
     sqlx::query!(
         r#"INSERT INTO replays (
@@ -102,7 +105,7 @@ pub async fn upload(
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         id,
         user.user_id,
-        header.seed,
+        seed_i64,
         header.draw_mode,
         header.mode,
         header.time_seconds,
@@ -116,7 +119,7 @@ pub async fn upload(
 
     // Update leaderboard best score/time for opted-in users when this replay
     // beats their existing best. Only classic mode counts for the leaderboard.
-    if header.mode == "classic" {
+    if header.mode == "Classic" {
         sqlx::query!(
             r#"UPDATE leaderboard
                SET best_score      = ?,

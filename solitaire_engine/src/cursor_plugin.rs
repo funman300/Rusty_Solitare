@@ -382,8 +382,8 @@ fn update_drop_target_overlays(
 /// for everything else it is card-sized. Replicated here rather than
 /// imported because `pile_drop_rect` is private to `input_plugin` and
 /// this overlay is the only other consumer.
-fn drop_overlay_rect(pile: &PileType, layout: &Layout, game: &GameState) -> (Vec2, Vec2) {
-    let centre = layout.pile_positions[pile];
+fn drop_overlay_rect(pile: &PileType, layout: &Layout, game: &GameState) -> Option<(Vec2, Vec2)> {
+    let centre = layout.pile_positions.get(pile).copied()?;
     if matches!(pile, PileType::Tableau(_)) {
         let card_count = game.piles.get(pile).map_or(0, |p| p.cards.len());
         if card_count > 1 {
@@ -393,13 +393,13 @@ fn drop_overlay_rect(pile: &PileType, layout: &Layout, game: &GameState) -> (Vec
             let bottom_edge = bottom_card_centre_y - layout.card_size.y / 2.0;
             let span_height = top_edge - bottom_edge;
             let new_centre_y = (top_edge + bottom_edge) / 2.0;
-            return (
+            return Some((
                 Vec2::new(centre.x, new_centre_y),
                 Vec2::new(layout.card_size.x, span_height),
-            );
+            ));
         }
     }
-    (centre, layout.card_size)
+    Some((centre, layout.card_size))
 }
 
 /// Spawns one overlay parent (fill) plus four edge sprites (outline) at
@@ -410,7 +410,10 @@ fn spawn_drop_target_overlay(
     layout: &Layout,
     game: &GameState,
 ) {
-    let (centre, size) = drop_overlay_rect(pile, layout, game);
+    let Some((centre, size)) = drop_overlay_rect(pile, layout, game) else {
+        warn!("drop_overlay_rect: pile {pile:?} not in layout, skipping overlay");
+        return;
+    };
     let edge = DROP_TARGET_OUTLINE_PX;
 
     commands

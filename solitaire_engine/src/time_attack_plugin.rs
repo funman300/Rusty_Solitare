@@ -172,14 +172,15 @@ fn advance_time_attack(
     paused: Option<Res<crate::pause_plugin::PausedResource>>,
     path: Option<Res<TimeAttackSessionPath>>,
     home_screens: Query<(), With<crate::home_plugin::HomeScreen>>,
+    win_overlays: Query<(), With<crate::win_summary_plugin::WinSummaryOverlay>>,
 ) {
     if !session.active {
         return;
     }
-    // Mirrors `tick_elapsed_time`: pause while the launch / mode-picker
-    // Home modal is up so the countdown doesn't burn while the player
-    // is choosing what to play next.
-    if paused.is_some_and(|p| p.0) || !home_screens.is_empty() {
+    // Pause the countdown while Home, the Pause overlay, or the Win Summary
+    // overlay is visible — the player should not lose time while reading results
+    // or navigating menus.
+    if paused.is_some_and(|p| p.0) || !home_screens.is_empty() || !win_overlays.is_empty() {
         return;
     }
     session.remaining_secs -= time.delta_secs();

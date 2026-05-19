@@ -21,7 +21,7 @@ use crate::settings_plugin::{SettingsResource, SettingsStoragePath};
 use crate::sync_plugin::SyncProviderResource;
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
-    ScrimDismissible,
+    ModalScrim, ScrimDismissible,
 };
 use crate::ui_theme::{
     ACCENT_PRIMARY, BG_ELEVATED, BORDER_SUBTLE, RADIUS_SM, STATE_INFO,
@@ -714,6 +714,7 @@ fn data_cell(
 fn handle_set_display_name_button(
     button_q: Query<&Interaction, (Changed<Interaction>, With<SetDisplayNameButton>)>,
     existing: Query<(), With<DisplayNameModal>>,
+    other_modal_scrims: Query<(), (With<ModalScrim>, Without<DisplayNameModal>)>,
     mut commands: Commands,
     settings: Option<Res<SettingsResource>>,
     font_res: Option<Res<FontResource>>,
@@ -724,6 +725,9 @@ fn handle_set_display_name_button(
     }
     if !existing.is_empty() {
         return; // already open
+    }
+    if !other_modal_scrims.is_empty() {
+        return; // Another modal is already visible.
     }
     buf.0 = settings
         .as_ref()

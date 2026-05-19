@@ -31,8 +31,15 @@ fn load_font(fonts: Option<ResMut<Assets<Font>>>, mut commands: Commands) {
     // Assets<Font>). FontPlugin in that context is a no-op — consumers
     // already query `Option<Res<FontResource>>` and degrade cleanly.
     let Some(mut fonts) = fonts else { return };
-    let font = Font::try_from_bytes(BUNDLED_FONT_BYTES.to_vec())
-        .expect("bundled FiraMono failed to parse — binary is corrupt");
+    let font = match Font::try_from_bytes(BUNDLED_FONT_BYTES.to_vec()) {
+        Ok(f) => f,
+        Err(e) => {
+            // A corrupt embedded font is unusual but should not crash the
+            // process — UI will render without glyphs rather than panicking.
+            warn!("bundled FiraMono failed to parse ({e}); UI text may be invisible");
+            return;
+        }
+    };
     let handle = fonts.add(font);
     commands.insert_resource(FontResource(handle));
 }

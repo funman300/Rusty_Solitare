@@ -32,7 +32,7 @@ use crate::settings_plugin::{SettingsResource, SettingsStoragePath};
 use crate::stats_plugin::{StatsResource, StatsUpdate};
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_button, spawn_modal_header, ButtonVariant,
-    ScrimDismissible,
+    ModalScrim, ScrimDismissible,
 };
 use crate::ui_theme::{
     ACCENT_PRIMARY, BORDER_SUBTLE, STATE_SUCCESS, TEXT_DISABLED, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -162,93 +162,91 @@ fn evaluate_on_win(
     mut achievements: ResMut<AchievementsResource>,
     mut progress: ResMut<ProgressResource>,
 ) {
-    let Some(ev) = wins.read().last() else {
-        return;
-    };
-
-    let ctx = AchievementContext {
-        games_played: stats.0.games_played,
-        games_won: stats.0.games_won,
-        win_streak_current: stats.0.win_streak_current,
-        best_single_score: stats.0.best_single_score,
-        lifetime_score: stats.0.lifetime_score,
-        draw_three_wins: stats.0.draw_three_wins,
-        daily_challenge_streak: progress.0.daily_challenge_streak,
-        last_win_score: ev.score,
-        last_win_time_seconds: ev.time_seconds,
-        last_win_used_undo: game.0.undo_count > 0,
-        wall_clock_hour: Some(Local::now().hour()),
-        last_win_recycle_count: game.0.recycle_count,
-        last_win_is_zen: game.0.mode == solitaire_core::game_state::GameMode::Zen,
-    };
-
-    let hits = check_achievements(&ctx);
-    if hits.is_empty() {
-        return;
-    }
-
-    let now = Utc::now();
-    let mut achievements_changed = false;
-    let mut progress_changed = false;
-
-    for def in hits {
-        let Some(record) = achievements.0.iter_mut().find(|r| r.id == def.id) else {
-            continue;
+    for ev in wins.read() {
+        let ctx = AchievementContext {
+            games_played: stats.0.games_played,
+            games_won: stats.0.games_won,
+            win_streak_current: stats.0.win_streak_current,
+            best_single_score: stats.0.best_single_score,
+            lifetime_score: stats.0.lifetime_score,
+            draw_three_wins: stats.0.draw_three_wins,
+            daily_challenge_streak: progress.0.daily_challenge_streak,
+            last_win_score: ev.score,
+            last_win_time_seconds: ev.time_seconds,
+            last_win_used_undo: game.0.undo_count > 0,
+            wall_clock_hour: Some(Local::now().hour()),
+            last_win_recycle_count: game.0.recycle_count,
+            last_win_is_zen: game.0.mode == solitaire_core::game_state::GameMode::Zen,
         };
-        if record.unlocked {
+
+        let hits = check_achievements(&ctx);
+        if hits.is_empty() {
             continue;
         }
-        record.unlock(now);
-        achievements_changed = true;
 
-        // Grant the reward on first unlock.
-        if !record.reward_granted {
-            if let Some(reward) = def.reward {
-                match reward {
-                    Reward::CardBack(idx) => {
-                        if !progress.0.unlocked_card_backs.contains(&idx) {
-                            progress.0.unlocked_card_backs.push(idx);
-                            progress_changed = true;
-                        }
-                    }
-                    Reward::Background(idx) => {
-                        if !progress.0.unlocked_backgrounds.contains(&idx) {
-                            progress.0.unlocked_backgrounds.push(idx);
-                            progress_changed = true;
-                        }
-                    }
-                    Reward::BonusXp(amount) => {
-                        xp_awarded.write(XpAwardedEvent { amount });
-                        let prev_level = progress.0.add_xp(amount);
-                        if progress.0.leveled_up_from(prev_level) {
-                            levelups.write(LevelUpEvent {
-                                previous_level: prev_level,
-                                new_level: progress.0.level,
-                                total_xp: progress.0.total_xp,
-                            });
-                        }
-                        progress_changed = true;
-                    }
-                    Reward::Badge => {}
-                }
+        let now = Utc::now();
+        let mut achievements_changed = false;
+        let mut progress_changed = false;
+
+        for def in hits {
+            let Some(record) = achievements.0.iter_mut().find(|r| r.id == def.id) else {
+                continue;
+            };
+            if record.unlocked {
+                continue;
             }
-            record.reward_granted = true;
+            record.unlock(now);
+            achievements_changed = true;
+
+            // Grant the reward on first unlock.
+            if !record.reward_granted {
+                if let Some(reward) = def.reward {
+                    match reward {
+                        Reward::CardBack(idx) => {
+                            if !progress.0.unlocked_card_backs.contains(&idx) {
+                                progress.0.unlocked_card_backs.push(idx);
+                                progress_changed = true;
+                            }
+                        }
+                        Reward::Background(idx) => {
+                            if !progress.0.unlocked_backgrounds.contains(&idx) {
+                                progress.0.unlocked_backgrounds.push(idx);
+                                progress_changed = true;
+                            }
+                        }
+                        Reward::BonusXp(amount) => {
+                            xp_awarded.write(XpAwardedEvent { amount });
+                            let prev_level = progress.0.add_xp(amount);
+                            if progress.0.leveled_up_from(prev_level) {
+                                levelups.write(LevelUpEvent {
+                                    previous_level: prev_level,
+                                    new_level: progress.0.level,
+                                    total_xp: progress.0.total_xp,
+                                });
+                            }
+                            progress_changed = true;
+                        }
+                        Reward::Badge => {}
+                    }
+                }
+                record.reward_granted = true;
+            }
+
+            unlocks.write(AchievementUnlockedEvent(record.clone()));
         }
 
-        unlocks.write(AchievementUnlockedEvent(record.clone()));
+        if achievements_changed
+            && let Some(target) = &path.0
+                && let Err(e) = save_achievements_to(target, &achievements.0) {
+                    warn!("failed to save achievements: {e}");
+                }
+
+        if progress_changed
+            && let Some(target) = &progress_path.0
+                && let Err(e) = save_progress_to(target, &progress.0) {
+                    warn!("failed to save progress after reward: {e}");
+                }
     }
-
-    if achievements_changed
-        && let Some(target) = &path.0
-            && let Err(e) = save_achievements_to(target, &achievements.0) {
-                warn!("failed to save achievements: {e}");
-            }
-
-    if progress_changed
-        && let Some(target) = &progress_path.0
-            && let Err(e) = save_progress_to(target, &progress.0) {
-                warn!("failed to save progress after reward: {e}");
-            }
 }
 
 /// Cinephile unlock observer.
@@ -391,6 +389,7 @@ fn toggle_achievements_screen(
     achievements: Res<AchievementsResource>,
     font_res: Option<Res<FontResource>>,
     screens: Query<Entity, With<AchievementsScreen>>,
+    other_modal_scrims: Query<(), (With<ModalScrim>, Without<AchievementsScreen>)>,
 ) {
     let button_clicked = requests.read().count() > 0;
     if !keys.just_pressed(KeyCode::KeyA) && !button_clicked {
@@ -398,7 +397,7 @@ fn toggle_achievements_screen(
     }
     if let Ok(entity) = screens.single() {
         commands.entity(entity).despawn();
-    } else {
+    } else if other_modal_scrims.is_empty() {
         spawn_achievements_screen(&mut commands, &achievements.0, font_res.as_deref());
     }
 }

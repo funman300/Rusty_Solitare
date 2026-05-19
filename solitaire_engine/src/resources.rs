@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use bevy::math::Vec2;
-use bevy::prelude::Resource;
+use bevy::prelude::{warn, Resource};
 use chrono::{DateTime, Utc};
 use solitaire_core::game_state::GameState;
 use solitaire_core::pile::PileType;
@@ -131,15 +131,48 @@ pub struct GameInputConsumedResource(pub bool);
 #[derive(Resource, Clone)]
 pub struct TokioRuntimeResource(pub Arc<tokio::runtime::Runtime>);
 
-impl Default for TokioRuntimeResource {
-    fn default() -> Self {
-        // Building the Tokio runtime is startup-time initialization; failure
-        // here means the OS refused to create threads, which is unrecoverable.
+impl TokioRuntimeResource {
+    /// Attempts to build the shared multi-threaded Tokio runtime.
+    ///
+    /// Returns `Err` if the OS refuses to create worker threads (e.g. resource
+    /// limits on Android). Callers should log the error and disable sync
+    /// features rather than panicking.
+    pub fn new() -> Result<Self, tokio::io::Error> {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
+            .build()?;
+        Ok(Self(Arc::new(rt)))
+    }
+}
+
+impl Default for TokioRuntimeResource {
+    fn default() -> Self {
+        // Try multi-threaded first; fall back to current-thread (single
+        // worker) if the OS refuses to create additional threads. Neither
+        // path uses `.expect()` so this never panics at startup.
+        match tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
             .build()
-            .expect("failed to build shared Tokio runtime");
-        Self(Arc::new(rt))
+        {
+            Ok(rt) => Self(Arc::new(rt)),
+            Err(e) => {
+                warn!(
+                    "sync: failed to build multi-thread Tokio runtime ({e}); \
+                     falling back to current-thread runtime"
+                );
+                // current_thread runtime never spawns OS threads, so it
+                // succeeds even under tight sandboxing.
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect(
+                        "current-thread Tokio runtime failed — \
+                         the process cannot do any async I/O",
+                    );
+                Self(Arc::new(rt))
+            }
+        }
     }
 }
