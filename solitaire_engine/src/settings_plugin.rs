@@ -94,7 +94,7 @@ pub struct SettingsChangedEvent(pub Settings);
 
 /// Marker on the root Settings panel entity.
 #[derive(Component, Debug)]
-struct SettingsPanel;
+pub struct SettingsPanel;
 
 /// Marks the `Text` node showing the live SFX volume value.
 #[derive(Component, Debug)]
@@ -1137,6 +1137,7 @@ fn handle_sync_buttons(
     mut configure_sync: MessageWriter<SyncConfigureRequestEvent>,
     mut logout_sync: MessageWriter<SyncLogoutRequestEvent>,
     mut delete_account: MessageWriter<DeleteAccountRequestEvent>,
+    mut screen: ResMut<SettingsScreen>,
 ) {
     for (interaction, button) in &interaction_query {
         if *interaction != Interaction::Pressed {
@@ -1144,7 +1145,12 @@ fn handle_sync_buttons(
         }
         match button {
             SettingsButton::SyncNow => { manual_sync.write(ManualSyncRequestEvent); }
-            SettingsButton::ConnectSync => { configure_sync.write(SyncConfigureRequestEvent); }
+            SettingsButton::ConnectSync => {
+                // Close settings before the sync-setup modal opens so the
+                // guard in open_sync_setup_modal doesn't block on our own scrim.
+                screen.0 = false;
+                configure_sync.write(SyncConfigureRequestEvent);
+            }
             SettingsButton::DisconnectSync => { logout_sync.write(SyncLogoutRequestEvent); }
             SettingsButton::DeleteAccount => { delete_account.write(DeleteAccountRequestEvent); }
             _ => {}

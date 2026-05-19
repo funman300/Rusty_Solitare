@@ -52,7 +52,7 @@ use crate::events::{
     SyncLogoutRequestEvent,
 };
 use crate::font_plugin::FontResource;
-use crate::settings_plugin::{SettingsResource, SettingsScreen, SettingsStoragePath};
+use crate::settings_plugin::{SettingsPanel, SettingsResource, SettingsScreen, SettingsStoragePath};
 use crate::resources::TokioRuntimeResource;
 use crate::sync_plugin::SyncProviderResource;
 use crate::ui_modal::{spawn_modal, ModalScrim};
@@ -205,10 +205,14 @@ impl Plugin for SyncSetupPlugin {
 // ---------------------------------------------------------------------------
 
 /// Opens the sync-setup modal when `SyncConfigureRequestEvent` is received.
+#[allow(clippy::type_complexity)]
 fn open_sync_setup_modal(
     mut events: MessageReader<SyncConfigureRequestEvent>,
     existing: Query<(), With<SyncSetupScreen>>,
-    other_modal_scrims: Query<(), (With<ModalScrim>, Without<SyncSetupScreen>)>,
+    // Exclude SettingsPanel: the Connect button closes settings in the same
+    // frame it fires SyncConfigureRequestEvent, but Bevy despawns are deferred
+    // so the settings scrim still exists in the world during this system.
+    other_modal_scrims: Query<(), (With<ModalScrim>, Without<SyncSetupScreen>, Without<SettingsPanel>)>,
     mut commands: Commands,
     mut focused: ResMut<SyncFocusedField>,
     font_res: Option<Res<FontResource>>,
