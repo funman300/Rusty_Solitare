@@ -202,6 +202,8 @@ impl Plugin for GamePlugin {
             .add_message::<FoundationCompletedEvent>()
             .add_message::<InfoToastEvent>()
             .add_message::<AppLifecycle>()
+            // add_message is idempotent; SettingsPlugin also registers this.
+            .add_message::<crate::settings_plugin::SettingsChangedEvent>()
             .add_systems(
                 Update,
                 poll_pending_new_game_seed.before(GameMutation),
@@ -228,10 +230,28 @@ impl Plugin for GamePlugin {
             // GameMutation flow.
             .add_systems(Update, spawn_restore_prompt_if_pending)
             .add_systems(Update, handle_restore_prompt.before(GameMutation))
+            .add_systems(Update, sync_settings_to_game.before(GameMutation))
             .init_resource::<AutoSaveTimer>()
             .add_systems(Update, tick_elapsed_time)
             .add_systems(Update, auto_save_game_state)
             .add_systems(Last, save_game_state_on_exit);
+    }
+}
+
+/// Forwards `take_from_foundation` from [`SettingsResource`] to the live
+/// [`GameStateResource`] every time [`SettingsChangedEvent`] fires.
+///
+/// This covers two cases that the new-game path misses:
+/// 1. The initial settings load at startup: saves on disk default to `false`
+///    but `Settings` defaults to `true`; the event fires once when the
+///    settings file is first read.
+/// 2. A user toggling the setting mid-session in the Settings panel.
+fn sync_settings_to_game(
+    mut events: MessageReader<crate::settings_plugin::SettingsChangedEvent>,
+    mut game: ResMut<GameStateResource>,
+) {
+    for ev in events.read() {
+        game.0.take_from_foundation = ev.0.take_from_foundation;
     }
 }
 
@@ -614,6 +634,7 @@ fn handle_restore_prompt(
     new_game_buttons: Query<&Interaction, (With<RestoreNewGameButton>, Changed<Interaction>)>,
     mut pending: ResMut<PendingRestoredGame>,
     mut game: ResMut<GameStateResource>,
+    settings: Option<Res<crate::settings_plugin::SettingsResource>>,
     mut changed: MessageWriter<StateChangedEvent>,
     mut new_game: MessageWriter<NewGameRequestEvent>,
     mut launch_home_shown: Option<ResMut<crate::home_plugin::LaunchHomeShown>>,
@@ -639,6 +660,10 @@ fn handle_restore_prompt(
     let resolved = if key_continue || click_continue {
         if let Some(restored) = pending.0.take() {
             game.0 = restored;
+            // Patch setting that serialized with the old core default of `false`.
+            if let Some(s) = settings.as_ref() {
+                game.0.take_from_foundation = s.0.take_from_foundation;
+            }
             changed.write(StateChangedEvent);
         }
         for entity in &screens {
