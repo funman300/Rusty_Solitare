@@ -69,6 +69,34 @@ function preloadTheme(theme) {
 preloadTheme("classic");
 preloadTheme("dark");
 
+// ── Persistence ──────────────────────────────────────────────────────────────
+const LS_SAVE_KEY = "fs_game_save";
+
+function saveState() {
+    if (!game) return;
+    try {
+        const gameState = game.serialize();
+        if (typeof gameState !== "string") return;
+        localStorage.setItem(LS_SAVE_KEY, JSON.stringify({ gameState, elapsedSecs, drawThree }));
+    } catch (e) {
+        // localStorage may be unavailable (private browsing quota, etc.) — never block gameplay.
+        console.warn("fs: save failed", e);
+    }
+}
+
+function clearSave() {
+    try { localStorage.removeItem(LS_SAVE_KEY); } catch { /* ignore */ }
+}
+
+function loadSave() {
+    try {
+        const raw = localStorage.getItem(LS_SAVE_KEY);
+        if (!raw) return null;
+        const save = JSON.parse(raw);
+        return save?.gameState ? save : null;
+    } catch { return null; }
+}
+
 // ── State ────────────────────────────────────────────────────────────────────
 let game      = null;
 let snap      = null;   // last rendered GameSnapshot
@@ -138,16 +166,72 @@ async function bootstrap() {
     await init();
     syncThemeButton();
 
-    const params  = new URLSearchParams(window.location.search);
-    const urlSeed = params.has("seed") ? Number(params.get("seed")) : randomSeed();
-    drawThree     = params.has("draw3");
-    chkDraw3.checked = drawThree;
-
     buildSlots();
     scaleBoard();
     window.addEventListener("resize", scaleBoard);
-    startGame(urlSeed);
     attachHandlers();
+
+    const saved = loadSave();
+    if (saved) {
+        showResumeDialog(saved);
+    } else {
+        const params  = new URLSearchParams(window.location.search);
+        const urlSeed = params.has("seed") ? Number(params.get("seed")) : randomSeed();
+        drawThree     = params.has("draw3");
+        chkDraw3.checked = drawThree;
+        startGame(urlSeed);
+    }
+}
+
+function showResumeDialog(saved) {
+    const overlay = document.getElementById("resume-overlay");
+    if (overlay) overlay.classList.remove("hidden");
+
+    document.getElementById("btn-resume").onclick = () => {
+        if (overlay) overlay.classList.add("hidden");
+        resumeGame(saved);
+    };
+    document.getElementById("btn-resume-new").onclick = () => {
+        clearSave();
+        if (overlay) overlay.classList.add("hidden");
+        drawThree = false;
+        chkDraw3.checked = false;
+        startGame(randomSeed());
+    };
+}
+
+function resumeGame(saved) {
+    let restored;
+    try {
+        restored = SolitaireGame.from_saved(saved.gameState);
+    } catch (e) {
+        console.warn("fs: restore failed, starting new game", e);
+        clearSave();
+        startGame(randomSeed());
+        return;
+    }
+
+    game = restored;
+    drawThree = !!saved.drawThree;
+    elapsedSecs = saved.elapsedSecs || 0;
+    chkDraw3.checked = drawThree;
+
+    const displaySeed = Math.round(game.seed());
+    hudSeed.textContent = `seed ${displaySeed}`;
+    winOverlay.classList.add("hidden");
+    cardEls.clear();
+    board.querySelectorAll(".card, .recycle-label").forEach(el => el.remove());
+
+    const url = new URL(window.location);
+    url.searchParams.set("seed", displaySeed);
+    if (drawThree) url.searchParams.set("draw3", "");
+    else           url.searchParams.delete("draw3");
+    history.replaceState(null, "", url);
+
+    const s = game.state();
+    snap = s;
+    render(s);
+    if (!s.is_won) startTimer();
 }
 
 function randomSeed() {
@@ -304,9 +388,12 @@ function render(s) {
         acTimer = setInterval(doAutoCompleteStep, 380);
     }
     if (s.is_won) {
+        clearSave();
         stopTimer();
         if (acTimer) { clearInterval(acTimer); acTimer = null; }
         showWin(s);
+    } else {
+        saveState();
     }
 }
 

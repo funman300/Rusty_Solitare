@@ -422,6 +422,25 @@ impl SolitaireGame {
         }
     }
 
+    /// Serialise the full game state as a JSON string for `localStorage`.
+    ///
+    /// Use [`SolitaireGame::from_saved`] to restore it. The returned string is
+    /// opaque — callers should treat it as a blob and store/restore it verbatim.
+    pub fn serialize(&self) -> Result<String, JsValue> {
+        serde_json::to_string(&self.game)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Restore a game from a JSON string previously produced by [`SolitaireGame::serialize`].
+    ///
+    /// Returns an error string if the JSON is malformed or describes a state
+    /// that can't be deserialised (e.g. from a future schema version).
+    pub fn from_saved(json: &str) -> Result<SolitaireGame, JsValue> {
+        serde_json::from_str::<GameState>(json)
+            .map(|game| SolitaireGame { game })
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     /// Apply one auto-complete move (only valid when `is_auto_completable`).
     ///
     /// If no card can go directly to a foundation this step, advances the
