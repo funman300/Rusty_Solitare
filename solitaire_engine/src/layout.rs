@@ -107,6 +107,22 @@ pub const HUD_BAND_HEIGHT: f32 = 64.0;
 #[cfg(target_os = "android")]
 pub const HUD_BAND_HEIGHT: f32 = 112.0;
 
+/// Height of the bottom action-bar (the row of ≡ ← || ? ! M + buttons).
+///
+/// The action bar sits *above* the OS gesture/navigation zone, so it is NOT
+/// covered by `safe_area_bottom`. `compute_layout` adds this constant to
+/// `safe_area_bottom` before computing the height-based card-size candidate
+/// and the available tableau height, ensuring the deepest fanned column
+/// never scrolls behind the button row.
+///
+/// Derivation (Android): `min_height 44 px` buttons
+///   + `padding.top 8 px` + `padding.bottom 8 px` outer bar padding = **60 px**.
+/// Desktop: no persistent bottom bar, so 0.
+#[cfg(not(target_os = "android"))]
+const BOTTOM_BAR_HEIGHT: f32 = 0.0;
+#[cfg(target_os = "android")]
+const BOTTOM_BAR_HEIGHT: f32 = 60.0;
+
 /// Table background colour (dark green felt).
 pub const TABLE_COLOUR: [f32; 3] = [0.059, 0.322, 0.196];
 
@@ -190,9 +206,13 @@ pub fn compute_layout(window: Vec2, safe_area_top: f32, safe_area_bottom: f32, h
     // Substituting h_gap = w/4 and h = CARD_ASPECT * w and solving for the
     // largest w that fits gives:
     //   (window.y - HUD_BAND_HEIGHT) = w * (0.5 + (1 + fan_factor + VERTICAL_GAP_FRAC) * CARD_ASPECT)
+    // Reserve space for both the OS gesture/nav bar and the app's own action
+    // bar, which sits above it and is invisible to safe_area_bottom.
+    let effective_safe_bottom = safe_area_bottom + BOTTOM_BAR_HEIGHT;
+
     let fan_factor = 1.0 + (MAX_TABLEAU_CARDS - 1.0) * TABLEAU_FAN_FRAC;
     let height_denom = 0.5 + (1.0 + fan_factor + VERTICAL_GAP_FRAC) * CARD_ASPECT;
-    let card_width_height_based = (window.y - safe_area_top - safe_area_bottom - band_h).max(0.0) / height_denom;
+    let card_width_height_based = (window.y - safe_area_top - effective_safe_bottom - band_h).max(0.0) / height_denom;
 
     let card_width = card_width_width_based.min(card_width_height_based);
     let card_height = card_width * CARD_ASPECT;
@@ -241,7 +261,7 @@ pub fn compute_layout(window: Vec2, safe_area_top: f32, safe_area_bottom: f32, h
     //
     // avail = distance from the top of the first tableau card to the bottom
     //         margin — i.e. the space available for 12 fan steps.
-    let avail = (tableau_y - (-window.y / 2.0 + safe_area_bottom + h_gap) - card_height / 2.0).max(0.0);
+    let avail = (tableau_y - (-window.y / 2.0 + effective_safe_bottom + h_gap) - card_height / 2.0).max(0.0);
     let ideal_fan_frac = if card_height > 0.0 {
         avail / ((MAX_TABLEAU_CARDS - 1.0) * card_height)
     } else {
