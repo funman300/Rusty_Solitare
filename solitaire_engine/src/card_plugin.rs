@@ -64,7 +64,11 @@ pub const TABLEAU_FACEDOWN_FAN_FRAC: f32 = 0.14;
 /// (e.g. input_plugin's drag-rejection tween) can compute the resting
 /// `Transform.translation.z` for a card at a given stack index without
 /// drifting from the value used by [`card_positions`].
-pub const STACK_FAN_FRAC: f32 = 0.003;
+// Must exceed the highest child local-z of any card entity (0.02 for the
+// Android corner label) so every card's sprite covers all children of the
+// card below it.  Raising from 0.003 → 0.025 fixes corner labels on
+// foundation piles bleeding through when a 2 sits on an Ace.
+pub const STACK_FAN_FRAC: f32 = 0.025;
 
 /// Font size as a fraction of card width.
 const FONT_SIZE_FRAC: f32 = 0.28;
