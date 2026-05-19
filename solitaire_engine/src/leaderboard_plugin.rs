@@ -1159,9 +1159,23 @@ mod tests {
             .spawn(async { Err::<(), String>("network error".to_string()) });
         app.world_mut().resource_mut::<OptInTask>().0 = Some(failed_task);
 
-        // Allow the task to complete and be polled.
-        for _ in 0..5 {
+        // Pump until the task is polled or a deadline elapses.  A fixed
+        // update count is unreliable under parallel `cargo test --workspace`
+        // load — the AsyncComputeTaskPool background threads can be starved
+        // long enough that 5 updates finish before the task completes.
+        // Mirrors the deadline-loop pattern used in sync_plugin tests.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
             app.update();
+            let msgs = app.world().resource::<Messages<WarningToastEvent>>();
+            let mut cursor = msgs.get_cursor();
+            if cursor.read(msgs).next().is_some() {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::yield_now();
         }
 
         let msgs = app.world().resource::<Messages<WarningToastEvent>>();
@@ -1183,8 +1197,19 @@ mod tests {
             .spawn(async { Err::<(), String>("network error".to_string()) });
         app.world_mut().resource_mut::<OptOutTask>().0 = Some(failed_task);
 
-        for _ in 0..5 {
+        // Deadline-bounded pump — see opt_in_error_fires_warning_toast for rationale.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
             app.update();
+            let msgs = app.world().resource::<Messages<WarningToastEvent>>();
+            let mut cursor = msgs.get_cursor();
+            if cursor.read(msgs).next().is_some() {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::yield_now();
         }
 
         let msgs = app.world().resource::<Messages<WarningToastEvent>>();
@@ -1210,8 +1235,22 @@ mod tests {
         let ok_task = AsyncComputeTaskPool::get().spawn(async { Ok::<(), String>(()) });
         app.world_mut().resource_mut::<OptInTask>().0 = Some(ok_task);
 
-        for _ in 0..5 {
+        // Deadline-bounded pump — see opt_in_error_fires_warning_toast for rationale.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
             app.update();
+            if app
+                .world()
+                .resource::<SettingsResource>()
+                .0
+                .leaderboard_opted_in
+            {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::yield_now();
         }
 
         assert!(
@@ -1237,8 +1276,22 @@ mod tests {
         let ok_task = AsyncComputeTaskPool::get().spawn(async { Ok::<(), String>(()) });
         app.world_mut().resource_mut::<OptOutTask>().0 = Some(ok_task);
 
-        for _ in 0..5 {
+        // Deadline-bounded pump — see opt_in_error_fires_warning_toast for rationale.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
             app.update();
+            if !app
+                .world()
+                .resource::<SettingsResource>()
+                .0
+                .leaderboard_opted_in
+            {
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            std::thread::yield_now();
         }
 
         assert!(
