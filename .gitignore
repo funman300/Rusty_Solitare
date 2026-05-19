@@ -8,6 +8,10 @@
 data/
 .claude/
 
+# ruflo runtime state
+agentdb.rvf
+agentdb.rvf.lock
+
 # IDE project files
 .idea/
 
