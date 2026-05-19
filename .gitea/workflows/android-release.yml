@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.36.2)'
+        required: true
+        default: 'v0.36.2'
 
 env:
   APK_OUT: target/release/apk/ferrous-solitaire.apk
@@ -42,7 +48,12 @@ jobs:
 
       - name: Get tag name
         id: tag
-        run: echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "name=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Decode release keystore
         run: echo "${{ secrets.RELEASE_KEYSTORE_B64 }}" | base64 -d > release.jks
