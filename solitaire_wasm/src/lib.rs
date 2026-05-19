@@ -366,10 +366,9 @@ impl SolitaireGame {
         } else {
             DrawMode::DrawOne
         };
-        let mut game = GameState::new_with_mode(seed as u64, dm, GameMode::Classic);
-        // The web client has no settings layer; enable standard Klondike rule unconditionally.
-        game.take_from_foundation = true;
-        SolitaireGame { game }
+        SolitaireGame {
+            game: GameState::new_with_mode(seed as u64, dm, GameMode::Classic),
+        }
     }
 
     /// Full pile snapshot as a JS object.
