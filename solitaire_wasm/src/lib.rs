@@ -366,9 +366,10 @@ impl SolitaireGame {
         } else {
             DrawMode::DrawOne
         };
-        SolitaireGame {
-            game: GameState::new_with_mode(seed as u64, dm, GameMode::Classic),
-        }
+        let mut game = GameState::new_with_mode(seed as u64, dm, GameMode::Classic);
+        // The web client has no settings layer; enable standard Klondike rule unconditionally.
+        game.take_from_foundation = true;
+        SolitaireGame { game }
     }
 
     /// Full pile snapshot as a JS object.
@@ -437,7 +438,12 @@ impl SolitaireGame {
     /// that can't be deserialised (e.g. from a future schema version).
     pub fn from_saved(json: &str) -> Result<SolitaireGame, JsValue> {
         serde_json::from_str::<GameState>(json)
-            .map(|game| SolitaireGame { game })
+            .map(|mut game| {
+                // Older saves serialised with take_from_foundation=false (the core default).
+                // The web client has no settings layer, so enforce the standard rule here.
+                game.take_from_foundation = true;
+                SolitaireGame { game }
+            })
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
