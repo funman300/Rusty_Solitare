@@ -45,7 +45,7 @@ use crate::layout::LayoutSystem;
 use crate::pause_plugin::PausedResource;
 use crate::resources::GameStateResource;
 #[cfg(target_os = "android")]
-use crate::resources::DragState;
+use crate::resources::{DragState, GameInputConsumedResource};
 use crate::selection_plugin::SelectionState;
 use crate::time_attack_plugin::TimeAttackResource;
 use crate::ui_focus::{FocusGroup, Focusable};
@@ -2492,6 +2492,7 @@ fn toggle_hud_on_tap(
     mut tracker: ResMut<HudTapTracker>,
     mut hud_vis: ResMut<HudVisibility>,
     buttons: Query<&Interaction, With<ActionButton>>,
+    mut game_consumed: ResMut<GameInputConsumedResource>,
 ) {
     use bevy::input::touch::TouchPhase;
     if !scrims.is_empty() || paused.is_some_and(|p| p.0) {
@@ -2502,6 +2503,7 @@ fn toggle_hud_on_tap(
         for _ in touch_events.read() {}
         tracker.start_pos = None;
         tracker.started_on_button = false;
+        game_consumed.0 = false;
         return;
     }
     for event in touch_events.read() {
@@ -2515,7 +2517,13 @@ fn toggle_hud_on_tap(
                     buttons.iter().any(|i| *i != Interaction::None);
             }
             TouchPhase::Ended if drag.is_idle() => {
-                let on_button = tracker.started_on_button;
+                // Also treat taps where game logic consumed the touch (e.g.
+                // drawing from stock) as "on button" so they don't toggle
+                // the HUD. The flag is set on TouchPhase::Started by the
+                // input system that consumed the tap and must be cleared here
+                // regardless of whether we toggle.
+                let on_button = tracker.started_on_button || game_consumed.0;
+                game_consumed.0 = false;
                 if let Some(start) = tracker.start_pos.take() {
                     if !on_button && (event.position - start).length() < HUD_TAP_SLOP_PX {
                         *hud_vis = match *hud_vis {
@@ -2532,6 +2540,7 @@ fn toggle_hud_on_tap(
             TouchPhase::Canceled => {
                 tracker.start_pos = None;
                 tracker.started_on_button = false;
+                game_consumed.0 = false;
             }
             _ => {}
         }

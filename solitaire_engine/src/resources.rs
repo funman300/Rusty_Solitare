@@ -114,6 +114,13 @@ pub struct HintCycleIndex(pub usize);
 #[derive(Resource, Debug, Clone, Default)]
 pub struct SettingsScrollPos(pub f32);
 
+/// Set to `true` by an input system when a touch tap is consumed by game logic
+/// (e.g. drawing from stock). `toggle_hud_on_tap` checks this flag on
+/// `TouchPhase::Ended` and skips the HUD visibility toggle when set, then
+/// resets it to `false` so subsequent taps behave normally.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct GameInputConsumedResource(pub bool);
+
 /// Shared Tokio runtime used by all async-task closures that need HTTP I/O.
 ///
 /// Bevy's `AsyncComputeTaskPool` uses `async-executor` (not Tokio), so spawned

@@ -47,7 +47,7 @@ use crate::game_plugin::{ConfirmNewGameScreen, GameMutation, RestorePromptScreen
 use crate::pause_plugin::PausedResource;
 use crate::progress_plugin::ProgressResource;
 use crate::layout::{Layout, LayoutResource};
-use crate::resources::{DragState, GameStateResource, HintCycleIndex};
+use crate::resources::{DragState, GameInputConsumedResource, GameStateResource, HintCycleIndex};
 use crate::selection_plugin::SelectionState;
 use crate::time_attack_plugin::TimeAttackResource;
 
@@ -95,6 +95,7 @@ impl Plugin for InputPlugin {
         app.init_resource::<HintCycleIndex>()
             .init_resource::<HintSolverConfig>()
             .init_resource::<crate::pending_hint::PendingHintTask>()
+            .init_resource::<GameInputConsumedResource>()
             .add_message::<StartZenRequestEvent>()
             .add_message::<InfoToastEvent>()
             .add_message::<ForfeitRequestEvent>()
@@ -501,6 +502,7 @@ fn handle_touch_stock_tap(
     layout: Option<Res<LayoutResource>>,
     drag: Res<DragState>,
     mut draw: MessageWriter<DrawRequestEvent>,
+    mut game_consumed: ResMut<GameInputConsumedResource>,
 ) {
     if paused.is_some_and(|p| p.0) {
         return;
@@ -522,6 +524,7 @@ fn handle_touch_stock_tap(
         };
         if point_in_rect(world, stock_pos, layout.0.card_size) {
             draw.write(DrawRequestEvent);
+            game_consumed.0 = true;
             break; // one draw per tap frame
         }
     }
