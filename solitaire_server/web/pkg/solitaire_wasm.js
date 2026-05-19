@@ -40,20 +40,32 @@ export class ReplayPlayer {
     }
     /**
      * Snapshot the current `GameState` as a JS object (see `StateSnapshot`).
+     *
+     * Throws a JS string exception on serialisation failure (should never
+     * occur in practice — `StateSnapshot` contains only primitive types).
      * @returns {any}
      */
     state() {
         const ret = wasm.replayplayer_state(this.__wbg_ptr);
-        return ret;
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * Apply the next move; returns the post-step snapshot, or `null`
      * once the move list is exhausted.
+     *
+     * Returns `null` (not an exception) when the replay is finished.
+     * Throws a JS string exception on serialisation failure.
      * @returns {any}
      */
     step() {
         const ret = wasm.replayplayer_step(this.__wbg_ptr);
-        return ret;
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * 0-indexed position of the next move to apply.
@@ -157,11 +169,16 @@ export class SolitaireGame {
     }
     /**
      * Full pile snapshot as a JS object.
+     *
+     * Throws a JS string exception on serialisation failure.
      * @returns {any}
      */
     state() {
         const ret = wasm.solitairegame_state(this.__wbg_ptr);
-        return ret;
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * Undo the last move. Returns `{ok, error?, snapshot?}`.
@@ -179,6 +196,13 @@ function __wbg_get_imports() {
         __wbg_Error_3639a60ed15f87e7: function(arg0, arg1) {
             const ret = Error(getStringFromWasm0(arg0, arg1));
             return ret;
+        },
+        __wbg_String_8564e559799eccda: function(arg0, arg1) {
+            const ret = String(arg1);
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+            getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
         __wbg___wbindgen_throw_9c75d47bf9e7731e: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
