@@ -1147,7 +1147,7 @@ fn add_android_corner_label(
     let bg_w = font_size * 2.0;
     let bg_h = font_size * 1.25;
 
-    // Background covers the PNG's baked-in small corner text.
+    // Background covers the PNG's baked-in small corner text (top-left).
     // Classic PNG cards have a white face, so the background must be white too.
     // (CARD_FACE_COLOUR is the Terminal theme's dark face colour — wrong here.)
     parent.spawn((
@@ -1160,6 +1160,20 @@ fn add_android_corner_label(
         Transform::from_xyz(
             -card_size.x / 2.0 + inset + bg_w / 2.0,
             card_size.y / 2.0 - inset - bg_h / 2.0,
+            0.015,
+        ),
+    ));
+    // Cover the matching rotated baked-in text at the bottom-right corner.
+    parent.spawn((
+        AndroidCornerBg,
+        Sprite {
+            color: Color::WHITE,
+            custom_size: Some(Vec2::new(bg_w, bg_h)),
+            ..default()
+        },
+        Transform::from_xyz(
+            card_size.x / 2.0 - inset - bg_w / 2.0,
+            -card_size.y / 2.0 + inset + bg_h / 2.0,
             0.015,
         ),
     ));

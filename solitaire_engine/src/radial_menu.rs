@@ -473,8 +473,11 @@ fn radial_open_on_long_press(
     mut state: ResMut<RightClickRadialState>,
 ) {
     // Guard: only count while a touch is down, uncommitted, and radial is idle.
-    let active_id = drag.active_touch_id;
-    if active_id.is_none() || drag.committed || state.is_active() || paused.is_some_and(|p| p.0) {
+    let Some(active_id) = drag.active_touch_id else {
+        *hold_timer = 0.0;
+        return;
+    };
+    if drag.committed || state.is_active() || paused.is_some_and(|p| p.0) {
         *hold_timer = 0.0;
         return;
     }
@@ -487,7 +490,7 @@ fn radial_open_on_long_press(
 
     // Resolve current touch world position.
     let Some(touches) = touches else { return };
-    let Some(touch) = touches.iter().find(|t| t.id() == active_id.unwrap()) else {
+    let Some(touch) = touches.iter().find(|t| t.id() == active_id) else {
         return;
     };
     let Some((camera, cam_xf)) = cameras.single().ok() else { return };

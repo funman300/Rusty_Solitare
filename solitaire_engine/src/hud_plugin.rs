@@ -989,7 +989,7 @@ fn spawn_action_button<M: Component>(
     // centred with room to breathe. On desktop, keep the comfortable 48 dp
     // floor and 8 dp side padding.
     #[cfg(target_os = "android")]
-    let (pad, min_w, min_h) = (UiRect::axes(Val::Px(4.0), Val::Px(4.0)), Val::Px(44.0), Val::Px(44.0));
+    let (pad, min_w, min_h) = (UiRect::axes(Val::Px(4.0), Val::Px(4.0)), Val::Px(52.0), Val::Px(44.0));
     #[cfg(not(target_os = "android"))]
     let (pad, min_w, min_h) = (UiRect::axes(VAL_SPACE_2, VAL_SPACE_2), Val::Px(48.0), Val::Px(48.0));
 

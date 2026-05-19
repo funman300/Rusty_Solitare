@@ -117,6 +117,7 @@ pub const HUD_BAND_HEIGHT: f32 = 112.0;
 ///
 /// Derivation (Android): `min_height 44 px` buttons
 ///   + `padding.top 8 px` + `padding.bottom 8 px` outer bar padding = **60 px**.
+///
 /// Desktop: no persistent bottom bar, so 0.
 #[cfg(not(target_os = "android"))]
 const BOTTOM_BAR_HEIGHT: f32 = 0.0;
