@@ -5,7 +5,7 @@ use crate::deck::{deal_klondike, Deck};
 use crate::error::MoveError;
 use crate::pile::{Pile, PileType};
 use crate::rules::{can_place_on_foundation, can_place_on_tableau, is_valid_tableau_sequence};
-use crate::scoring::{compute_time_bonus as scoring_time_bonus, score_move, score_undo as scoring_undo};
+use crate::scoring::{compute_time_bonus as scoring_time_bonus, score_flip, score_move, score_recycle, score_undo as scoring_undo};
 
 const MAX_UNDO_STACK: usize = 64;
 
@@ -247,6 +247,13 @@ impl GameState {
                 stock.cards.push(card);
             }
             self.recycle_count = self.recycle_count.saturating_add(1);
+            if self.mode != GameMode::Zen {
+                let penalty = score_recycle(
+                    self.recycle_count,
+                    self.draw_mode == DrawMode::DrawThree,
+                );
+                self.score = (self.score + penalty).max(0);
+            }
             self.move_count = self.move_count.saturating_add(1);
             return Ok(());
         }
@@ -308,6 +315,11 @@ impl GameState {
 
             match &to {
                 PileType::Foundation(_) => {
+                    if matches!(&from, PileType::Foundation(_)) {
+                        return Err(MoveError::RuleViolation(
+                            "cannot move between foundation slots".into(),
+                        ));
+                    }
                     if count != 1 {
                         return Err(MoveError::RuleViolation(
                             "only one card can move to foundation at a time".into(),
@@ -330,6 +342,11 @@ impl GameState {
                                 "only one card can return from foundation at a time".into(),
                             ));
                         }
+                    }
+                    if matches!(&from, PileType::Waste) && count != 1 {
+                        return Err(MoveError::RuleViolation(
+                            "only the top waste card may be moved".into(),
+                        ));
                     }
                     let dest = self.piles.get(&to).ok_or(MoveError::InvalidDestination)?;
                     if !can_place_on_tableau(&bottom_card, dest) {
@@ -367,7 +384,8 @@ impl GameState {
             .cards
             .split_off(move_start);
 
-        // Flip the newly exposed top card of the source pile
+        // Flip the newly exposed top card of the source pile; award +5 per Windows scoring.
+        let mut flipped = false;
         if let Some(top) = self.piles
             .get_mut(&from)
             .ok_or(MoveError::InvalidSource)?
@@ -376,11 +394,13 @@ impl GameState {
             && !top.face_up
         {
             top.face_up = true;
+            flipped = true;
         }
 
         self.piles.get_mut(&to).ok_or(MoveError::InvalidDestination)?.cards.append(&mut moved);
 
-        self.score = (self.score + score_delta).max(0);
+        let flip_bonus = if flipped && self.mode != GameMode::Zen { score_flip() } else { 0 };
+        self.score = (self.score + score_delta + flip_bonus).max(0);
         self.move_count = self.move_count.saturating_add(1);
 
         self.is_won = self.check_win();
@@ -407,7 +427,7 @@ impl GameState {
         self.score = if self.mode == GameMode::Zen {
             0
         } else {
-            (self.score + scoring_undo()).max(0)
+            (snapshot.score + scoring_undo()).max(0)
         };
         self.move_count = snapshot.move_count;
         self.is_won = false;
@@ -441,9 +461,13 @@ impl GameState {
     /// Returns `true` when stock and waste are empty and all tableau cards are face-up.
     /// At that point the game can be completed without further player input.
     pub fn check_auto_complete(&self) -> bool {
-        // Stock must be empty; waste may still have cards (they are resolved
-        // by draw() calls inside next_auto_complete_move / auto_complete_step).
+        // All three conditions must hold: stock empty, waste empty, and all
+        // tableau cards face-up. Requiring waste empty avoids the deadlock
+        // where the waste top cannot reach a foundation directly.
         if self.piles.get(&PileType::Stock).is_none_or(|p| !p.cards.is_empty()) {
+            return false;
+        }
+        if self.piles.get(&PileType::Waste).is_none_or(|p| !p.cards.is_empty()) {
             return false;
         }
         (0..7).all(|i| {
@@ -548,11 +572,10 @@ impl GameState {
     /// # Precondition
     ///
     /// This function is only called when `is_auto_completable` is `true`.
-    /// Auto-completability requires the waste pile to be empty, as enforced by
-    /// [`check_auto_complete`](Self::check_auto_complete) — it returns `false`
-    /// whenever `piles[Waste]` is non-empty. Therefore, skipping the waste pile
-    /// in this scan is intentional and correct: by the time this function is
-    /// reached, there are guaranteed to be no cards there to move.
+    /// Auto-completability requires both stock and waste to be empty, as
+    /// enforced by [`check_auto_complete`](Self::check_auto_complete). The
+    /// waste-pile check in this function is therefore a safety net only; under
+    /// normal operation the waste is guaranteed empty when this is reached.
     pub fn next_auto_complete_move(&self) -> Option<(PileType, PileType)> {
         if !self.is_auto_completable || self.is_won {
             return None;
@@ -1134,10 +1157,11 @@ mod tests {
     }
 
     #[test]
-    fn auto_complete_true_when_stock_empty_waste_has_cards() {
-        // Waste no longer blocks auto-complete — draw() drains it during
-        // auto-complete steps. Only stock-not-empty and face-down tableau
-        // cards block the flag.
+    fn auto_complete_blocked_when_waste_has_cards() {
+        // Waste must also be empty for auto-complete to engage. A non-empty
+        // waste pile — even with all tableau cards face-up and stock empty —
+        // must return false to prevent a deadlock where the waste top cannot
+        // reach a foundation directly.
         let mut g = new_game();
         g.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
         g.piles.get_mut(&PileType::Waste).unwrap().cards.push(Card {
@@ -1151,7 +1175,7 @@ mod tests {
                 c.face_up = true;
             }
         }
-        assert!(g.check_auto_complete());
+        assert!(!g.check_auto_complete());
     }
 
     #[test]
@@ -1517,6 +1541,126 @@ mod tests {
         }
     }
 
+    // --- Flip bonus (+5) ---
+
+    #[test]
+    fn flip_bonus_awarded_when_face_down_card_exposed() {
+        let mut g = new_game();
+        g.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+        g.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+        for i in 0..7 { g.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear(); }
+        // Tableau(0): hidden Ace under a face-up 5♠
+        g.piles.get_mut(&PileType::Tableau(0)).unwrap().cards = vec![
+            Card { id: 1, suit: Suit::Hearts,  rank: Rank::Ace,  face_up: false },
+            Card { id: 2, suit: Suit::Spades,  rank: Rank::Five, face_up: true  },
+        ];
+        // Tableau(1): 6♥ — 5♠ can land here
+        g.piles.get_mut(&PileType::Tableau(1)).unwrap().cards = vec![
+            Card { id: 3, suit: Suit::Hearts, rank: Rank::Six, face_up: true },
+        ];
+        let score_before = g.score;
+        g.move_cards(PileType::Tableau(0), PileType::Tableau(1), 1).unwrap();
+        assert_eq!(g.score, score_before + 5, "flip bonus must be +5 when a face-down card is exposed");
+        assert!(g.piles[&PileType::Tableau(0)].cards[0].face_up, "exposed card must now be face-up");
+    }
+
+    #[test]
+    fn flip_bonus_not_awarded_when_source_pile_empties() {
+        let mut g = new_game();
+        g.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+        g.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+        for i in 0..7 { g.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear(); }
+        // Only a King in Tableau(0); moving it leaves pile empty — nothing to flip
+        g.piles.get_mut(&PileType::Tableau(0)).unwrap().cards = vec![
+            Card { id: 1, suit: Suit::Spades, rank: Rank::King, face_up: true },
+        ];
+        let score_before = g.score;
+        g.move_cards(PileType::Tableau(0), PileType::Tableau(1), 1).unwrap();
+        assert_eq!(g.score, score_before, "no flip bonus when source pile becomes empty");
+    }
+
+    #[test]
+    fn flip_bonus_suppressed_in_zen_mode() {
+        let mut g = GameState::new_with_mode(42, DrawMode::DrawOne, GameMode::Zen);
+        g.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+        g.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+        for i in 0..7 { g.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear(); }
+        g.piles.get_mut(&PileType::Tableau(0)).unwrap().cards = vec![
+            Card { id: 1, suit: Suit::Hearts,  rank: Rank::Ace,  face_up: false },
+            Card { id: 2, suit: Suit::Spades,  rank: Rank::Five, face_up: true  },
+        ];
+        g.piles.get_mut(&PileType::Tableau(1)).unwrap().cards = vec![
+            Card { id: 3, suit: Suit::Hearts, rank: Rank::Six, face_up: true },
+        ];
+        g.move_cards(PileType::Tableau(0), PileType::Tableau(1), 1).unwrap();
+        assert_eq!(g.score, 0, "zen mode must suppress flip bonus");
+    }
+
+    // --- Recycle penalty ---
+
+    #[test]
+    fn recycle_penalty_draw1_first_pass_free() {
+        let mut g = new_game(); // DrawOne
+        g.score = 200;
+        while !g.piles[&PileType::Stock].cards.is_empty() { g.draw().unwrap(); }
+        g.draw().unwrap(); // first recycle — free
+        assert_eq!(g.recycle_count, 1);
+        assert_eq!(g.score, 200, "first recycle in Draw-1 must be free");
+    }
+
+    #[test]
+    fn recycle_penalty_draw1_second_pass_costs_100() {
+        let mut g = new_game(); // DrawOne
+        g.score = 200;
+        // First recycle (free)
+        while !g.piles[&PileType::Stock].cards.is_empty() { g.draw().unwrap(); }
+        g.draw().unwrap();
+        // Second recycle (-100)
+        while !g.piles[&PileType::Stock].cards.is_empty() { g.draw().unwrap(); }
+        g.draw().unwrap();
+        assert_eq!(g.recycle_count, 2);
+        assert_eq!(g.score, 100, "second recycle in Draw-1 must cost -100");
+    }
+
+    #[test]
+    fn recycle_penalty_draw3_three_passes_free() {
+        let mut g = GameState::new(42, DrawMode::DrawThree);
+        g.score = 200;
+        for _ in 0..3 {
+            while !g.piles[&PileType::Stock].cards.is_empty() { g.draw().unwrap(); }
+            g.draw().unwrap();
+        }
+        assert_eq!(g.recycle_count, 3);
+        assert_eq!(g.score, 200, "first 3 recycles in Draw-3 must be free");
+    }
+
+    #[test]
+    fn recycle_penalty_draw3_fourth_pass_costs_20() {
+        let mut g = GameState::new(42, DrawMode::DrawThree);
+        g.score = 200;
+        for _ in 0..3 {
+            while !g.piles[&PileType::Stock].cards.is_empty() { g.draw().unwrap(); }
+            g.draw().unwrap();
+        }
+        // Fourth recycle (-20)
+        while !g.piles[&PileType::Stock].cards.is_empty() { g.draw().unwrap(); }
+        g.draw().unwrap();
+        assert_eq!(g.recycle_count, 4);
+        assert_eq!(g.score, 180, "fourth recycle in Draw-3 must cost -20");
+    }
+
+    #[test]
+    fn recycle_penalty_suppressed_in_zen_mode() {
+        let mut g = GameState::new_with_mode(42, DrawMode::DrawOne, GameMode::Zen);
+        // Two recycles — second would normally cost -100 in classic mode
+        for _ in 0..2 {
+            while !g.piles[&PileType::Stock].cards.is_empty() { g.draw().unwrap(); }
+            g.draw().unwrap();
+        }
+        assert_eq!(g.recycle_count, 2);
+        assert_eq!(g.score, 0, "zen mode must suppress recycle penalty");
+    }
+
     #[test]
     fn possible_instructions_waste_top_included() {
         let mut g = new_game();
@@ -1534,5 +1678,59 @@ mod tests {
             (0..7).any(|dst| moves.contains(&(PileType::Waste, PileType::Tableau(dst), 1))),
             "King on waste must be moveable to an empty tableau column"
         );
+    }
+
+    // --- P2: waste multi-card move must be rejected ---
+
+    #[test]
+    fn waste_multi_card_move_returns_rule_violation() {
+        let mut g = new_game();
+        g.piles.get_mut(&PileType::Waste).unwrap().cards = vec![
+            Card { id: 1, suit: Suit::Hearts,  rank: Rank::Ace,  face_up: true },
+            Card { id: 2, suit: Suit::Spades,  rank: Rank::King, face_up: true },
+        ];
+        for i in 0..7 { g.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear(); }
+        let result = g.move_cards(PileType::Waste, PileType::Tableau(0), 2);
+        assert!(matches!(result, Err(MoveError::RuleViolation(_))),
+            "moving 2 cards from waste must be rejected");
+    }
+
+    // --- P3: foundation-to-foundation move must be rejected ---
+
+    #[test]
+    fn foundation_to_foundation_move_returns_rule_violation() {
+        let mut g = new_game();
+        g.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+        g.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+        for i in 0..7 { g.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear(); }
+        // Place Ace of Clubs on Foundation(0), leave Foundation(1) empty.
+        g.piles.get_mut(&PileType::Foundation(0)).unwrap().cards = vec![
+            Card { id: 1, suit: Suit::Clubs, rank: Rank::Ace, face_up: true },
+        ];
+        // Attempting to move Ace from Foundation(0) to Foundation(1) must fail.
+        let result = g.move_cards(PileType::Foundation(0), PileType::Foundation(1), 1);
+        assert!(matches!(result, Err(MoveError::RuleViolation(_))),
+            "moving between foundation slots must be rejected");
+    }
+
+    // --- P4: undo must not retain points from the undone move ---
+
+    #[test]
+    fn undo_does_not_retain_score_from_undone_move() {
+        let mut g = new_game();
+        g.piles.get_mut(&PileType::Stock).unwrap().cards.clear();
+        g.piles.get_mut(&PileType::Waste).unwrap().cards.clear();
+        for i in 0..7 { g.piles.get_mut(&PileType::Tableau(i)).unwrap().cards.clear(); }
+        // Place an Ace on Tableau(0) — moving it to Foundation earns +10.
+        g.piles.get_mut(&PileType::Tableau(0)).unwrap().cards = vec![
+            Card { id: 1, suit: Suit::Clubs, rank: Rank::Ace, face_up: true },
+        ];
+        assert_eq!(g.score, 0);
+        g.move_cards(PileType::Tableau(0), PileType::Foundation(0), 1).unwrap();
+        assert_eq!(g.score, 10, "moving Ace to foundation earns +10");
+        // Undo must roll back to snapshot.score (0) minus the penalty, not keep the +10.
+        g.undo().unwrap();
+        // snapshot.score was 0, so result is max(0, 0 - 15) = 0
+        assert_eq!(g.score, 0, "undo must not retain points from the undone move");
     }
 }

@@ -45,19 +45,29 @@ pub struct AnalyticsPlugin;
 impl Plugin for AnalyticsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AnalyticsResource>()
-            .init_resource::<TokioRuntimeResource>()
             .add_systems(Startup, init_analytics)
             .add_systems(
                 Update,
                 (
                     react_to_settings_change,
-                    on_game_won,
-                    on_forfeit,
                     on_new_game,
                     on_achievement_unlocked,
-                    tick_flush_timer,
                 ),
             );
+
+        // Build the shared Tokio runtime; skip network flush systems if the OS
+        // refuses to create threads (resource-limited / sandboxed environments).
+        match TokioRuntimeResource::new() {
+            Ok(rt) => {
+                app.insert_resource(rt).add_systems(
+                    Update,
+                    (on_game_won, on_forfeit, tick_flush_timer),
+                );
+            }
+            Err(e) => {
+                bevy::log::warn!("analytics_plugin: Tokio runtime unavailable — analytics flush disabled: {e}");
+            }
+        }
     }
 }
 

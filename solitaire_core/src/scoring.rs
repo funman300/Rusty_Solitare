@@ -5,7 +5,11 @@ use crate::pile::PileType;
 /// Windows XP Standard scoring:
 /// - +10 for any card reaching a foundation pile
 /// - +5 for a waste → tableau move
+/// - -15 for a foundation → tableau (take-from-foundation) move
 /// - 0 for all other moves
+///
+/// Note: the +5 flip bonus for exposing a face-down tableau card is applied
+/// separately in `game_state::move_cards` because it depends on post-move state.
 pub fn score_move(from: &PileType, to: &PileType) -> i32 {
     match to {
         PileType::Foundation(_) => 10,
@@ -21,6 +25,21 @@ pub fn score_move(from: &PileType, to: &PileType) -> i32 {
 /// Score penalty applied when the player uses undo: -15.
 pub fn score_undo() -> i32 {
     -15
+}
+
+/// Score bonus awarded when a face-down tableau card is flipped face-up: +5.
+pub fn score_flip() -> i32 {
+    5
+}
+
+/// Score penalty for recycling the waste pile back to stock.
+///
+/// Windows standard: the first N recycles are free (N=1 for Draw-1, N=3 for Draw-3).
+/// Subsequent recycles cost -100 (Draw-1) or -20 (Draw-3).
+/// `recycle_count` is the new total count **after** this recycle.
+pub fn score_recycle(recycle_count: u32, is_draw_three: bool) -> i32 {
+    let (free, penalty) = if is_draw_three { (3_u32, -20_i32) } else { (1_u32, -100_i32) };
+    if recycle_count > free { penalty } else { 0 }
 }
 
 /// Time bonus added to the score on a win: `700_000 / elapsed_seconds`.
@@ -92,5 +111,30 @@ mod tests {
         // Very short elapsed time would overflow without the .min() guard.
         let bonus = compute_time_bonus(1);
         assert!(bonus >= 0, "time bonus must be non-negative after u64→i32 cast");
+    }
+
+    #[test]
+    fn flip_bonus_is_five() {
+        assert_eq!(score_flip(), 5);
+    }
+
+    #[test]
+    fn recycle_draw1_first_pass_free() {
+        assert_eq!(score_recycle(1, false), 0);
+    }
+
+    #[test]
+    fn recycle_draw1_second_pass_penalised() {
+        assert_eq!(score_recycle(2, false), -100);
+    }
+
+    #[test]
+    fn recycle_draw3_third_pass_free() {
+        assert_eq!(score_recycle(3, true), 0);
+    }
+
+    #[test]
+    fn recycle_draw3_fourth_pass_penalised() {
+        assert_eq!(score_recycle(4, true), -20);
     }
 }

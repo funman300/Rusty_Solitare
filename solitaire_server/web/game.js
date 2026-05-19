@@ -431,12 +431,12 @@ async function submitReplay(s) {
     const payload = {
         schema_version: 1,
         seed: Math.round(game.seed()),
-        draw_mode: drawThree ? "draw_three" : "draw_one",
-        mode: "classic",
+        draw_mode: drawThree ? "DrawThree" : "DrawOne",
+        mode: "Classic",
         time_seconds: elapsedSecs,
         final_score: s.score,
         move_count: s.move_count,
-        recorded_at: new Date().toISOString(),
+        recorded_at: new Date().toISOString().slice(0, 10),
         moves: [],
     };
     try {

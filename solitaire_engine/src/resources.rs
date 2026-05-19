@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use bevy::math::Vec2;
-use bevy::prelude::{warn, Resource};
+use bevy::prelude::Resource;
 use chrono::{DateTime, Utc};
 use solitaire_core::game_state::GameState;
 use solitaire_core::pile::PileType;
@@ -146,33 +146,3 @@ impl TokioRuntimeResource {
     }
 }
 
-impl Default for TokioRuntimeResource {
-    fn default() -> Self {
-        // Try multi-threaded first; fall back to current-thread (single
-        // worker) if the OS refuses to create additional threads. Neither
-        // path uses `.expect()` so this never panics at startup.
-        match tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => Self(Arc::new(rt)),
-            Err(e) => {
-                warn!(
-                    "sync: failed to build multi-thread Tokio runtime ({e}); \
-                     falling back to current-thread runtime"
-                );
-                // current_thread runtime never spawns OS threads, so it
-                // succeeds even under tight sandboxing.
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect(
-                        "current-thread Tokio runtime failed — \
-                         the process cannot do any async I/O",
-                    );
-                Self(Arc::new(rt))
-            }
-        }
-    }
-}
