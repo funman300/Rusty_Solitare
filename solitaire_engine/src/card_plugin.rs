@@ -178,8 +178,8 @@ pub struct CardLabel;
 /// readable at phone scale. Only exists when `CardImageSet` is present
 /// (the fallback solid-colour path uses a plain `CardLabel` instead).
 #[cfg(target_os = "android")]
-#[derive(Component, Debug, Clone, Copy)]
-struct AndroidCornerLabel;
+#[derive(Component, Debug, Clone)]
+struct AndroidCornerLabel(pub String);
 
 /// Solid-colour background sprite behind [`AndroidCornerLabel`].
 ///
@@ -707,15 +707,20 @@ fn sync_cards(
             .map(|c| c.id)
     };
 
-    // Map card_id -> (Entity, current_translation, has_card_animation) for
-    // in-place updates. The `has_card_animation` flag lets `update_card_entity`
-    // skip the snap/slide path on cards that are already being driven by a
-    // curve-based `CardAnimation` tween (e.g. the drag-rejection return tween
-    // — see `input_plugin::end_drag`). Otherwise the StateChangedEvent that
-    // accompanies a rejection would race the tween and the card would jump.
-    let mut existing: HashMap<u32, (Entity, Vec3, bool)> = HashMap::new();
+    // Map card_id -> (Entity, current_translation, anim_end) for in-place
+    // updates.  `anim_end` is `Some(end_xy)` when a curve-based `CardAnimation`
+    // is currently driving the card (e.g. a drag-rejection return tween).
+    //
+    // In the position loop below we compare `anim_end` against the new game-
+    // state target position to decide whether to honour or cancel the tween:
+    //   • end ≈ target  → animation is still heading to the right place; let
+    //                      it finish (skip the snap/slide path).
+    //   • end ≠ target  → the game state has changed (e.g. a new game started
+    //                      while the win-cascade was mid-flight); cancel the
+    //                      stale `CardAnimation` and apply the new position.
+    let mut existing: HashMap<u32, (Entity, Vec3, Option<Vec2>)> = HashMap::new();
     for (entity, marker, transform, anim) in entities.iter() {
-        existing.insert(marker.card_id, (entity, transform.translation, anim.is_some()));
+        existing.insert(marker.card_id, (entity, transform.translation, anim.map(|a| a.end)));
     }
 
     let live_ids: HashSet<u32> = positions.iter().map(|(c, _, _)| c.id).collect();
@@ -732,7 +737,19 @@ fn sync_cards(
     // behind the incoming top card during the draw slide animation.
     for (card, position, z) in positions {
         let entity = match existing.get(&card.id) {
-            Some(&(entity, cur, has_anim)) => {
+            Some(&(entity, cur, anim_end)) => {
+                // If a CardAnimation is in flight, check whether its destination
+                // still matches the game-state target.  If the game moved the card
+                // elsewhere (e.g. new game started during a win-cascade scatter),
+                // cancel the stale tween so the card snaps/slides to its new home.
+                let has_anim = match anim_end {
+                    Some(end_xy) if (end_xy - position).length() > 2.0 => {
+                        commands.entity(entity).remove::<CardAnimation>();
+                        false
+                    }
+                    Some(_) => true,
+                    None => false,
+                };
                 update_card_entity(
                     &mut commands, entity, card, position, z, layout,
                     slide_secs, back_colour, color_blind, high_contrast, cur, has_anim, card_images, selected_back, font_handle,
@@ -1142,10 +1159,11 @@ fn add_android_corner_label(
     // Large rank+suit text drawn on top of the background. FiraMono must be
     // wired here explicitly — the suit glyphs (U+2660–U+2666) are not in
     // Bevy's built-in font and render as a coloured rectangle without it.
+    let label_text = mobile_label_for(card);
     parent.spawn((
-        AndroidCornerLabel,
+        AndroidCornerLabel(label_text.clone()),
         CardLabel,
-        Text2d::new(mobile_label_for(card)),
+        Text2d::new(label_text),
         TextFont {
             font: font_handle.cloned().unwrap_or_default(),
             font_size,
@@ -2089,7 +2107,7 @@ fn resize_cards_in_place(
 fn resize_android_corner_labels(
     layout: Res<LayoutResource>,
     card_images: Option<Res<CardImageSet>>,
-    mut text_query: Query<(&mut TextFont, &mut Transform), With<AndroidCornerLabel>>,
+    mut text_query: Query<(&AndroidCornerLabel, &mut Text2d, &mut TextFont, &mut Transform)>,
     mut bg_query: Query<
         (&mut Sprite, &mut Transform),
         (With<AndroidCornerBg>, Without<AndroidCornerLabel>),
@@ -2105,7 +2123,8 @@ fn resize_android_corner_labels(
     let text_x = -layout.0.card_size.x / 2.0 + inset;
     let text_y = layout.0.card_size.y / 2.0 - inset;
 
-    for (mut font, mut transform) in text_query.iter_mut() {
+    for (label, mut text2d, mut font, mut transform) in text_query.iter_mut() {
+        text2d.0 = label.0.clone();
         font.font_size = font_size;
         transform.translation.x = text_x;
         transform.translation.y = text_y;
