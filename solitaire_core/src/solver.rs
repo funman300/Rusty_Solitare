@@ -298,9 +298,16 @@ impl SolverState {
         }
     }
 
-    /// True when every foundation slot has 13 cards.
+    /// True when every foundation slot holds a complete Ace-through-King sequence.
     fn is_won(&self) -> bool {
-        self.foundation.iter().all(|f| f.len() == 13)
+        self.foundation.iter().all(|pile| {
+            pile.len() == 13
+                && pile[0].rank == crate::card::Rank::Ace
+                && pile.windows(2).all(|w| {
+                    w[0].suit == w[1].suit
+                        && w[1].rank.value() == w[0].rank.value() + 1
+                })
+        })
     }
 
     /// Returns the foundation slot that already claims `suit`, or the

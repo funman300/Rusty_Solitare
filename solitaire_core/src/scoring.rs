@@ -9,9 +9,11 @@ use crate::pile::PileType;
 pub fn score_move(from: &PileType, to: &PileType) -> i32 {
     match to {
         PileType::Foundation(_) => 10,
-        PileType::Tableau(_) => {
-            if matches!(from, PileType::Waste) { 5 } else { 0 }
-        }
+        PileType::Tableau(_) => match from {
+            PileType::Waste => 5,
+            PileType::Foundation(_) => -15,
+            _ => 0,
+        },
         _ => 0,
     }
 }
@@ -71,12 +73,11 @@ mod tests {
     }
 
     #[test]
-    fn non_waste_to_tableau_scores_zero() {
-        // Foundation → Tableau is impossible in practice but must score 0.
-        assert_eq!(score_move(&PileType::Foundation(0), &PileType::Tableau(0)), 0);
-        // Tableau → Tableau (restack) scores 0.
-        assert_eq!(score_move(&PileType::Tableau(1), &PileType::Tableau(2)), 0);
+    fn foundation_to_tableau_penalises_fifteen() {
+        // Moving a card back off a foundation (take_from_foundation rule) costs -15.
+        assert_eq!(score_move(&PileType::Foundation(0), &PileType::Tableau(0)), -15);
     }
+
 
     #[test]
     fn move_to_stock_or_waste_scores_zero() {

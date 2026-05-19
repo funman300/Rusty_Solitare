@@ -138,12 +138,13 @@ fn handle_open_dialog(
     mut requests: MessageReader<StartPlayBySeedRequestEvent>,
     font_res: Option<Res<FontResource>>,
     existing: Query<(), With<PlayBySeedScreen>>,
+    other_scrims: Query<(), (With<crate::ui_modal::ModalScrim>, Without<PlayBySeedScreen>)>,
 ) {
     if requests.read().count() == 0 {
         return;
     }
-    // Guard against double-spawn (e.g. two events in one frame).
-    if !existing.is_empty() {
+    // Guard against double-spawn (e.g. two events in one frame) or stacking over another modal.
+    if !existing.is_empty() || !other_scrims.is_empty() {
         return;
     }
     let font = font_res.as_deref();

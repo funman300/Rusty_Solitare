@@ -139,6 +139,7 @@ impl Plugin for LeaderboardPlugin {
             .init_resource::<DisplayNameBuffer>()
             .add_message::<ToggleLeaderboardRequestEvent>()
             .add_message::<WarningToastEvent>()
+            .add_message::<InfoToastEvent>()
             // `MouseWheel` and `KeyboardInput` are emitted by Bevy's input
             // plugin under `DefaultPlugins`; register them explicitly so all
             // leaderboard systems run cleanly under `MinimalPlugins` in tests.

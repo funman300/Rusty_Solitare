@@ -305,7 +305,7 @@ fn update_field_borders(
 fn handle_auth_button(
     login_q: Query<&Interaction, (Changed<Interaction>, With<SyncLoginButton>)>,
     register_q: Query<&Interaction, (Changed<Interaction>, With<SyncRegisterButton>)>,
-    fields: Query<(&SyncFieldKind, &SyncFieldBuffer)>,
+    mut fields: Query<(&SyncFieldKind, &mut SyncFieldBuffer)>,
     rt: Res<TokioRuntimeResource>,
     mut pending: ResMut<PendingAuthTask>,
     mut error_nodes: Query<(&mut Text, &mut TextColor), With<SyncAuthError>>,
@@ -392,6 +392,14 @@ fn handle_auth_button(
     pending.task = Some(task);
     pending.url = url;
     pending.username = username;
+
+    // Zero the password buffer immediately — it must not linger in ECS
+    // components after the credential has been handed off to the async task.
+    for (kind, mut buf) in &mut fields {
+        if *kind == SyncFieldKind::Password {
+            buf.0.clear();
+        }
+    }
 }
 
 /// Polls the in-flight auth task. On success updates settings + provider.

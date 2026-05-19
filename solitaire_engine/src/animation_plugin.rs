@@ -258,6 +258,11 @@ fn advance_card_anims(
             anim.delay = (anim.delay - dt).max(0.0);
             continue;
         }
+        if anim.duration <= 0.0 {
+            transform.translation = anim.target;
+            commands.entity(entity).remove::<CardAnim>();
+            continue;
+        }
         anim.elapsed += dt;
         let t = (anim.elapsed / anim.duration).min(1.0);
         // Curved interpolation using `MotionCurve::SmoothSnap` (cubic ease-out

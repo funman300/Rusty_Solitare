@@ -341,8 +341,6 @@ pub async fn get_me(
     }))
 }
 
-/// Allowed MIME types for uploaded avatars.
-const ALLOWED_IMAGE_TYPES: &[&str] = &["image/jpeg", "image/png", "image/webp", "image/gif"];
 /// Maximum avatar upload size in bytes (1 MB).
 const AVATAR_MAX_BYTES: usize = 1024 * 1024;
 
@@ -361,23 +359,15 @@ pub async fn upload_avatar(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string();
-    let ext = if mime.contains("jpeg") || mime.contains("jpg") {
-        "jpg"
-    } else if mime.contains("png") {
-        "png"
-    } else if mime.contains("webp") {
-        "webp"
-    } else if mime.contains("gif") {
-        "gif"
-    } else {
-        return Err(AppError::BadRequest(
+    let ext = match mime.as_str() {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/png"  => "png",
+        "image/webp" => "webp",
+        "image/gif"  => "gif",
+        _ => return Err(AppError::BadRequest(
             "avatar must be image/jpeg, image/png, image/webp, or image/gif".into(),
-        ));
+        )),
     };
-
-    if !ALLOWED_IMAGE_TYPES.iter().any(|t| mime.starts_with(t)) {
-        return Err(AppError::BadRequest("unsupported image type".into()));
-    }
     if body.len() > AVATAR_MAX_BYTES {
         return Err(AppError::BadRequest("avatar must be ≤ 1 MB".into()));
     }

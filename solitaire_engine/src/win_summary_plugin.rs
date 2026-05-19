@@ -508,7 +508,7 @@ fn collect_session_achievements(
 ) {
     // Reset on any new-game request (including mode switches via Z/X/C/T) so
     // achievements from the previous session are not carried into the next one.
-    if new_games.read().last().is_some() {
+    if new_games.read().next().is_some() {
         session.names.clear();
     }
     for ev in unlocks.read() {
@@ -539,6 +539,7 @@ fn spawn_win_summary_after_delay(
     settings: Option<Res<SettingsResource>>,
     time: Res<Time>,
     overlays: Query<Entity, With<WinSummaryOverlay>>,
+    other_scrims: Query<(), (With<ModalScrim>, Without<WinSummaryOverlay>)>,
     mut delay: Local<Option<f32>>,
 ) {
     // Process new win events.
@@ -569,8 +570,8 @@ fn spawn_win_summary_after_delay(
         *remaining -= time.delta_secs();
         if *remaining <= 0.0 {
             *delay = None;
-            // Only spawn if there is no overlay already.
-            if overlays.is_empty() {
+            // Only spawn if no overlay of any kind is already visible.
+            if overlays.is_empty() && other_scrims.is_empty() {
                 // Drain any XpAwardedEvents that arrived this frame but were
                 // not yet consumed by `cache_win_data` (which may run later in
                 // the same schedule).  Accumulating here ensures the modal

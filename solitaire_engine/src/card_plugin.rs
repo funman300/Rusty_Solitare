@@ -41,7 +41,9 @@ use crate::ui_theme::{
 };
 
 /// Fraction of card height used as vertical offset between face-up tableau cards.
-pub const TABLEAU_FAN_FRAC: f32 = 0.25;
+/// Must match `layout::TABLEAU_FAN_FRAC` so the initial layout and the first
+/// dynamic update from `update_tableau_fan_frac` produce identical spacing.
+pub const TABLEAU_FAN_FRAC: f32 = 0.18;
 
 /// Per-card vertical step for face-down tableau cards, as a fraction of
 /// card height. Smaller than [`TABLEAU_FAN_FRAC`] because face-down cards
@@ -51,11 +53,11 @@ pub const TABLEAU_FAN_FRAC: f32 = 0.25;
 /// renderer creates a visible offset between the card face and where
 /// clicks land.
 ///
-/// Matches `layout::TABLEAU_FACEDOWN_FAN_FRAC` (0.20). Both constants must
+/// Matches `layout::TABLEAU_FACEDOWN_FAN_FRAC` (0.14). Both constants must
 /// stay in sync; the layout constant drives the adaptive LayoutResource value
 /// used at runtime, while this one is the minimum floor used by
 /// `update_tableau_fan_frac` when computing proportional updates.
-pub const TABLEAU_FACEDOWN_FAN_FRAC: f32 = 0.20;
+pub const TABLEAU_FACEDOWN_FAN_FRAC: f32 = 0.14;
 
 /// Fraction of card height used as a tiny offset between stacked cards in
 /// non-tableau piles, so stacking is visible. Public so other plugins

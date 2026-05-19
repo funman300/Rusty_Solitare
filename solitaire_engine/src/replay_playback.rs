@@ -512,6 +512,7 @@ pub struct ReplayPlaybackPlugin;
 impl Plugin for ReplayPlaybackPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ReplayPlaybackState>()
+            .add_message::<StateChangedEvent>()
             .add_systems(
                 Update,
                 (

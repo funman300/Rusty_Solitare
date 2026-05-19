@@ -13,6 +13,7 @@ use bevy::prelude::*;
 use crate::audio_plugin::{AudioState, SoundLibrary};
 use crate::events::{MoveRequestEvent, StateChangedEvent};
 use crate::game_plugin::GameMutation;
+use crate::pause_plugin::PausedResource;
 use crate::resources::GameStateResource;
 
 /// Volume amplitude used for the auto-complete activation chime.
@@ -111,9 +112,13 @@ fn drive_auto_complete(
     mut state: ResMut<AutoCompleteState>,
     game: Res<GameStateResource>,
     time: Res<Time>,
+    paused: Option<Res<PausedResource>>,
     mut moves: MessageWriter<MoveRequestEvent>,
 ) {
     if !state.active {
+        return;
+    }
+    if paused.is_some_and(|p| p.0) {
         return;
     }
 

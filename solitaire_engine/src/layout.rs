@@ -123,7 +123,7 @@ pub struct Layout {
     pub pile_positions: HashMap<PileType, Vec2>,
     /// Per-step vertical offset fraction for face-up tableau cards, as a
     /// fraction of `card_size.y`. On height-limited (desktop) windows this
-    /// equals `TABLEAU_FAN_FRAC` (0.25); on width-limited (portrait phone)
+    /// equals `TABLEAU_FAN_FRAC` (0.18); on width-limited (portrait phone)
     /// windows it expands to fill the available vertical space so the tableau
     /// stretches to the bottom of the screen. Card rendering (`card_plugin`)
     /// and hit testing (`input_plugin`) both read from this field so they
