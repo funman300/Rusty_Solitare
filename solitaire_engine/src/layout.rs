@@ -96,13 +96,16 @@ const MAX_TABLEAU_CARDS: f32 = 13.0;
 /// below this band so the HUD doesn't bleed into the play surface.
 ///
 /// Desktop: 64 px fits the score/moves/time + mode badge rows.
-/// Android: 80 px gives the same content rows comfortable clearance.
-/// (Previously 128 px when action buttons lived in the top band; those are
-/// now in the bottom bar so the larger reserve is no longer needed.)
+/// Android: 112 px — the HUD column has 4 flex tiers with 3 inter-tier
+/// gaps (4 px each) plus a SPACE_2 = 8 px top offset. With empty tiers
+/// still contributing gap height in Bevy's flex layout, the actual HUD
+/// height can reach ~80 px before the grid starts; 112 px gives ~28 px
+/// of clearance between the HUD bottom and the top card edge, preventing
+/// the overlap seen with the previous 80 px value.
 #[cfg(not(target_os = "android"))]
 pub const HUD_BAND_HEIGHT: f32 = 64.0;
 #[cfg(target_os = "android")]
-pub const HUD_BAND_HEIGHT: f32 = 80.0;
+pub const HUD_BAND_HEIGHT: f32 = 112.0;
 
 /// Table background colour (dark green felt).
 pub const TABLE_COLOUR: [f32; 3] = [0.059, 0.322, 0.196];

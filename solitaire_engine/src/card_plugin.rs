@@ -1147,11 +1147,13 @@ fn add_android_corner_label(
     let bg_w = font_size * 2.0;
     let bg_h = font_size * 1.25;
 
-    // Solid background that hides the card art's small corner label.
+    // Background covers the PNG's baked-in small corner text.
+    // Classic PNG cards have a white face, so the background must be white too.
+    // (CARD_FACE_COLOUR is the Terminal theme's dark face colour — wrong here.)
     parent.spawn((
         AndroidCornerBg,
         Sprite {
-            color: CARD_FACE_COLOUR,
+            color: Color::WHITE,
             custom_size: Some(Vec2::new(bg_w, bg_h)),
             ..default()
         },
@@ -1165,6 +1167,22 @@ fn add_android_corner_label(
     // Large rank+suit text drawn on top of the background. FiraMono must be
     // wired here explicitly — the suit glyphs (U+2660–U+2666) are not in
     // Bevy's built-in font and render as a coloured rectangle without it.
+    //
+    // Classic PNG cards have a white face: red suits stay the same saturated
+    // red, but black suits must use a dark colour (CARD_FACE_COLOUR ≈ #1a1a1a)
+    // rather than the near-white BLACK_SUIT_COLOUR designed for the dark
+    // Terminal theme background.
+    let text_col = if card.suit.is_red() {
+        if color_blind {
+            RED_SUIT_COLOUR_CBM
+        } else if high_contrast {
+            RED_SUIT_COLOUR_HC
+        } else {
+            RED_SUIT_COLOUR
+        }
+    } else {
+        CARD_FACE_COLOUR
+    };
     let label_text = mobile_label_for(card);
     parent.spawn((
         AndroidCornerLabel(label_text.clone()),
@@ -1175,7 +1193,7 @@ fn add_android_corner_label(
             font_size,
             ..default()
         },
-        TextColor(text_colour(card, color_blind, high_contrast)),
+        TextColor(text_col),
         Anchor::TOP_LEFT,
         Transform::from_xyz(
             -card_size.x / 2.0 + inset,

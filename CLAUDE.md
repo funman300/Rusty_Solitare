@@ -355,7 +355,7 @@ Must always be handled explicitly:
 * The gesture/navigation bar at the bottom (≈132px physical on common
   devices) is inside the Bevy viewport; use `SafeAreaInsets.bottom` to
   avoid placing interactive elements in that zone
-* `HUD_BAND_HEIGHT` is 128px on Android (two-row wrap) vs 64px on desktop;
+* `HUD_BAND_HEIGHT` is 112px on Android vs 64px on desktop;
   layout constants are `#[cfg(target_os = "android")]` gated
 * JNI calls must use `attach_current_thread_permanently` — not
   `attach_current_thread` — to avoid detach-on-drop panics
