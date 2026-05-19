@@ -32,7 +32,7 @@ use crate::font_plugin::FontResource;
 use crate::resources::{DragState, GameStateResource, SyncStatusResource};
 use crate::ui_modal::{
     spawn_modal, spawn_modal_actions, spawn_modal_body_text, spawn_modal_button,
-    spawn_modal_header, ButtonVariant,
+    spawn_modal_header, ButtonVariant, ModalScrim,
 };
 use crate::ui_theme;
 
@@ -431,6 +431,7 @@ fn handle_new_game(
     game_over_screens: Query<Entity, With<GameOverScreen>>,
     layout: Option<Res<crate::layout::LayoutResource>>,
     mut card_transforms: Query<&mut Transform, With<crate::card_plugin::CardEntity>>,
+    scrims: Query<(), With<ModalScrim>>,
 ) {
     for ev in new_game.read() {
         // If an active game is in progress, intercept and show a confirm dialog.
@@ -440,8 +441,12 @@ fn handle_new_game(
         // duplicates) or if the event itself was already confirmed by the
         // player pressing Y on the modal — without the `confirmed` check the
         // modal would be respawned the frame after the despawn flushes.
+        // Also skip if any other modal scrim is currently open (global guard).
         let confirm_already_open = !confirm_screens.is_empty();
         if needs_confirm && !confirm_already_open && !ev.confirmed {
+            if !scrims.is_empty() {
+                return;
+            }
             // Despawn any stale game-over overlay before showing confirm dialog.
             for entity in &game_over_screens {
                 commands.entity(entity).despawn();
@@ -576,8 +581,12 @@ fn spawn_restore_prompt_if_pending(
     splash: Query<(), With<crate::splash_plugin::SplashRoot>>,
     existing: Query<(), With<RestorePromptScreen>>,
     font_res: Option<Res<FontResource>>,
+    scrims: Query<(), With<ModalScrim>>,
 ) {
     if pending.0.is_none() || !splash.is_empty() || !existing.is_empty() {
+        return;
+    }
+    if !scrims.is_empty() {
         return;
     }
     spawn_modal(
@@ -1100,6 +1109,7 @@ fn check_no_moves(
     mut already_fired: Local<bool>,
     game_over_screens: Query<Entity, With<GameOverScreen>>,
     font_res: Option<Res<FontResource>>,
+    scrims: Query<(), With<ModalScrim>>,
 ) {
     // Reset the debounce flag on every state change so if something changes
     // we re-evaluate on the next state change.
@@ -1131,8 +1141,9 @@ fn check_no_moves(
         let no_moves_msg = "No moves available \u{2014} press D to draw or N for a new game";
         toast.write(InfoToastEvent(no_moves_msg.to_string()));
         *already_fired = true;
-        // Only spawn the overlay if one does not already exist.
-        if game_over_screens.is_empty() {
+        // Only spawn the overlay if one does not already exist, and no other
+        // modal scrim is currently open (global ModalScrim guard).
+        if game_over_screens.is_empty() && scrims.is_empty() {
             spawn_game_over_screen(&mut commands, game.0.score, font_res.as_deref());
         }
     }

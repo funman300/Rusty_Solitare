@@ -146,7 +146,6 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
         .route("/api/account", delete(auth::delete_account))
         .route("/api/me", get(auth::get_me))
         .route("/api/me/avatar", put(auth::upload_avatar))
-        .nest_service("/avatars", ServeDir::new("avatars"))
         .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             middleware::require_auth,
@@ -198,7 +197,8 @@ fn build_router_inner(state: AppState, rate_limit: bool) -> Router {
         .route("/api/daily-challenge", get(challenge::daily_challenge))
         .route("/api/replays/recent", get(replays::recent))
         .route("/api/replays/{id}", get(replays::get_by_id))
-        .route("/health", get(health));
+        .route("/health", get(health))
+        .nest_service("/avatars", ServeDir::new("avatars"));
 
     // Replay web UI: a single HTML page served at `/replays/:id` plus a
     // ServeDir for the static assets (`web/index.html`, `web/replay.css`,

@@ -48,10 +48,21 @@ pub struct AvatarPlugin;
 impl Plugin for AvatarPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<AvatarFetchEvent>()
-            .init_resource::<TokioRuntimeResource>()
             .init_resource::<AvatarResource>()
             .init_resource::<PendingAvatarTask>()
-            .add_systems(Update, (handle_avatar_fetch, poll_avatar_task));
+            .add_systems(Update, poll_avatar_task);
+
+        // Build the shared Tokio runtime; skip avatar download if the OS
+        // refuses to create threads (resource-limited / sandboxed environments).
+        match TokioRuntimeResource::new() {
+            Ok(rt) => {
+                app.insert_resource(rt)
+                    .add_systems(Update, handle_avatar_fetch);
+            }
+            Err(e) => {
+                bevy::log::warn!("avatar_plugin: Tokio runtime unavailable — avatar fetch disabled: {e}");
+            }
+        }
     }
 }
 

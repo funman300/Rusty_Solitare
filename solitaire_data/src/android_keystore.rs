@@ -2,7 +2,10 @@
 ///
 /// Tokens are serialised to JSON, encrypted with AES-256/GCM/NoPadding using a
 /// device-bound key from the Android Keystore, and written atomically to
-/// `{data_dir}/auth_tokens.bin` as `[12-byte IV][ciphertext+GCM-tag]`.
+/// `{data_dir}/ferrous_solitaire/auth_tokens.bin` as `[12-byte IV][ciphertext+GCM-tag]`.
+///
+/// The file stores a `HashMap<String, TokenBlob>` (keyed by username) so that
+/// multiple accounts can coexist without silently overwriting each other.
 ///
 /// The Keystore key survives app restarts but is destroyed on uninstall (or if
 /// the user changes biometric/lock credentials, in which case decryption fails
@@ -15,6 +18,7 @@ use jni::{
     JNIEnv, JavaVM,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::auth_tokens::TokenError;
@@ -280,21 +284,30 @@ fn decrypt_gcm(
 // ---------------------------------------------------------------------------
 
 fn token_file_path() -> Option<PathBuf> {
+    crate::platform::data_dir()
+        .map(|d| d.join(crate::APP_DIR_NAME).join("auth_tokens.bin"))
+}
+
+/// Path where the token file lived before the APP_DIR_NAME subdirectory was
+/// introduced. Used only during the one-time migration in `read_map`.
+fn legacy_token_file_path() -> Option<PathBuf> {
     crate::platform::data_dir().map(|d| d.join("auth_tokens.bin"))
 }
 
-fn read_file_bytes() -> Result<Vec<u8>, TokenError> {
-    let path = token_file_path()
-        .ok_or_else(|| TokenError::KeychainUnavailable("no data dir".into()))?;
+fn read_file_bytes_from(path: &PathBuf) -> Result<Vec<u8>, TokenError> {
     if !path.exists() {
         return Err(TokenError::NotFound(String::new()));
     }
-    std::fs::read(&path).map_err(|e| TokenError::Keyring(format!("read auth_tokens.bin: {e}")))
+    std::fs::read(path).map_err(|e| TokenError::Keyring(format!("read auth_tokens.bin: {e}")))
 }
 
 fn write_file_bytes(data: &[u8]) -> Result<(), TokenError> {
     let path = token_file_path()
         .ok_or_else(|| TokenError::KeychainUnavailable("no data dir".into()))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| TokenError::Keyring(format!("create dir: {e}")))?;
+    }
     let tmp = path.with_extension("bin.tmp");
     std::fs::write(&tmp, data)
         .map_err(|e| TokenError::Keyring(format!("write auth_tokens.bin.tmp: {e}")))?;
@@ -302,29 +315,88 @@ fn write_file_bytes(data: &[u8]) -> Result<(), TokenError> {
         .map_err(|e| TokenError::Keyring(format!("rename auth_tokens: {e}")))
 }
 
-fn load_blob(username: &str) -> Result<TokenBlob, TokenError> {
-    let data = read_file_bytes().map_err(|e| match e {
-        TokenError::NotFound(_) => TokenError::NotFound(username.to_string()),
-        other => other,
-    })?;
+/// Decrypt raw bytes from the file and deserialise as `HashMap<String, TokenBlob>`.
+///
+/// Migration strategy:
+/// 1. If the new-path file exists, read and decrypt it.
+///    - Try to deserialise as `HashMap<String, TokenBlob>`.
+///    - On parse failure (old single-blob format), try `TokenBlob` and convert.
+/// 2. If the new-path file does NOT exist but the legacy-path file does, migrate:
+///    - Read and decrypt the legacy file.
+///    - Deserialise as `TokenBlob` (the only format the legacy path ever used).
+///    - Write the result to the new path as a single-entry map.
+///    - Delete the legacy file (best-effort; leave it if removal fails).
+/// 3. If neither file exists, return an empty map.
+fn read_map() -> Result<HashMap<String, TokenBlob>, TokenError> {
+    let new_path = token_file_path()
+        .ok_or_else(|| TokenError::KeychainUnavailable("no data dir".into()))?;
+    let legacy_path = legacy_token_file_path();
 
-    if data.len() < 12 {
-        return Err(TokenError::Keyring("auth_tokens.bin corrupt (too short)".into()));
+    // --- 1. New path exists ---
+    if new_path.exists() {
+        let data = read_file_bytes_from(&new_path).map_err(|e| match e {
+            TokenError::NotFound(_) => TokenError::NotFound(String::new()),
+            other => other,
+        })?;
+        if data.len() < 12 {
+            return Err(TokenError::Keyring("auth_tokens.bin corrupt (too short)".into()));
+        }
+        let plaintext = with_jvm(|env| {
+            let key = load_or_create_key(env)?;
+            decrypt_gcm(env, &key, &data)
+        })?;
+        // Try the current multi-user format first.
+        if let Ok(map) = serde_json::from_slice::<HashMap<String, TokenBlob>>(&plaintext) {
+            return Ok(map);
+        }
+        // Fall back: old single-blob format written by an earlier binary.
+        if let Ok(blob) = serde_json::from_slice::<TokenBlob>(&plaintext) {
+            let mut map = HashMap::new();
+            map.insert(blob.username.clone(), blob);
+            return Ok(map);
+        }
+        return Err(TokenError::Keyring("auth_tokens.bin unrecognised format".into()));
     }
 
-    let plaintext = with_jvm(|env| {
+    // --- 2. Legacy path migration ---
+    if let Some(ref lpath) = legacy_path {
+        if lpath.exists() {
+            let data = read_file_bytes_from(lpath).map_err(|e| match e {
+                TokenError::NotFound(_) => TokenError::NotFound(String::new()),
+                other => other,
+            })?;
+            if data.len() >= 12 {
+                let plaintext = with_jvm(|env| {
+                    let key = load_or_create_key(env)?;
+                    decrypt_gcm(env, &key, &data)
+                })?;
+                if let Ok(blob) = serde_json::from_slice::<TokenBlob>(&plaintext) {
+                    let mut map = HashMap::new();
+                    map.insert(blob.username.clone(), blob);
+                    // Write to the new location, then remove the legacy file.
+                    if write_map_inner(&map).is_ok() {
+                        let _ = std::fs::remove_file(lpath);
+                    }
+                    return Ok(map);
+                }
+            }
+            // Legacy file corrupt or unrecognised — treat as empty.
+        }
+    }
+
+    // --- 3. No file found ---
+    Ok(HashMap::new())
+}
+
+/// Serialise and encrypt a map, then write it atomically.
+fn write_map_inner(map: &HashMap<String, TokenBlob>) -> Result<(), TokenError> {
+    let plaintext = serde_json::to_vec(map)
+        .map_err(|e| TokenError::Keyring(format!("JSON encode: {e}")))?;
+    let encrypted = with_jvm(|env| {
         let key = load_or_create_key(env)?;
-        decrypt_gcm(env, &key, &data)
+        encrypt_gcm(env, &key, &plaintext)
     })?;
-
-    let blob: TokenBlob = serde_json::from_slice(&plaintext)
-        .map_err(|e| TokenError::Keyring(format!("JSON decode: {e}")))?;
-
-    if blob.username != username {
-        return Err(TokenError::NotFound(username.to_string()));
-    }
-
-    Ok(blob)
+    write_file_bytes(&encrypted)
 }
 
 // ---------------------------------------------------------------------------
@@ -333,77 +405,106 @@ fn load_blob(username: &str) -> Result<TokenBlob, TokenError> {
 
 /// Encrypt and store `access_token` and `refresh_token` for `username`.
 ///
-/// Overwrites any previously stored tokens.
+/// If tokens already exist for other usernames they are preserved.
+/// Any previously stored tokens for `username` are silently replaced.
 pub fn store_tokens(
     username: &str,
     access_token: &str,
     refresh_token: &str,
 ) -> Result<(), TokenError> {
-    let blob = TokenBlob {
-        username: username.to_string(),
-        access_token: access_token.to_string(),
-        refresh_token: refresh_token.to_string(),
+    let mut map = match read_map() {
+        Ok(m) => m,
+        // If the file is missing or corrupt, start with an empty map so we
+        // do not block a fresh login.
+        Err(TokenError::NotFound(_)) => HashMap::new(),
+        Err(e) => return Err(e),
     };
-    let plaintext = serde_json::to_vec(&blob)
-        .map_err(|e| TokenError::Keyring(format!("JSON encode: {e}")))?;
 
-    let encrypted = with_jvm(|env| {
-        let key = load_or_create_key(env)?;
-        encrypt_gcm(env, &key, &plaintext)
-    })?;
+    map.insert(
+        username.to_string(),
+        TokenBlob {
+            username: username.to_string(),
+            access_token: access_token.to_string(),
+            refresh_token: refresh_token.to_string(),
+        },
+    );
 
-    write_file_bytes(&encrypted)
+    write_map_inner(&map)
 }
 
 /// Return the stored access token for `username`.
 ///
-/// Returns [`TokenError::NotFound`] if no token has been stored yet.
+/// Returns [`TokenError::NotFound`] if no token has been stored for this username.
 pub fn load_access_token(username: &str) -> Result<String, TokenError> {
-    load_blob(username).map(|b| b.access_token)
+    let mut map = read_map()?;
+    map.remove(username)
+        .map(|b| b.access_token)
+        .ok_or_else(|| TokenError::NotFound(username.to_string()))
 }
 
 /// Return the stored refresh token for `username`.
 ///
-/// Returns [`TokenError::NotFound`] if no token has been stored yet.
+/// Returns [`TokenError::NotFound`] if no token has been stored for this username.
 pub fn load_refresh_token(username: &str) -> Result<String, TokenError> {
-    load_blob(username).map(|b| b.refresh_token)
+    let mut map = read_map()?;
+    map.remove(username)
+        .map(|b| b.refresh_token)
+        .ok_or_else(|| TokenError::NotFound(username.to_string()))
 }
 
-/// Delete stored tokens and remove the Keystore key for `username`.
+/// Delete stored tokens for `username`.
+///
+/// If other usernames have stored tokens they are left untouched.
+/// When this is the last entry in the map the Keystore key is also removed so
+/// a future re-login generates a fresh key.
 ///
 /// Missing file or missing Keystore entry are silently ignored.
-pub fn delete_tokens(_username: &str) -> Result<(), TokenError> {
-    if let Some(path) = token_file_path() {
-        if path.exists() {
-            std::fs::remove_file(&path)
-                .map_err(|e| TokenError::Keyring(format!("delete auth_tokens.bin: {e}")))?;
+pub fn delete_tokens(username: &str) -> Result<(), TokenError> {
+    let mut map = match read_map() {
+        Ok(m) => m,
+        Err(TokenError::NotFound(_)) => return Ok(()), // nothing to delete
+        Err(e) => return Err(e),
+    };
+
+    map.remove(username);
+
+    if map.is_empty() {
+        // No more users — remove the file and the Keystore key.
+        if let Some(path) = token_file_path() {
+            if path.exists() {
+                std::fs::remove_file(&path)
+                    .map_err(|e| TokenError::Keyring(format!("delete auth_tokens.bin: {e}")))?;
+            }
         }
-    }
 
-    // Remove the Keystore key so a future re-login generates a fresh key.
-    with_jvm(|env| {
-        let ks_class = env.find_class("java/security/KeyStore")?;
-        let ks_type = JValueOwned::from(env.new_string("AndroidKeyStore")?);
-        let ks = env
-            .call_static_method(
-                &ks_class,
-                "getInstance",
-                "(Ljava/lang/String;)Ljava/security/KeyStore;",
-                &[ks_type.borrow()],
+        // Remove the Keystore key so a future re-login generates a fresh key.
+        with_jvm(|env| {
+            let ks_class = env.find_class("java/security/KeyStore")?;
+            let ks_type = JValueOwned::from(env.new_string("AndroidKeyStore")?);
+            let ks = env
+                .call_static_method(
+                    &ks_class,
+                    "getInstance",
+                    "(Ljava/lang/String;)Ljava/security/KeyStore;",
+                    &[ks_type.borrow()],
+                )?
+                .l()?;
+
+            let null = JObject::null();
+            env.call_method(
+                &ks,
+                "load",
+                "(Ljava/security/KeyStore$LoadStoreParameter;)V",
+                &[JValue::Object(&null)],
             )?
-            .l()?;
+            .v()?;
 
-        let null = JObject::null();
-        env.call_method(
-            &ks,
-            "load",
-            "(Ljava/security/KeyStore$LoadStoreParameter;)V",
-            &[JValue::Object(&null)],
-        )?
-        .v()?;
-
-        let alias = JValueOwned::from(env.new_string(KEY_ALIAS)?);
-        env.call_method(&ks, "deleteEntry", "(Ljava/lang/String;)V", &[alias.borrow()])?
-            .v()
-    })
+            let alias = JValueOwned::from(env.new_string(KEY_ALIAS)?);
+            env.call_method(&ks, "deleteEntry", "(Ljava/lang/String;)V", &[alias.borrow()])?
+                .v()
+        })
+    } else {
+        // Other users still exist — just rewrite the map without this user.
+        write_map_inner(&map)
+    }
 }

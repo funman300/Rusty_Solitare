@@ -135,8 +135,21 @@ fn merge_stats(
         fastest_win_seconds: local.fastest_win_seconds.min(remote.fastest_win_seconds),
         lifetime_score: local.lifetime_score.max(remote.lifetime_score),
         best_single_score: local.best_single_score.max(remote.best_single_score),
-        draw_one_wins: local.draw_one_wins.max(remote.draw_one_wins),
-        draw_three_wins: local.draw_three_wins.max(remote.draw_three_wins),
+        // Take per-mode win counts from whichever side contributed `games_won`
+        // (the side with the higher total). Independent max() calls can push
+        // draw_one_wins + draw_three_wins above games_won when the two sides
+        // have complementary win histories (e.g. local has 20 draw-one wins,
+        // remote has 20 draw-three wins, each with games_won = 20).
+        draw_one_wins: if local.games_won >= remote.games_won {
+            local.draw_one_wins
+        } else {
+            remote.draw_one_wins
+        },
+        draw_three_wins: if local.games_won >= remote.games_won {
+            local.draw_three_wins
+        } else {
+            remote.draw_three_wins
+        },
         // Per-mode bests. Bests take max; fastest times take a *zero-aware*
         // min — see [`min_ignore_zero`] for the rationale (0 means "no win
         // yet" for these fields, unlike the lifetime `fastest_win_seconds`
@@ -505,17 +518,55 @@ mod tests {
     }
 
     #[test]
-    fn stats_draw_mode_wins_take_max() {
+    fn stats_draw_mode_wins_taken_from_winning_side() {
+        // Both sides have equal games_won (default 0), so local is chosen (>=).
+        // Per-mode counts come entirely from that one side — no cross-side max.
         let mut local = default_payload();
+        local.stats.games_won = 25;
         local.stats.draw_one_wins = 20;
         local.stats.draw_three_wins = 5;
         let mut remote = default_payload();
+        remote.stats.games_won = 15;
         remote.stats.draw_one_wins = 15;
         remote.stats.draw_three_wins = 8;
 
+        // local has more wins, so local's per-mode counts are used.
         let (merged, _) = merge(&local, &remote);
+        assert_eq!(merged.stats.games_won, 25);
         assert_eq!(merged.stats.draw_one_wins, 20);
-        assert_eq!(merged.stats.draw_three_wins, 8);
+        assert_eq!(merged.stats.draw_three_wins, 5);
+        assert!(
+            merged.stats.draw_one_wins + merged.stats.draw_three_wins
+                <= merged.stats.games_won,
+            "draw-mode win counts must not exceed total wins"
+        );
+    }
+
+    #[test]
+    fn merge_stats_draw_mode_wins_do_not_exceed_total() {
+        // local: 20 draw-one wins, 0 draw-three, games_won = 20
+        // remote: 0 draw-one wins, 20 draw-three, games_won = 20
+        // Without the fix, independent max() calls yield draw_one=20, draw_three=20,
+        // games_won=20 — the breakdown sums to 40, double the actual total.
+        let mut local = default_payload();
+        local.stats.games_won = 20;
+        local.stats.draw_one_wins = 20;
+        local.stats.draw_three_wins = 0;
+
+        let mut remote = default_payload();
+        remote.stats.games_won = 20;
+        remote.stats.draw_one_wins = 0;
+        remote.stats.draw_three_wins = 20;
+
+        let (merged, _) = merge(&local, &remote);
+        assert!(
+            merged.stats.draw_one_wins + merged.stats.draw_three_wins <= merged.stats.games_won,
+            "draw-mode win counts must not exceed total wins after merge: \
+             draw_one={}, draw_three={}, games_won={}",
+            merged.stats.draw_one_wins,
+            merged.stats.draw_three_wins,
+            merged.stats.games_won,
+        );
     }
 
     #[test]
