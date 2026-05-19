@@ -140,6 +140,12 @@ pub struct HudColumn;
 #[derive(Component, Debug)]
 pub struct HudActionBar;
 
+/// Marker on the text node inside each action-bar button (Android only).
+/// Used by `resize_action_bar_labels` to update font size on window resize.
+#[cfg(target_os = "android")]
+#[derive(Component, Debug)]
+struct ActionButtonLabel;
+
 /// Marker on the circular profile-picture button anchored to the
 /// top-right of the HUD band. Pressing it opens the Profile overlay.
 /// Shows the server avatar image when loaded; falls back to the player's
@@ -489,6 +495,11 @@ impl Plugin for HudPlugin {
                         .after(TouchDragSet::AfterStartDrag)
                         .in_set(TouchDragSet::BeforeEndDrag),
                 );
+            app.add_systems(
+                Update,
+                resize_action_bar_labels
+                    .run_if(resource_exists_and_changed::<crate::layout::LayoutResource>),
+            );
         }
     }
 }
@@ -843,11 +854,25 @@ fn handle_avatar_button(
 /// on its own visual edge.
 fn spawn_action_buttons(
     font_res: Option<Res<FontResource>>,
+    windows: Query<&Window>,
     mut commands: Commands,
 ) {
+    // On Android the glyph labels must scale with the viewport so they remain
+    // legible on any screen density. Use the window width at startup; the
+    // resize_action_bar_labels system keeps this current on window changes.
+    #[cfg(target_os = "android")]
+    let action_font_size = {
+        let w = windows.iter().next().map_or(900.0, |win| win.width());
+        action_bar_font_size(w)
+    };
+    #[cfg(not(target_os = "android"))]
+    let action_font_size = TYPE_BODY;
+    #[cfg(not(target_os = "android"))]
+    let _windows = windows;
+
     let font = TextFont {
         font: font_res.as_ref().map(|f| f.0.clone()).unwrap_or_default(),
-        font_size: TYPE_BODY,
+        font_size: action_font_size,
         ..default()
     };
 
@@ -992,6 +1017,9 @@ fn spawn_action_button<M: Component>(
         HighContrastBorder::with_default(BORDER_SUBTLE),
     ))
     .with_children(|b| {
+        #[cfg(target_os = "android")]
+        b.spawn((ActionButtonLabel, Text::new(label), font.clone(), TextColor(text_color)));
+        #[cfg(not(target_os = "android"))]
         b.spawn((Text::new(label), font.clone(), TextColor(text_color)));
         if let Some(key) = hotkey {
             // Hotkey hint rendered as a dim caption next to the label —
@@ -2480,6 +2508,32 @@ fn restore_hud_on_modal(
 ) {
     if !new_scrims.is_empty() {
         *hud_vis = HudVisibility::Visible;
+    }
+}
+
+/// Returns the action-bar glyph font size for a given logical window width.
+/// Scales linearly so glyphs remain legible at any phone density.
+#[cfg(target_os = "android")]
+fn action_bar_font_size(window_width: f32) -> f32 {
+    // ~1/40 of the window width gives ~22 px on a 900 logical-px phone.
+    // Clamped so it never goes too tiny on narrow viewports or too large
+    // on landscape tablets.
+    (window_width / 40.0).clamp(16.0, 30.0)
+}
+
+/// Resizes the glyph text inside every [`ActionButtonLabel`] to match the
+/// current viewport width whenever [`LayoutResource`] changes (orientation
+/// change or window resize).
+#[cfg(target_os = "android")]
+fn resize_action_bar_labels(
+    layout: Res<crate::layout::LayoutResource>,
+    windows: Query<&Window>,
+    mut labels: Query<&mut TextFont, With<ActionButtonLabel>>,
+) {
+    let w = windows.iter().next().map_or(layout.0.card_size.x * 7.25, |win| win.width());
+    let new_size = action_bar_font_size(w);
+    for mut font in &mut labels {
+        font.font_size = new_size;
     }
 }
 
